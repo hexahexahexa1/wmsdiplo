@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: import-service
+
+server:
+  port: ${WMS_IMPORT_PORT:8090}
+
+logging:
+  level:
+    root: INFO
+
+wms:
+  import:
+    folder: ${WMS_IMPORT_FOLDER:input}
+    poll-interval-ms: ${WMS_IMPORT_POLL_MS:2000}
+  core-api:
+    base-url: ${WMS_CORE_API_BASE:http://localhost:8080}

@@ -1,0 +1,34 @@
+plugins {
+    id 'java'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+group = 'com.wmsdipl'
+version = '0.1.0-SNAPSHOT'
+
+ext {
+    springBootVersion = '3.2.6'
+    springDependencyManagementVersion = '1.1.4'
+    lombokVersion = '1.18.30'
+    springIntegrationVersion = '6.2.4'
+    javaFxVersion = '17.0.12'
+}
+
+allprojects {
+    repositories {
+        mavenCentral()
+    }
+}
+
+subprojects {
+    apply plugin: 'java'
+
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+    }
+}

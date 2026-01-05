@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: core-api
+  datasource:
+    url: ${WMS_DB_URL:jdbc:postgresql://localhost:55432/wmsdipl}
+    username: ${WMS_DB_USER:wmsdipl}
+    password: ${WMS_DB_PASSWORD:wmsdipl}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.dialect: org.hibernate.dialect.PostgreSQLDialect
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    table: schema_version
+
+server:
+  port: ${WMS_CORE_API_PORT:8080}
+
+logging:
+  level:
+    root: INFO

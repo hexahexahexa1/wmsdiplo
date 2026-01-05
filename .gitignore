@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Java / JVM
+*.class
+hs_err_pid*
+
+# Generated docs
+/docs/er-diagram-1.pdf

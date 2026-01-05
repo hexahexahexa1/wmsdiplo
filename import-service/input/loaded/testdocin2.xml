@@ -1,0 +1,4 @@
+<receipt messageId="msg-001" docNo="DOC123" docDate="2024-12-31" supplier="SUP1">
+  <line lineNo="1" sku="SKU1" name="Товар 1" uom="pcs" qtyExpected="10" packaging="box" sscc="123"/>
+  <line lineNo="2" sku="SKU2" name="Товар 2" uom="pcs" qtyExpected="5" packaging="box" sscc="456"/>
+</receipt>

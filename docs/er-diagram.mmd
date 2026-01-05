@@ -1,0 +1,132 @@
+%% ER diagram for WMS core schema
+%% Render with: mmdc -i docs/er-diagram.mmd -o docs/er-diagram.pdf --pdfFit
+
+flowchart LR
+    classDef table fill:#e9f2ff,stroke:#7aa7ff,stroke-width:1px,color:#0c1c3f,font-weight:bold
+    classDef header fill:#d0e4ff,stroke:#7aa7ff,stroke-width:1px,color:#0c1c3f,font-weight:bold
+    classDef field fill:#ffffff,stroke:#e0e0e0,stroke-width:1px,color:#2b2b2b,font-weight:normal
+
+    subgraph receipts
+        direction TB
+        r_id["id\nBIGSERIAL PK"]:::field
+        r_ext["external_key\nvarchar(128)"]:::field
+        r_doc["doc_no\nvarchar(64) UQ*"]:::field
+        r_date["doc_date\ndate"]:::field
+        r_sup["supplier\nvarchar(255)"]:::field
+        r_stat["status\nvarchar(32) idx"]:::field
+        r_msg["message_id\nvarchar(128) UQ"]:::field
+        r_ca["created_at\ntimestamp"]:::field
+        r_ua["updated_at\ntimestamp"]:::field
+    end
+    class receipts table
+
+    subgraph receipt_lines
+        direction TB
+        rl_id["id\nBIGSERIAL PK"]:::field
+        rl_rid["receipt_id\nBIGINT FK receipts"]:::field
+        rl_sku["sku_id\nBIGINT FK skus"]:::field
+        rl_pack["packaging_id\nBIGINT FK packagings"]:::field
+        rl_uom["uom\nvarchar(32)"]:::field
+        rl_qty["qty_expected\nnumeric(18,3)"]:::field
+        rl_sscc["sscc_expected\nvarchar(64)"]:::field
+        rl_line["line_no\nint"]:::field
+    end
+    class receipt_lines table
+
+    subgraph skus
+        direction TB
+        s_id["id\nBIGSERIAL PK"]:::field
+        s_code["code\nvarchar(64) UQ"]:::field
+        s_name["name\nvarchar(255)"]:::field
+        s_uom["uom\nvarchar(32)"]:::field
+    end
+    class skus table
+
+    subgraph packagings
+        direction TB
+        p_id["id\nBIGSERIAL PK"]:::field
+        p_code["code\nvarchar(64) UQ"]:::field
+        p_name["name\nvarchar(255)"]:::field
+        p_cap["capacity\nnumeric(18,2)"]:::field
+        p_uom["uom\nvarchar(32)"]:::field
+    end
+    class packagings table
+
+    subgraph tasks
+        direction TB
+        t_id["id\nBIGSERIAL PK"]:::field
+        t_rid["receipt_id\nBIGINT FK receipts"]:::field
+        t_lid["line_id\nBIGINT FK receipt_lines"]:::field
+        t_assignee["assignee\nvarchar(128)"]:::field
+        t_status["status\nvarchar(32) idx"]:::field
+        t_q_assign["qty_assigned\nnumeric(18,3)"]:::field
+        t_q_done["qty_done\nnumeric(18,3)"]:::field
+        t_ca["created_at\ntimestamp"]:::field
+        t_close["closed_at\ntimestamp"]:::field
+    end
+    class tasks table
+
+    subgraph scans
+        direction TB
+        sc_id["id\nBIGSERIAL PK"]:::field
+        sc_tid["task_id\nBIGINT FK tasks"]:::field
+        sc_sscc["sscc\nvarchar(64)"]:::field
+        sc_barcode["barcode\nvarchar(128)"]:::field
+        sc_qty["qty\nnumeric(18,3)"]:::field
+        sc_dev["device_id\nvarchar(128)"]:::field
+        sc_disc["discrepancy\nboolean"]:::field
+        sc_time["scanned_at\ntimestamp"]:::field
+    end
+    class scans table
+
+    subgraph discrepancies
+        direction TB
+        d_id["id\nBIGSERIAL PK"]:::field
+        d_rid["receipt_id\nBIGINT FK receipts"]:::field
+        d_lid["line_id\nBIGINT FK receipt_lines"]:::field
+        d_type["type\nvarchar(64)"]:::field
+        d_qe["qty_expected\nnumeric(18,3)"]:::field
+        d_qa["qty_actual\nnumeric(18,3)"]:::field
+        d_comment["comment\nvarchar(512)"]:::field
+        d_res["resolved\nboolean"]:::field
+        d_ca["created_at\ntimestamp"]:::field
+    end
+    class discrepancies table
+
+    subgraph import_log
+        direction TB
+        il_id["id\nBIGSERIAL PK"]:::field
+        il_file["file_name\nvarchar(255)"]:::field
+        il_checksum["checksum\nvarchar(128)"]:::field
+        il_msg["message_id\nvarchar(128) UQ"]:::field
+        il_status["status\nvarchar(32)"]:::field
+        il_err["error_message\ntext"]:::field
+        il_proc["processed_at\ntimestamp"]:::field
+    end
+    class import_log table
+
+    subgraph status_history
+        direction TB
+        sh_id["id\nBIGSERIAL PK"]:::field
+        sh_ent_id["entity_id\nBIGINT"]:::field
+        sh_ent_type["entity_type\nvarchar(64)"]:::field
+        sh_from["status_from\nvarchar(32)"]:::field
+        sh_to["status_to\nvarchar(32)"]:::field
+        sh_by["changed_by\nvarchar(128)"]:::field
+        sh_at["changed_at\ntimestamp"]:::field
+    end
+    class status_history table
+
+    %% Relations
+    receipts -->|receipt_id| receipt_lines
+    receipts -->|receipt_id| tasks
+    receipts -->|receipt_id| discrepancies
+    receipts -->|entity_id| status_history
+    receipts -->|message_id| import_log
+
+    receipt_lines -->|line_id| tasks
+    receipt_lines -->|line_id| discrepancies
+    skus -->|sku_id| receipt_lines
+    packagings -->|packaging_id| receipt_lines
+
+    tasks -->|task_id| scans

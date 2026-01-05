@@ -1,0 +1,2 @@
+rootProject.name = 'WMSDIPL'
+include 'core-api', 'import-service', 'desktop-client'
