@@ -1,12 +1,14 @@
 package com.wmsdipl.core.service;
 
-import com.wmsdipl.core.api.dto.CreateReceiptRequest;
-import com.wmsdipl.core.api.dto.ImportPayload;
-import com.wmsdipl.core.api.dto.ReceiptDto;
-import com.wmsdipl.core.api.dto.ReceiptLineDto;
+import com.wmsdipl.contracts.dto.CreateReceiptRequest;
+import com.wmsdipl.contracts.dto.ImportPayload;
+import com.wmsdipl.contracts.dto.ReceiptDto;
+import com.wmsdipl.contracts.dto.ReceiptLineDto;
 import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.domain.ReceiptLine;
 import com.wmsdipl.core.domain.ReceiptStatus;
+import com.wmsdipl.core.domain.Sku;
+import com.wmsdipl.core.mapper.ReceiptMapper;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -14,7 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -26,19 +27,24 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 public class ReceiptService {
 
     private final ReceiptRepository receiptRepository;
+    private final ReceiptMapper receiptMapper;
+    private final SkuService skuService;
 
-    public ReceiptService(ReceiptRepository receiptRepository) {
+    public ReceiptService(ReceiptRepository receiptRepository, ReceiptMapper receiptMapper, 
+                         SkuService skuService) {
         this.receiptRepository = receiptRepository;
+        this.receiptMapper = receiptMapper;
+        this.skuService = skuService;
     }
 
     @Transactional(readOnly = true)
     public List<ReceiptDto> list() {
-        return receiptRepository.findAll().stream().map(this::toDto).toList();
+        return receiptRepository.findAll().stream().map(receiptMapper::toDto).toList();
     }
 
     @Transactional(readOnly = true)
     public ReceiptDto get(Long id) {
-        return receiptRepository.findById(id).map(this::toDto)
+        return receiptRepository.findById(id).map(receiptMapper::toDto)
             .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Receipt not found"));
     }
 
@@ -46,7 +52,7 @@ public class ReceiptService {
     public List<ReceiptLineDto> listLines(Long id) {
         Receipt receipt = receiptRepository.findById(id)
             .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Receipt not found"));
-        return receipt.getLines().stream().map(this::toLineDto).toList();
+        return receipt.getLines().stream().map(receiptMapper::toLineDto).toList();
     }
 
     @Transactional
@@ -57,9 +63,9 @@ public class ReceiptService {
         receipt.setDocDate(request.docDate());
         receipt.setSupplier(request.supplier());
         receipt.setStatus(ReceiptStatus.DRAFT);
-        request.lines().forEach(lineReq -> receipt.addLine(toLine(lineReq)));
+        request.lines().forEach(lineReq -> receipt.addLine(receiptMapper.toLine(lineReq)));
         try {
-            return toDto(receiptRepository.save(receipt));
+            return receiptMapper.toDto(receiptRepository.save(receipt));
         } catch (DataIntegrityViolationException ex) {
             throw new ResponseStatusException(CONFLICT, "Duplicate document for supplier");
         }
@@ -72,7 +78,7 @@ public class ReceiptService {
         }
         Optional<Receipt> existing = receiptRepository.findByMessageId(payload.messageId());
         if (existing.isPresent()) {
-            return toDto(existing.get());
+            return receiptMapper.toDto(existing.get());
         }
         Receipt receipt = new Receipt();
         receipt.setDocNo(payload.docNo());
@@ -80,9 +86,9 @@ public class ReceiptService {
         receipt.setSupplier(payload.supplier());
         receipt.setStatus(ReceiptStatus.DRAFT);
         receipt.setMessageId(payload.messageId());
-        payload.lines().forEach(line -> receipt.addLine(toLine(line)));
+        payload.lines().forEach(line -> receipt.addLine(toLineFromImport(line)));
         try {
-            return toDto(receiptRepository.save(receipt));
+            return receiptMapper.toDto(receiptRepository.save(receipt));
         } catch (DataIntegrityViolationException ex) {
             throw new ResponseStatusException(CONFLICT, "Import duplicate constraint");
         }
@@ -118,21 +124,18 @@ public class ReceiptService {
         }
     }
 
-    private ReceiptLine toLine(CreateReceiptRequest.Line lineReq) {
+    private ReceiptLine toLineFromImport(ImportPayload.Line lineReq) {
         ReceiptLine line = new ReceiptLine();
         line.setLineNo(lineReq.lineNo());
-        line.setSkuId(lineReq.skuId());
-        line.setPackagingId(lineReq.packagingId());
-        line.setUom(lineReq.uom());
-        line.setQtyExpected(defaultZero(lineReq.qtyExpected()));
-        line.setSsccExpected(lineReq.ssccExpected());
-        return line;
-    }
-
-    private ReceiptLine toLine(ImportPayload.Line lineReq) {
-        ReceiptLine line = new ReceiptLine();
-        line.setLineNo(lineReq.lineNo());
-        line.setSkuId(null); // импорт по коду; связывание с каталогом позже
+        
+        // Auto-create SKU if not exists to avoid rejecting receipts with new SKUs
+        if (lineReq.sku() != null && !lineReq.sku().isBlank()) {
+            Sku sku = skuService.findOrCreate(lineReq.sku(), lineReq.name(), lineReq.uom());
+            line.setSkuId(sku.getId());
+        } else {
+            line.setSkuId(null);
+        }
+        
         line.setPackagingId(null);
         line.setUom(lineReq.uom());
         line.setQtyExpected(defaultZero(lineReq.qtyExpected()));
@@ -140,31 +143,8 @@ public class ReceiptService {
         return line;
     }
 
-    private ReceiptDto toDto(Receipt receipt) {
-        return new ReceiptDto(
-            receipt.getId(),
-            receipt.getDocNo(),
-            receipt.getDocDate(),
-            receipt.getSupplier(),
-            receipt.getStatus().name(),
-            receipt.getMessageId(),
-            receipt.getCreatedAt()
-        );
-    }
-
-    private ReceiptLineDto toLineDto(ReceiptLine line) {
-        return new ReceiptLineDto(
-            line.getId(),
-            line.getLineNo(),
-            line.getSkuId(),
-            line.getPackagingId(),
-            line.getUom(),
-            line.getQtyExpected(),
-            line.getSsccExpected()
-        );
-    }
-
     private BigDecimal defaultZero(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
     }
 }
+

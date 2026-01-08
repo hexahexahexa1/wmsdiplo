@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<receipt messageId="msg-20260108-002" docNo="RECEIPT-2026-002" docDate="2026-01-08" supplier="SUPPLIER-FOODCO">
+  <line lineNo="1" sku="SKU-MILK-100" name="Молоко 3.2% 1л" uom="л" qtyExpected="200" packaging="паллета" sscc="00098765432101234567" lotNumber="LOT-2026-M-001" expiryDate="2026-01-22"/>
+  <line lineNo="2" sku="SKU-BREAD-200" name="Хлеб белый нарезной" uom="шт" qtyExpected="150" packaging="ящик" sscc="00098765432101234568" lotNumber="LOT-2026-B-001" expiryDate="2026-01-10"/>
+  <line lineNo="3" sku="SKU-CHEESE-300" name="Сыр российский 45%" uom="кг" qtyExpected="80" packaging="коробка" sscc="00098765432101234569" lotNumber="LOT-2026-C-001" expiryDate="2026-02-15"/>
+  <line lineNo="4" sku="SKU-YOGURT-400" name="Йогурт натуральный 2.5%" uom="шт" qtyExpected="300" packaging="паллета" sscc="00098765432101234570" lotNumber="LOT-2026-Y-001" expiryDate="2026-01-18"/>
+</receipt>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<receipt messageId="msg-20260108-003" docNo="RECEIPT-2026-003" docDate="2026-01-08" supplier="SUPPLIER-TECHMART">
+  <line lineNo="1" sku="SKU-PHONE-001" name="Смартфон iPhone 15 Pro" uom="шт" qtyExpected="30" packaging="коробка" sscc="00011111111111111111"/>
+  <line lineNo="2" sku="SKU-TABLET-002" name="Планшет iPad Pro 12.9" uom="шт" qtyExpected="20" packaging="коробка" sscc="00011111111111111112"/>
+  <line lineNo="3" sku="SKU-WATCH-003" name="Умные часы Apple Watch Ultra" uom="шт" qtyExpected="15" packaging="коробка" sscc="00011111111111111113"/>
+</receipt>

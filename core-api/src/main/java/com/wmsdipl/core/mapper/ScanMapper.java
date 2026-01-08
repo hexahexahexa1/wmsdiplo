@@ -1,0 +1,33 @@
+package com.wmsdipl.core.mapper;
+
+import com.wmsdipl.contracts.dto.ScanDto;
+import com.wmsdipl.core.domain.Scan;
+import org.springframework.stereotype.Component;
+
+/**
+ * Mapper for converting between Scan entity and ScanDto.
+ */
+@Component
+public class ScanMapper {
+
+    /**
+     * Converts Scan entity to ScanDto.
+     */
+    public ScanDto toDto(Scan scan) {
+        if (scan == null) {
+            return null;
+        }
+
+        return new ScanDto(
+            scan.getId(),
+            scan.getTask() != null ? scan.getTask().getId() : null,
+            scan.getPalletCode(),
+            scan.getSscc(),
+            scan.getBarcode(),
+            scan.getQty(),
+            scan.getDeviceId(),
+            scan.getDiscrepancy(),
+            scan.getScannedAt()
+        );
+    }
+}

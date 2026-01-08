@@ -15,3 +15,5 @@ wms:
     poll-interval-ms: ${WMS_IMPORT_POLL_MS:2000}
   core-api:
     base-url: ${WMS_CORE_API_BASE:http://localhost:8080}
+    username: ${WMS_CORE_API_USERNAME:testuser}
+    password: ${WMS_CORE_API_PASSWORD:password}

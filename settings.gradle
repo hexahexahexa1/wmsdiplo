@@ -1,2 +1,3 @@
 rootProject.name = 'WMSDIPL'
-include 'core-api', 'import-service', 'desktop-client'
+include 'shared-contracts', 'core-api', 'import-service', 'desktop-client'
+

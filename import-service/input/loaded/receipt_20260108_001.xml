@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<receipt messageId="msg-20260108-001" docNo="RECEIPT-2026-001" docDate="2026-01-08" supplier="SUPPLIER-ALPHA">
+  <line lineNo="1" sku="SKU-LAPTOP-001" name="Ноутбук Dell XPS 15" uom="шт" qtyExpected="25" packaging="коробка" sscc="00012345678901234567"/>
+  <line lineNo="2" sku="SKU-MONITOR-002" name="Монитор Samsung 27 дюймов" uom="шт" qtyExpected="40" packaging="коробка" sscc="00012345678901234568"/>
+  <line lineNo="3" sku="SKU-MOUSE-003" name="Мышь Logitech MX Master 3" uom="шт" qtyExpected="100" packaging="паллета" sscc="00012345678901234569"/>
+  <line lineNo="4" sku="SKU-KEYBOARD-004" name="Клавиатура механическая Keychron K8" uom="шт" qtyExpected="75" packaging="коробка" sscc="00012345678901234570"/>
+  <line lineNo="5" sku="SKU-HEADSET-005" name="Наушники Sony WH-1000XM5" uom="шт" qtyExpected="50" packaging="коробка" sscc="00012345678901234571"/>
+</receipt>

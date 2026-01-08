@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<receipt messageId="TEST-MSG-2026-FINAL" docNo="RCV-2026-TEST-FINAL" docDate="2026-01-08" supplier="Тестовый Поставщик Final">
+    <lines>
+        <line lineNo="1" sku="SKU-001" name="Товар SKU-001" uom="PCS" qtyExpected="100"/>
+        <line lineNo="2" sku="SKU-002" name="Товар SKU-002" uom="PCS" qtyExpected="50"/>
+        <line lineNo="3" sku="SKU-001" name="Товар SKU-001" uom="PCS" qtyExpected="75"/>
+    </lines>
+</receipt>

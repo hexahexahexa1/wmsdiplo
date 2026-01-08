@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<receipt messageId="test-new-sku-20260108" docNo="RCP-NEW-SKU-001" docDate="2026-01-08" supplier="TestSupplier">
+    <line lineNo="1" sku="NEW-SKU-2026" name="Новый товар 2026" uom="ШТ" qtyExpected="100" />
+    <line lineNo="2" sku="ANOTHER-NEW-SKU" name="Еще один новый товар" uom="КГ" qtyExpected="50.5" />
+    <line lineNo="3" sku="TEST-PRODUCT-XYZ" name="Тестовый продукт XYZ" uom="ШТ" qtyExpected="25" />
+</receipt>

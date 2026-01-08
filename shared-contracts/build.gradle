@@ -1,0 +1,20 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.wmsdipl.contracts'
+version = '0.1.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+dependencies {
+    // Minimal dependencies - only what DTOs need
+    compileOnly "org.projectlombok:lombok:${rootProject.ext.lombokVersion}"
+    annotationProcessor "org.projectlombok:lombok:${rootProject.ext.lombokVersion}"
+    
+    implementation 'jakarta.validation:jakarta.validation-api:3.0.2'
+}

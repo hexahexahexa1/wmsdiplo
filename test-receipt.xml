@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Receipt>
+    <MessageID>TEST-MSG-2026-001</MessageID>
+    <DocumentNumber>RCV-TEST-2026-FINAL</DocumentNumber>
+    <DocumentDate>2026-01-08</DocumentDate>
+    <Supplier>Тестовый Поставщик Final</Supplier>
+    <Lines>
+        <Line>
+            <LineNumber>1</LineNumber>
+            <SKU>SKU-001</SKU>
+            <UOM>PCS</UOM>
+            <QtyExpected>100</QtyExpected>
+        </Line>
+        <Line>
+            <LineNumber>2</LineNumber>
+            <SKU>SKU-002</SKU>
+            <UOM>PCS</UOM>
+            <QtyExpected>50</QtyExpected>
+        </Line>
+        <Line>
+            <LineNumber>3</LineNumber>
+            <SKU>SKU-001</SKU>
+            <UOM>PCS</UOM>
+            <QtyExpected>75</QtyExpected>
+        </Line>
+    </Lines>
+</Receipt>

@@ -1,6 +1,6 @@
 package com.wmsdipl.imports.service;
 
-import com.wmsdipl.imports.dto.ImportPayload;
+import com.wmsdipl.contracts.dto.ImportPayload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
