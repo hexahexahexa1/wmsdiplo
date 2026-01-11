@@ -5,6 +5,7 @@ import com.wmsdipl.core.domain.*;
 import com.wmsdipl.core.repository.*;
 import com.wmsdipl.core.service.PutawayService;
 import com.wmsdipl.core.service.TaskLifecycleService;
+import com.wmsdipl.core.service.StockMovementService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,9 +38,6 @@ class PlacementWorkflowServiceTest {
     private LocationRepository locationRepository;
 
     @Mock
-    private PalletMovementRepository palletMovementRepository;
-
-    @Mock
     private ScanRepository scanRepository;
 
     @Mock
@@ -50,6 +48,9 @@ class PlacementWorkflowServiceTest {
 
     @Mock
     private PutawayService putawayService;
+
+    @Mock
+    private StockMovementService stockMovementService;
 
     @InjectMocks
     private PlacementWorkflowService placementWorkflowService;
@@ -151,7 +152,7 @@ class PlacementWorkflowServiceTest {
         idField.set(testPallet, 1L);
         
         RecordScanRequest request = new RecordScanRequest(
-            "PALLET001", 10, "SSCC001", "BARCODE001", "DEVICE001", null
+            "PALLET001", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null
         );
 
         when(taskLifecycleService.getTask(1L)).thenReturn(testTask);
@@ -159,7 +160,8 @@ class PlacementWorkflowServiceTest {
         when(locationRepository.findById(1L)).thenReturn(Optional.of(sourceLocation));
         when(locationRepository.findById(2L)).thenReturn(Optional.of(targetLocation));
         when(palletRepository.save(any(Pallet.class))).thenReturn(testPallet);
-        when(palletMovementRepository.save(any(PalletMovement.class))).thenReturn(new PalletMovement());
+        when(stockMovementService.recordPlacement(any(), any(), any(), any(), anyLong()))
+                .thenReturn(new PalletMovement());
         when(scanRepository.save(any(Scan.class))).thenReturn(testScan);
         when(taskRepository.save(any(Task.class))).thenReturn(testTask);
 
@@ -188,7 +190,7 @@ class PlacementWorkflowServiceTest {
         // Given
         testTask.setTaskType(TaskType.RECEIVING);
         RecordScanRequest request = new RecordScanRequest(
-            "PALLET001", 10, "SSCC001", "BARCODE001", "DEVICE001", null
+            "PALLET001", 10, "SSCC001", "BARCODE001", null, "DEVICE001", null
         );
 
         when(taskLifecycleService.getTask(1L)).thenReturn(testTask);
@@ -203,7 +205,7 @@ class PlacementWorkflowServiceTest {
         // Given
         testTask.setStatus(TaskStatus.NEW);
         RecordScanRequest request = new RecordScanRequest(
-            "PALLET001", 10, "SSCC001", "BARCODE001", "DEVICE001", null
+            "PALLET001", 10, "SSCC001", "BARCODE001", null, "DEVICE001", null
         );
 
         when(taskLifecycleService.getTask(1L)).thenReturn(testTask);
@@ -217,10 +219,11 @@ class PlacementWorkflowServiceTest {
     void shouldThrowException_WhenPalletNotFound() {
         // Given
         RecordScanRequest request = new RecordScanRequest(
-            "INVALID", 10, "SSCC001", "BARCODE001", "DEVICE001", null
+            "INVALID", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null
         );
 
         when(taskLifecycleService.getTask(1L)).thenReturn(testTask);
+        when(locationRepository.findById(2L)).thenReturn(Optional.of(targetLocation)); // Needed for validation
         when(palletRepository.findByCode("INVALID")).thenReturn(Optional.empty());
 
         // When & Then
@@ -233,10 +236,21 @@ class PlacementWorkflowServiceTest {
         // Given
         testTask.setPalletId(999L);
         RecordScanRequest request = new RecordScanRequest(
-            "PALLET001", 10, "SSCC001", "BARCODE001", "DEVICE001", null
+            "PALLET001", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null
         );
 
         when(taskLifecycleService.getTask(1L)).thenReturn(testTask);
+        when(locationRepository.findById(2L)).thenReturn(Optional.of(targetLocation)); // Needed for validation
+        
+        // Use reflection to set pallet ID
+        try {
+            Field idField = Pallet.class.getDeclaredField("id");
+            idField.setAccessible(true);
+            idField.set(testPallet, 1L);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        
         when(palletRepository.findByCode("PALLET001")).thenReturn(Optional.of(testPallet));
 
         // When & Then

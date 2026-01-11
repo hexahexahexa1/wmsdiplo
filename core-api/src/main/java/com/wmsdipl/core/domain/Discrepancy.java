@@ -14,6 +14,11 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+import lombok.Getter;
+import lombok.Setter;
+
+@Getter
+@Setter
 @Entity
 @Table(name = "discrepancies")
 public class Discrepancy {
@@ -56,69 +61,5 @@ public class Discrepancy {
         if (resolved == null) {
             resolved = false;
         }
-    }
-
-    public Long getId() {
-        return id;
-    }
-
-    public Receipt getReceipt() {
-        return receipt;
-    }
-
-    public void setReceipt(Receipt receipt) {
-        this.receipt = receipt;
-    }
-
-    public ReceiptLine getLine() {
-        return line;
-    }
-
-    public void setLine(ReceiptLine line) {
-        this.line = line;
-    }
-
-    public String getType() {
-        return type;
-    }
-
-    public void setType(String type) {
-        this.type = type;
-    }
-
-    public BigDecimal getQtyExpected() {
-        return qtyExpected;
-    }
-
-    public void setQtyExpected(BigDecimal qtyExpected) {
-        this.qtyExpected = qtyExpected;
-    }
-
-    public BigDecimal getQtyActual() {
-        return qtyActual;
-    }
-
-    public void setQtyActual(BigDecimal qtyActual) {
-        this.qtyActual = qtyActual;
-    }
-
-    public String getComment() {
-        return comment;
-    }
-
-    public void setComment(String comment) {
-        this.comment = comment;
-    }
-
-    public Boolean getResolved() {
-        return resolved;
-    }
-
-    public void setResolved(Boolean resolved) {
-        this.resolved = resolved;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
     }
 }

@@ -13,8 +13,11 @@ import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.TaskRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
 
 /**
  * Service for task management and querying.
@@ -60,8 +63,8 @@ public class TaskService {
 
     @Transactional
     public Task create(Task task) {
-        if (task.getReceipt() == null && task.getReceipt() == null) {
-            throw new IllegalArgumentException("Receipt is required");
+        if (task.getReceipt() == null) {
+            throw new ResponseStatusException(BAD_REQUEST, "Receipt is required");
         }
         return taskRepository.save(task);
     }

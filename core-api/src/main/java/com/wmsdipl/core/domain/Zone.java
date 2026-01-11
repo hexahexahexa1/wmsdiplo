@@ -29,9 +29,6 @@ public class Zone {
     @Column(nullable = false, length = 128)
     private String name;
 
-    @Column(name = "zone_type", length = 32)
-    private String zoneType = "STORAGE";
-
     @Column(name = "priority_rank")
     private Integer priorityRank = 100;
 
@@ -82,14 +79,6 @@ public class Zone {
 
     public void setName(String name) {
         this.name = name;
-    }
-
-    public String getZoneType() {
-        return zoneType;
-    }
-
-    public void setZoneType(String zoneType) {
-        this.zoneType = zoneType;
     }
 
     public Integer getPriorityRank() {

@@ -7,6 +7,9 @@ import com.wmsdipl.desktop.model.PutawayRule;
 import com.wmsdipl.desktop.model.Receipt;
 import com.wmsdipl.desktop.model.Scan;
 import com.wmsdipl.desktop.model.Sku;
+import com.wmsdipl.desktop.model.StockItem;
+import com.wmsdipl.desktop.model.StockMovement;
+import com.wmsdipl.desktop.model.User;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleObjectProperty;
@@ -14,22 +17,28 @@ import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
-import javafx.scene.control.Button;
-import javafx.scene.control.ComboBox;
-import javafx.scene.control.Label;
-import javafx.scene.control.PasswordField;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckBox;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.Dialog;
+import javafx.scene.control.DialogPane;
+import javafx.scene.control.Label;
+import javafx.scene.control.ListCell;
+import javafx.scene.control.ListView;
+import javafx.scene.control.PasswordField;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
-import javafx.scene.control.Tab;
-import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextFormatter;
-import javafx.scene.control.ListView;
 import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
@@ -100,11 +109,24 @@ public class DesktopClientApplication extends Application {
         Button receiptsBtn = navButton("Приходы", activeModule.equals("receipts"), this::showReceiptsPane);
         Button topologyBtn = navButton("Топология", activeModule.equals("topology"), this::showTopologyPane);
         Button palletsBtn = navButton("Паллеты", activeModule.equals("pallets"), this::showPalletsPane);
+        Button stockBtn = navButton("Остатки", activeModule.equals("stock"), this::showStockPane);
         Button tasksBtn = navButton("Задания", activeModule.equals("tasks"), this::showTasksPane);
+        Button skusBtn = navButton("Номенклатура", activeModule.equals("skus"), this::showSkusPane);
         Button terminalBtn = navButton("Терминал", activeModule.equals("terminal"), this::showTerminalPane);
+        Button usersBtn = navButton("Пользователи", activeModule.equals("users"), this::showUsersPane);
         Button settingsBtn = navButton("Настройки", activeModule.equals("settings"), this::showSettingsPane);
+        
+        // Spacer to push logout button to bottom
+        VBox spacer = new VBox();
+        VBox.setVgrow(spacer, Priority.ALWAYS);
+        
+        Button logoutBtn = new Button("Выйти");
+        logoutBtn.getStyleClass().add("nav-button");
+        logoutBtn.setStyle("-fx-background-color: #8B0000; -fx-text-fill: white;");
+        logoutBtn.setMaxWidth(Double.MAX_VALUE);
+        logoutBtn.setOnAction(e -> handleLogout());
 
-        VBox nav = new VBox(14, logo, receiptsBtn, topologyBtn, palletsBtn, tasksBtn, terminalBtn, settingsBtn);
+        VBox nav = new VBox(14, logo, receiptsBtn, topologyBtn, palletsBtn, stockBtn, tasksBtn, skusBtn, terminalBtn, usersBtn, settingsBtn, spacer, logoutBtn);
         nav.setPadding(new Insets(24, 24, 24, 24));
         nav.setPrefWidth(210);
         nav.setAlignment(Pos.TOP_CENTER);
@@ -330,22 +352,85 @@ public class DesktopClientApplication extends Application {
         ListView<com.wmsdipl.desktop.model.Zone> zonesView = new ListView<>();
         zonesView.setPrefWidth(240);
 
+        // Zone management buttons
+        Button createZoneBtn = new Button("+ Создать зону");
+        createZoneBtn.getStyleClass().add("btn-success");
+        createZoneBtn.setOnAction(e -> openZoneCreationDialog(zonesView));
+        
+        Button editZoneBtn = new Button("✏ Редактировать");
+        editZoneBtn.getStyleClass().add("btn-primary");
+        editZoneBtn.setDisable(true);
+        editZoneBtn.setOnAction(e -> openZoneEditDialog(zonesView, zonesView.getSelectionModel().getSelectedItem()));
+        
+        Button deleteZoneBtn = new Button("🗑 Удалить зону");
+        deleteZoneBtn.getStyleClass().add("btn-danger");
+        deleteZoneBtn.setDisable(true);
+        deleteZoneBtn.setOnAction(e -> deleteZone(zonesView, zonesView.getSelectionModel().getSelectedItem()));
+        
+        zonesView.getSelectionModel().selectedItemProperty().addListener((obs, o, z) -> {
+            boolean selected = z != null;
+            editZoneBtn.setDisable(!selected);
+            deleteZoneBtn.setDisable(!selected);
+        });
+        
+        HBox zoneBtns = new HBox(8, createZoneBtn, editZoneBtn, deleteZoneBtn);
+        zoneBtns.setPadding(new Insets(8, 0, 0, 0));
+
         TableView<Location> locTable = new TableView<>();
         locTable.setPlaceholder(new Label("Нет ячеек"));
         TableColumn<Location, String> locCode = new TableColumn<>("code");
         locCode.setCellValueFactory(c -> new SimpleObjectProperty<>(c.getValue().code()));
+        TableColumn<Location, String> locType = new TableColumn<>("type");
+        locType.setCellValueFactory(c -> new SimpleObjectProperty<>(c.getValue().locationType() != null ? c.getValue().locationType() : ""));
         TableColumn<Location, String> locStatus = new TableColumn<>("status");
         locStatus.setCellValueFactory(c -> new SimpleObjectProperty<>(c.getValue().status()));
         TableColumn<Location, Number> locMax = new TableColumn<>("maxPallets");
         locMax.setCellValueFactory(c -> new SimpleObjectProperty<>(c.getValue().maxPallets()));
         TableColumn<Location, String> locZone = new TableColumn<>("zone");
-        locZone.setCellValueFactory(c -> new SimpleObjectProperty<>(c.getValue().zone() != null ? c.getValue().zone().code() : ""));
-        locTable.getColumns().addAll(locCode, locStatus, locMax, locZone);
+        locZone.setCellValueFactory(c -> new SimpleObjectProperty<>(c.getValue().zoneCode() != null ? c.getValue().zoneCode() : ""));
+        locTable.getColumns().addAll(locCode, locType, locStatus, locMax, locZone);
 
-        VBox left = new VBox(10, new Label("Зоны"), zonesView);
+        // Location management buttons
+        Button createLocBtn = new Button("+ Создать ячейку");
+        createLocBtn.getStyleClass().add("btn-success");
+        createLocBtn.setOnAction(e -> openLocationCreationDialog(locTable, zonesView));
+        
+        Button editLocBtn = new Button("✏ Редактировать");
+        editLocBtn.getStyleClass().add("btn-primary");
+        editLocBtn.setDisable(true);
+        editLocBtn.setOnAction(e -> openLocationEditDialog(locTable, locTable.getSelectionModel().getSelectedItem(), zonesView));
+        
+        Button blockLocBtn = new Button("🔒 Заблокировать");
+        blockLocBtn.getStyleClass().add("btn-warning");
+        blockLocBtn.setDisable(true);
+        blockLocBtn.setOnAction(e -> toggleLocationBlock(locTable, locTable.getSelectionModel().getSelectedItem()));
+        
+        Button deleteLocBtn = new Button("🗑 Удалить");
+        deleteLocBtn.getStyleClass().add("btn-danger");
+        deleteLocBtn.setDisable(true);
+        deleteLocBtn.setOnAction(e -> deleteLocation(locTable, locTable.getSelectionModel().getSelectedItem()));
+        
+        locTable.getSelectionModel().selectedItemProperty().addListener((obs, o, loc) -> {
+            boolean selected = loc != null;
+            editLocBtn.setDisable(!selected);
+            deleteLocBtn.setDisable(!selected);
+            
+            if (selected) {
+                boolean isBlocked = "BLOCKED".equals(loc.status());
+                blockLocBtn.setText(isBlocked ? "🔓 Разблокировать" : "🔒 Заблокировать");
+                blockLocBtn.setDisable(false);
+            } else {
+                blockLocBtn.setDisable(true);
+            }
+        });
+        
+        HBox locBtns = new HBox(8, createLocBtn, editLocBtn, blockLocBtn, deleteLocBtn);
+        locBtns.setPadding(new Insets(8, 0, 0, 0));
+
+        VBox left = new VBox(10, new Label("Зоны"), zonesView, zoneBtns);
         left.setPadding(new Insets(12));
         left.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
-        VBox right = new VBox(10, new Label("Ячейки"), locTable);
+        VBox right = new VBox(10, new Label("Ячейки"), locTable, locBtns);
         right.setPadding(new Insets(12));
         right.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
 
@@ -361,8 +446,8 @@ public class DesktopClientApplication extends Application {
         CompletableFuture
             .supplyAsync(() -> {
                 try {
-                    var zones = apiClient.listZones();
-                    var locs = apiClient.listLocations();
+                    var zones = zonesView != null ? apiClient.listZones() : null;
+                    var locs = locTable != null ? apiClient.listLocations() : null;
                     return new Object[]{zones, locs};
                 } catch (Exception e) {
                     throw new RuntimeException(e);
@@ -370,18 +455,24 @@ public class DesktopClientApplication extends Application {
             })
             .whenComplete((data, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    zonesView.setItems(FXCollections.observableArrayList());
-                    locTable.setItems(FXCollections.observableArrayList());
-                    locTable.setPlaceholder(new Label("Ошибка: " + error.getMessage()));
+                    if (zonesView != null) zonesView.setItems(FXCollections.observableArrayList());
+                    if (locTable != null) {
+                        locTable.setItems(FXCollections.observableArrayList());
+                        locTable.setPlaceholder(new Label("Ошибка: " + error.getMessage()));
+                    }
                     return;
                 }
-                @SuppressWarnings("unchecked")
-                List<com.wmsdipl.desktop.model.Zone> zones = (List<com.wmsdipl.desktop.model.Zone>) data[0];
-                @SuppressWarnings("unchecked")
-                List<Location> locs = (List<Location>) data[1];
-                zonesView.setItems(FXCollections.observableArrayList(zones));
-                locTable.setUserData(locs);
-                locTable.setItems(FXCollections.observableArrayList(locs));
+                if (data[0] != null && zonesView != null) {
+                    @SuppressWarnings("unchecked")
+                    List<com.wmsdipl.desktop.model.Zone> zones = (List<com.wmsdipl.desktop.model.Zone>) data[0];
+                    zonesView.setItems(FXCollections.observableArrayList(zones));
+                }
+                if (data[1] != null && locTable != null) {
+                    @SuppressWarnings("unchecked")
+                    List<Location> locs = (List<Location>) data[1];
+                    locTable.setUserData(locs);
+                    locTable.setItems(FXCollections.observableArrayList(locs));
+                }
             }));
     }
 
@@ -392,7 +483,7 @@ public class DesktopClientApplication extends Application {
             return;
         }
         List<Location> filtered = zone == null ? all : all.stream()
-            .filter(l -> l.zone() != null && zone.id().equals(l.zone().id()))
+            .filter(l -> l.zoneId() != null && zone.id().equals(l.zoneId()))
             .toList();
         locTable.setItems(FXCollections.observableArrayList(filtered));
     }
@@ -431,6 +522,300 @@ public class DesktopClientApplication extends Application {
         layout.setPadding(new Insets(24));
         layout.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
         setContent(layout);
+    }
+
+    private void showStockPane() {
+        activeModule = "stock";
+        shell.setLeft(buildNav());
+
+        Label header = new Label("Остатки на складе");
+        header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
+        
+        // Filter fields
+        TextField skuCodeFilter = new TextField();
+        skuCodeFilter.setPromptText("Код SKU");
+        skuCodeFilter.setPrefWidth(150);
+        
+        TextField locationCodeFilter = new TextField();
+        locationCodeFilter.setPromptText("Код ячейки");
+        locationCodeFilter.setPrefWidth(150);
+        
+        TextField palletBarcodeFilter = new TextField();
+        palletBarcodeFilter.setPromptText("Баркод паллеты");
+        palletBarcodeFilter.setPrefWidth(150);
+        
+        TextField receiptIdFilter = new TextField();
+        receiptIdFilter.setPromptText("ID прихода");
+        receiptIdFilter.setPrefWidth(120);
+        
+        ComboBox<String> statusFilter = new ComboBox<>();
+        statusFilter.getItems().addAll("", "EMPTY", "RECEIVED", "PLACED", "PICKED");
+        statusFilter.setValue("");
+        statusFilter.setPromptText("Статус");
+        statusFilter.setPrefWidth(130);
+        
+        Button searchBtn = new Button("Поиск");
+        searchBtn.getStyleClass().add("refresh-btn");
+        searchBtn.setPrefHeight(40);
+        searchBtn.setPrefWidth(120);
+        
+        Button clearBtn = new Button("Очистить");
+        clearBtn.getStyleClass().add("refresh-btn");
+        clearBtn.setPrefHeight(40);
+        clearBtn.setPrefWidth(120);
+        
+        // Filters row
+        HBox filtersRow = new HBox(10, skuCodeFilter, locationCodeFilter, palletBarcodeFilter, receiptIdFilter, statusFilter, searchBtn, clearBtn);
+        filtersRow.setAlignment(Pos.CENTER_LEFT);
+        
+        // Stock table
+        TableView<StockItem> stockTable = new TableView<>();
+        stockTable.setPlaceholder(new Label("Нет данных"));
+        stockTable.setPrefHeight(500);
+        stockTable.setFixedCellSize(50);
+        
+        TableColumn<StockItem, Object> palletIdCol = column("ID", StockItem::palletId);
+        palletIdCol.setPrefWidth(60);
+        
+        TableColumn<StockItem, Object> palletCodeCol = column("Паллета", StockItem::palletCode);
+        palletCodeCol.setPrefWidth(120);
+        
+        TableColumn<StockItem, Object> skuCodeCol = column("SKU", StockItem::skuCode);
+        skuCodeCol.setPrefWidth(120);
+        
+        TableColumn<StockItem, Object> skuNameCol = column("Название", StockItem::skuName);
+        skuNameCol.setPrefWidth(200);
+        
+        TableColumn<StockItem, Object> qtyCol = column("Кол-во", StockItem::quantity);
+        qtyCol.setPrefWidth(80);
+        
+        TableColumn<StockItem, Object> uomCol = column("Ед.изм", StockItem::uom);
+        uomCol.setPrefWidth(70);
+        
+        TableColumn<StockItem, Object> locationCol = column("Ячейка", s -> s.locationCode() != null ? s.locationCode() : "Не размещено");
+        locationCol.setPrefWidth(120);
+        
+        TableColumn<StockItem, Object> statusCol = column("Статус", StockItem::palletStatus);
+        statusCol.setPrefWidth(100);
+        
+        TableColumn<StockItem, Object> receiptCol = column("Приход", s -> s.receiptDocNumber() != null ? s.receiptDocNumber() : "");
+        receiptCol.setPrefWidth(150);
+        
+        TableColumn<StockItem, Object> lotCol = column("Партия", s -> s.lotNumber() != null ? s.lotNumber() : "");
+        lotCol.setPrefWidth(100);
+        
+        TableColumn<StockItem, Object> expiryCol = column("Срок годн.", s -> s.expiryDate() != null ? s.expiryDate().toString() : "");
+        expiryCol.setPrefWidth(100);
+        
+        stockTable.getColumns().addAll(palletIdCol, palletCodeCol, skuCodeCol, skuNameCol, 
+                                       qtyCol, uomCol, locationCol, statusCol, receiptCol, lotCol, expiryCol);
+        
+        // Double-click to show movement history
+        stockTable.setRowFactory(tv -> {
+            TableRow<StockItem> row = new TableRow<>();
+            row.setOnMouseClicked(event -> {
+                if (event.getClickCount() == 2 && !row.isEmpty()) {
+                    showMovementHistoryDialog(row.getItem());
+                }
+            });
+            return row;
+        });
+        
+        // Pagination controls
+        Label pageLabel = new Label("Страница: 0");
+        pageLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        
+        Button prevBtn = new Button("◀ Пред");
+        prevBtn.getStyleClass().add("refresh-btn");
+        prevBtn.setPrefHeight(36);
+        prevBtn.setDisable(true);
+        
+        Button nextBtn = new Button("След ▶");
+        nextBtn.getStyleClass().add("refresh-btn");
+        nextBtn.setPrefHeight(36);
+        
+        Label totalLabel = new Label("Всего: 0");
+        totalLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        
+        HBox paginationBox = new HBox(12, prevBtn, pageLabel, nextBtn, totalLabel);
+        paginationBox.setAlignment(Pos.CENTER_LEFT);
+        paginationBox.setPadding(new Insets(10, 0, 0, 0));
+        
+        // State for pagination
+        final int[] currentPage = {0};
+        final int pageSize = 50;
+        
+        // Load stock function
+        Runnable loadStock = () -> {
+            String skuCode = skuCodeFilter.getText().trim();
+            String locationCode = locationCodeFilter.getText().trim();
+            String palletBarcode = palletBarcodeFilter.getText().trim();
+            String receiptIdStr = receiptIdFilter.getText().trim();
+            String status = statusFilter.getValue();
+            
+            Long receiptId = null;
+            if (!receiptIdStr.isEmpty()) {
+                try {
+                    receiptId = Long.parseLong(receiptIdStr);
+                } catch (NumberFormatException ex) {
+                    stockTable.setPlaceholder(new Label("Неверный ID прихода"));
+                    return;
+                }
+            }
+            
+            final Long finalReceiptId = receiptId;
+            stockTable.setPlaceholder(new Label("Загрузка..."));
+            
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.listStock(
+                        skuCode.isEmpty() ? null : skuCode,
+                        locationCode.isEmpty() ? null : locationCode,
+                        palletBarcode.isEmpty() ? null : palletBarcode,
+                        finalReceiptId,
+                        status.isEmpty() ? null : status,
+                        currentPage[0],
+                        pageSize
+                    );
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }).whenComplete((page, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    stockTable.setPlaceholder(new Label("Ошибка: " + error.getMessage()));
+                    stockTable.setItems(FXCollections.observableArrayList());
+                    return;
+                }
+                
+                stockTable.setItems(FXCollections.observableArrayList(page.content));
+                pageLabel.setText("Страница: " + (currentPage[0] + 1) + " / " + Math.max(1, page.totalPages));
+                totalLabel.setText("Всего: " + page.totalElements);
+                
+                prevBtn.setDisable(currentPage[0] == 0);
+                nextBtn.setDisable(currentPage[0] >= page.totalPages - 1);
+                
+                stockTable.setPlaceholder(new Label("Нет данных"));
+            }));
+        };
+        
+        // Button actions
+        searchBtn.setOnAction(e -> {
+            currentPage[0] = 0;
+            loadStock.run();
+        });
+        
+        clearBtn.setOnAction(e -> {
+            skuCodeFilter.clear();
+            locationCodeFilter.clear();
+            palletBarcodeFilter.clear();
+            receiptIdFilter.clear();
+            statusFilter.setValue("");
+            currentPage[0] = 0;
+            loadStock.run();
+        });
+        
+        prevBtn.setOnAction(e -> {
+            if (currentPage[0] > 0) {
+                currentPage[0]--;
+                loadStock.run();
+            }
+        });
+        
+        nextBtn.setOnAction(e -> {
+            currentPage[0]++;
+            loadStock.run();
+        });
+        
+        // Enter key on filters triggers search
+        skuCodeFilter.setOnAction(e -> searchBtn.fire());
+        locationCodeFilter.setOnAction(e -> searchBtn.fire());
+        palletBarcodeFilter.setOnAction(e -> searchBtn.fire());
+        receiptIdFilter.setOnAction(e -> searchBtn.fire());
+        
+        VBox layout = new VBox(12, header, filtersRow, stockTable, paginationBox);
+        layout.setPadding(new Insets(24));
+        layout.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
+        VBox.setVgrow(stockTable, Priority.ALWAYS);
+        
+        setContent(layout);
+        
+        // Load initial data
+        loadStock.run();
+    }
+    
+    private void showMovementHistoryDialog(StockItem stockItem) {
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.setTitle("История перемещений - " + stockItem.palletCode());
+        
+        TableView<StockMovement> historyTable = new TableView<>();
+        historyTable.setPlaceholder(new Label("Загрузка..."));
+        historyTable.setPrefHeight(400);
+        
+        TableColumn<StockMovement, Object> idCol = column("ID", StockMovement::id);
+        idCol.setPrefWidth(50);
+        
+        TableColumn<StockMovement, Object> typeCol = column("Тип", StockMovement::movementType);
+        typeCol.setPrefWidth(100);
+        
+        TableColumn<StockMovement, Object> fromLocCol = column("Откуда", m -> m.fromLocationCode() != null ? m.fromLocationCode() : "-");
+        fromLocCol.setPrefWidth(120);
+        
+        TableColumn<StockMovement, Object> toLocCol = column("Куда", m -> m.toLocationCode() != null ? m.toLocationCode() : "-");
+        toLocCol.setPrefWidth(120);
+        
+        TableColumn<StockMovement, Object> qtyCol = column("Кол-во", StockMovement::quantity);
+        qtyCol.setPrefWidth(80);
+        
+        TableColumn<StockMovement, Object> movedByCol = column("Кем", StockMovement::movedBy);
+        movedByCol.setPrefWidth(120);
+        
+        TableColumn<StockMovement, Object> movedAtCol = column("Когда", m -> {
+            if (m.movedAt() != null) {
+                return m.movedAt().toString().substring(0, 19).replace('T', ' ');
+            }
+            return "";
+        });
+        movedAtCol.setPrefWidth(150);
+        
+        TableColumn<StockMovement, Object> taskCol = column("Задание", m -> m.taskId() != null ? m.taskId().toString() : "");
+        taskCol.setPrefWidth(80);
+        
+        historyTable.getColumns().addAll(idCol, typeCol, fromLocCol, toLocCol, qtyCol, movedByCol, movedAtCol, taskCol);
+        
+        Button closeBtn = new Button("Закрыть");
+        closeBtn.getStyleClass().add("refresh-btn");
+        closeBtn.setPrefWidth(120);
+        closeBtn.setOnAction(e -> dialog.close());
+        
+        HBox buttonBox = new HBox(closeBtn);
+        buttonBox.setAlignment(Pos.CENTER);
+        buttonBox.setPadding(new Insets(10));
+        
+        VBox content = new VBox(10, historyTable, buttonBox);
+        content.setPadding(new Insets(12));
+        content.setStyle("-fx-background-color: #1c1c1c;");
+        
+        Scene scene = new Scene(content, 900, 500);
+        applyStyles(scene);
+        dialog.setScene(scene);
+        dialog.show();
+        
+        // Load movement history
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                return apiClient.getPalletHistory(stockItem.palletId());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }).whenComplete((movements, error) -> Platform.runLater(() -> {
+            if (error != null) {
+                historyTable.setPlaceholder(new Label("Ошибка: " + error.getMessage()));
+            } else {
+                historyTable.setItems(FXCollections.observableArrayList(movements));
+                historyTable.setPlaceholder(new Label("Нет перемещений"));
+            }
+        }));
     }
 
     private void showTasksPane() {
@@ -475,6 +860,270 @@ public class DesktopClientApplication extends Application {
         layout.setPadding(new Insets(24));
         layout.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
         setContent(layout);
+    }
+
+    private void showUsersPane() {
+        activeModule = "users";
+        shell.setLeft(buildNav());
+
+        Label header = new Label("Управление пользователями");
+        header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
+
+        TableView<User> userTable = new TableView<>();
+        userTable.setPlaceholder(new Label("Нет пользователей"));
+        userTable.getColumns().addAll(
+            column("ID", User::id),
+            column("Имя пользователя", User::username),
+            column("Полное имя", User::fullName),
+            column("Email", User::email),
+            column("Роль", User::role),
+            column("Активен", User::active)
+        );
+
+        // User management buttons
+        Button createUserBtn = new Button("+ Создать пользователя");
+        createUserBtn.getStyleClass().add("btn-success");
+        createUserBtn.setOnAction(e -> openUserCreationDialog(userTable));
+
+        Button editUserBtn = new Button("✏ Редактировать");
+        editUserBtn.getStyleClass().add("btn-primary");
+        editUserBtn.setDisable(true);
+        editUserBtn.setOnAction(e -> openUserEditDialog(userTable, userTable.getSelectionModel().getSelectedItem()));
+
+        Button changePasswordBtn = new Button("🔑 Сменить пароль");
+        changePasswordBtn.getStyleClass().add("btn-warning");
+        changePasswordBtn.setDisable(true);
+        changePasswordBtn.setOnAction(e -> openPasswordChangeDialog(userTable, userTable.getSelectionModel().getSelectedItem()));
+
+        Button deleteUserBtn = new Button("🗑 Удалить");
+        deleteUserBtn.getStyleClass().add("btn-danger");
+        deleteUserBtn.setDisable(true);
+        deleteUserBtn.setOnAction(e -> deleteUser(userTable, userTable.getSelectionModel().getSelectedItem()));
+
+        userTable.getSelectionModel().selectedItemProperty().addListener((obs, o, user) -> {
+            boolean selected = user != null;
+            editUserBtn.setDisable(!selected);
+            changePasswordBtn.setDisable(!selected);
+            deleteUserBtn.setDisable(!selected);
+        });
+
+        Button refreshBtn = new Button("Обновить");
+        refreshBtn.getStyleClass().add("refresh-btn");
+        refreshBtn.setOnAction(e -> loadList(userTable, () -> apiClient.listUsers()));
+
+        HBox userBtns = new HBox(8, createUserBtn, editUserBtn, changePasswordBtn, deleteUserBtn, refreshBtn);
+        userBtns.setPadding(new Insets(8, 0, 8, 0));
+
+        VBox layout = new VBox(10, header, userBtns, userTable);
+        layout.setPadding(new Insets(24));
+        layout.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
+
+        setContent(layout);
+
+        loadList(userTable, () -> apiClient.listUsers());
+    }
+
+    private void openUserCreationDialog(TableView<User> userTable) {
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Создать пользователя");
+        dialog.setHeaderText("Введите данные нового пользователя");
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20, 150, 10, 10));
+
+        TextField usernameField = new TextField();
+        usernameField.setPromptText("Имя пользователя");
+        PasswordField passwordField = new PasswordField();
+        passwordField.setPromptText("Пароль");
+        TextField fullNameField = new TextField();
+        fullNameField.setPromptText("Полное имя");
+        TextField emailField = new TextField();
+        emailField.setPromptText("Email");
+        
+        ComboBox<String> roleCombo = new ComboBox<>();
+        roleCombo.getItems().addAll("OPERATOR", "SUPERVISOR", "ADMIN");
+        roleCombo.setValue("OPERATOR");
+        
+        CheckBox activeCheck = new CheckBox("Активен");
+        activeCheck.setSelected(true);
+
+        grid.add(new Label("Имя пользователя:"), 0, 0);
+        grid.add(usernameField, 1, 0);
+        grid.add(new Label("Пароль:"), 0, 1);
+        grid.add(passwordField, 1, 1);
+        grid.add(new Label("Полное имя:"), 0, 2);
+        grid.add(fullNameField, 1, 2);
+        grid.add(new Label("Email:"), 0, 3);
+        grid.add(emailField, 1, 3);
+        grid.add(new Label("Роль:"), 0, 4);
+        grid.add(roleCombo, 1, 4);
+        grid.add(activeCheck, 1, 5);
+
+        dialog.getDialogPane().setContent(grid);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        dialog.showAndWait().ifPresent(response -> {
+            if (response == ButtonType.OK) {
+                String username = usernameField.getText();
+                String password = passwordField.getText();
+                String fullName = fullNameField.getText();
+                String email = emailField.getText();
+                String role = roleCombo.getValue();
+                Boolean active = activeCheck.isSelected();
+
+                if (username == null || username.isBlank() || password == null || password.isBlank()) {
+                    showError("Имя пользователя и пароль обязательны");
+                    return;
+                }
+
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        apiClient.createUser(username, password, fullName, email, role, active);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }).whenComplete((v, error) -> Platform.runLater(() -> {
+                    if (error != null) {
+                        showError("Ошибка создания пользователя: " + error.getMessage());
+                    } else {
+                        showInfo("Пользователь успешно создан");
+                        loadList(userTable, () -> apiClient.listUsers());
+                    }
+                }));
+            }
+        });
+    }
+
+    private void openUserEditDialog(TableView<User> userTable, User user) {
+        if (user == null) return;
+
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Редактировать пользователя");
+        dialog.setHeaderText("Редактирование: " + user.username());
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20, 150, 10, 10));
+
+        TextField fullNameField = new TextField(user.fullName() != null ? user.fullName() : "");
+        fullNameField.setPromptText("Полное имя");
+        TextField emailField = new TextField(user.email() != null ? user.email() : "");
+        emailField.setPromptText("Email");
+        
+        ComboBox<String> roleCombo = new ComboBox<>();
+        roleCombo.getItems().addAll("OPERATOR", "SUPERVISOR", "ADMIN");
+        roleCombo.setValue(user.role() != null ? user.role() : "OPERATOR");
+        
+        CheckBox activeCheck = new CheckBox("Активен");
+        activeCheck.setSelected(user.active() != null ? user.active() : true);
+
+        grid.add(new Label("Полное имя:"), 0, 0);
+        grid.add(fullNameField, 1, 0);
+        grid.add(new Label("Email:"), 0, 1);
+        grid.add(emailField, 1, 1);
+        grid.add(new Label("Роль:"), 0, 2);
+        grid.add(roleCombo, 1, 2);
+        grid.add(activeCheck, 1, 3);
+
+        dialog.getDialogPane().setContent(grid);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        dialog.showAndWait().ifPresent(response -> {
+            if (response == ButtonType.OK) {
+                String fullName = fullNameField.getText();
+                String email = emailField.getText();
+                String role = roleCombo.getValue();
+                Boolean active = activeCheck.isSelected();
+
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        apiClient.updateUser(user.id(), fullName, email, role, active);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }).whenComplete((v, error) -> Platform.runLater(() -> {
+                    if (error != null) {
+                        showError("Ошибка обновления пользователя: " + error.getMessage());
+                    } else {
+                        showInfo("Пользователь успешно обновлен");
+                        loadList(userTable, () -> apiClient.listUsers());
+                    }
+                }));
+            }
+        });
+    }
+
+    private void openPasswordChangeDialog(TableView<User> userTable, User user) {
+        if (user == null) return;
+
+        Dialog<ButtonType> dialog = new Dialog<>();
+        dialog.setTitle("Сменить пароль");
+        dialog.setHeaderText("Смена пароля для: " + user.username());
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20, 150, 10, 10));
+
+        PasswordField newPasswordField = new PasswordField();
+        newPasswordField.setPromptText("Новый пароль");
+
+        grid.add(new Label("Новый пароль:"), 0, 0);
+        grid.add(newPasswordField, 1, 0);
+
+        dialog.getDialogPane().setContent(grid);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        dialog.showAndWait().ifPresent(response -> {
+            if (response == ButtonType.OK) {
+                String newPassword = newPasswordField.getText();
+
+                if (newPassword == null || newPassword.isBlank()) {
+                    showError("Пароль не может быть пустым");
+                    return;
+                }
+
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        apiClient.changePassword(user.id(), newPassword);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }).whenComplete((v, error) -> Platform.runLater(() -> {
+                    if (error != null) {
+                        showError("Ошибка смены пароля: " + error.getMessage());
+                    } else {
+                        showInfo("Пароль успешно изменен");
+                    }
+                }));
+            }
+        });
+    }
+
+    private void deleteUser(TableView<User> userTable, User user) {
+        if (user == null) return;
+
+        if (!showConfirm("Удаление пользователя", "Удалить пользователя '" + user.username() + "'?")) {
+            return;
+        }
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                apiClient.deleteUser(user.id());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }).whenComplete((v, error) -> Platform.runLater(() -> {
+            if (error != null) {
+                showError("Ошибка удаления пользователя: " + error.getMessage());
+            } else {
+                showInfo("Пользователь успешно удален");
+                loadList(userTable, () -> apiClient.listUsers());
+            }
+        }));
     }
 
     private void loadTasks(TableView<com.wmsdipl.desktop.model.Task> table, String receiptFilter) {
@@ -664,36 +1313,16 @@ public class DesktopClientApplication extends Application {
         loadMyTasks.run();
     }
 
-    private void showSettingsPane() {
-        activeModule = "settings";
+    private void showSkusPane() {
+        activeModule = "skus";
         shell.setLeft(buildNav());
-        Label header = new Label("Настройки");
+        
+        Label header = new Label("Справочник номенклатур (SKU)");
         header.setStyle("-fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: white;");
-
-        TextField coreApiField = new TextField(coreApiBase);
-        TextField importApiField = new TextField(importApiBase);
-        TextField importFolderField = new TextField();
-        Label statusLabel = new Label("Сохраните настройки");
-        statusLabel.setStyle("-fx-text-fill: white;");
-
-        Button saveApi = new Button("Сохранить API адреса");
-        saveApi.setOnAction(e -> {
-            coreApiBase = coreApiField.getText();
-            importApiBase = importApiField.getText();
-            apiClient = new ApiClient(coreApiBase);
-            statusLabel.setText("API базовые адреса сохранены");
-        });
-
-        Button saveFolder = new Button("Сохранить директорию импорта");
-        saveFolder.setOnAction(e -> updateImportFolder(importApiField.getText(), importFolderField.getText(), statusLabel));
-
-        // SKU catalog
-        Label skuHeader = new Label("Справочник номенклатур (SKU)");
-        skuHeader.setStyle("-fx-text-fill: white; -fx-font-size: 16px; -fx-font-weight: bold;");
         
         TableView<Sku> skuTable = new TableView<>();
         skuTable.setPlaceholder(new Label("Нет номенклатур"));
-        skuTable.setPrefHeight(250);
+        skuTable.setPrefHeight(400);
         skuTable.getColumns().addAll(
             column("ID", Sku::id),
             column("Код", Sku::code),
@@ -703,14 +1332,20 @@ public class DesktopClientApplication extends Application {
         
         Button refreshSku = new Button("Обновить");
         refreshSku.getStyleClass().add("refresh-btn");
+        refreshSku.setPrefHeight(48);
+        refreshSku.setPrefWidth(150);
         refreshSku.setOnAction(e -> loadList(skuTable, () -> apiClient.listSkus()));
         
         Button createSku = new Button("Создать SKU");
         createSku.getStyleClass().add("refresh-btn");
+        createSku.setPrefHeight(48);
+        createSku.setPrefWidth(150);
         createSku.setOnAction(e -> showCreateSkuDialog(skuTable));
         
         Button deleteSku = new Button("Удалить");
         deleteSku.getStyleClass().add("refresh-btn");
+        deleteSku.setPrefHeight(48);
+        deleteSku.setPrefWidth(150);
         deleteSku.setDisable(true);
         
         skuTable.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
@@ -736,8 +1371,56 @@ public class DesktopClientApplication extends Application {
             }
         });
         
-        HBox skuButtons = new HBox(10, refreshSku, createSku, deleteSku);
+        HBox buttons = new HBox(10, refreshSku, createSku, deleteSku);
+        buttons.setPadding(new Insets(10, 0, 10, 0));
+        
+        VBox layout = new VBox(15, header, buttons, skuTable);
+        layout.setPadding(new Insets(24));
+        layout.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
+        layout.setFillWidth(true);
+        
+        setContent(layout);
         loadList(skuTable, () -> apiClient.listSkus());
+    }
+
+    private void showSettingsPane() {
+        activeModule = "settings";
+        shell.setLeft(buildNav());
+        Label header = new Label("Настройки");
+        header.setStyle("-fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: white;");
+
+        TextField coreApiField = new TextField(coreApiBase);
+        TextField importApiField = new TextField(importApiBase);
+        TextField importFolderField = new TextField();
+        Label statusLabel = new Label("Сохраните настройки");
+        statusLabel.setStyle("-fx-text-fill: white;");
+
+        // Load current import folder
+        CompletableFuture.runAsync(() -> {
+            try {
+                String currentFolder = new ImportServiceClient(importApiBase).getCurrentFolder();
+                Platform.runLater(() -> {
+                    if (currentFolder != null && !currentFolder.isBlank()) {
+                        importFolderField.setText(currentFolder);
+                    }
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> {
+                    statusLabel.setText("Не удалось загрузить текущую директорию: " + e.getMessage());
+                });
+            }
+        });
+
+        Button saveApi = new Button("Сохранить API адреса");
+        saveApi.setOnAction(e -> {
+            coreApiBase = coreApiField.getText();
+            importApiBase = importApiField.getText();
+            apiClient = new ApiClient(coreApiBase);
+            statusLabel.setText("API базовые адреса сохранены");
+        });
+
+        Button saveFolder = new Button("Сохранить директорию импорта");
+        saveFolder.setOnAction(e -> updateImportFolder(importApiField.getText(), importFolderField.getText(), statusLabel));
 
         // Putaway rules list
         Label rulesHeader = new Label("Правила размещения");
@@ -765,9 +1448,6 @@ public class DesktopClientApplication extends Application {
             new Label("Путь к папке импорта"), importFolderField,
             new HBox(8, saveApi, saveFolder),
             statusLabel,
-            skuHeader,
-            skuButtons,
-            skuTable,
             rulesHeader,
             refreshRules,
             rulesTable
@@ -1019,6 +1699,7 @@ public class DesktopClientApplication extends Application {
                     updateButtons.run();
                     updateTitle.run();
                     docTab.setContent(buildDocumentTab(currentTask[0]));
+                    factTab.setContent(buildFactTab(currentTask[0], dialog));
                 }
             }));
         });
@@ -1045,6 +1726,7 @@ public class DesktopClientApplication extends Application {
                     updateButtons.run();
                     updateTitle.run();
                     docTab.setContent(buildDocumentTab(currentTask[0]));
+                    factTab.setContent(buildFactTab(currentTask[0], dialog));
                 }
             }));
         });
@@ -1205,6 +1887,13 @@ public class DesktopClientApplication extends Application {
         Label header = new Label("Сканирование");
         header.setStyle("-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: white;");
 
+        // Show target location for PLACEMENT tasks
+        Label targetLocationInfo = null;
+        if ("PLACEMENT".equals(task.taskType()) && task.targetLocationCode() != null) {
+            targetLocationInfo = new Label("🎯 Целевая ячейка: " + task.targetLocationCode());
+            targetLocationInfo.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #4CAF50; -fx-padding: 8px; -fx-background-color: rgba(76,175,80,0.1); -fx-background-radius: 4px;");
+        }
+
         // Scan fields (blue, 16px, with 📷 icon)
         Label palletLabel = new Label("📷 Паллета:");
         palletLabel.setStyle("-fx-text-fill: #2196F3; -fx-font-size: 14px;");
@@ -1237,6 +1926,20 @@ public class DesktopClientApplication extends Application {
             return null;
         }));
 
+        // Location field (only for PLACEMENT tasks)
+        Label locationLabel = null;
+        TextField locationField = null;
+        boolean isPlacementTask = "PLACEMENT".equals(task.taskType());
+        
+        if (isPlacementTask) {
+            locationLabel = new Label("📍 Ячейка:");
+            locationLabel.setStyle("-fx-text-fill: #2196F3; -fx-font-size: 14px;");
+            locationField = new TextField();
+            locationField.setPromptText("Отсканируйте код ячейки");
+            locationField.getStyleClass().add("scan-field");
+            locationField.setPrefHeight(48);
+        }
+
         Label commentLabel = new Label("✏️ Комментарий:");
         commentLabel.setStyle("-fx-text-fill: #9E9E9E; -fx-font-size: 14px;");
         TextArea commentField = new TextArea();
@@ -1250,6 +1953,17 @@ public class DesktopClientApplication extends Application {
         submitBtn.getStyleClass().add("refresh-btn");
         submitBtn.setPrefHeight(48);
         submitBtn.setPrefWidth(200);
+
+        // Disable all fields if task is not STARTED
+        boolean isStarted = "IN_PROGRESS".equals(task.status());
+        palletField.setDisable(!isStarted);
+        barcodeField.setDisable(!isStarted);
+        qtyField.setDisable(!isStarted);
+        commentField.setDisable(!isStarted);
+        submitBtn.setDisable(!isStarted);
+        if (locationField != null) {
+            locationField.setDisable(!isStarted);
+        }
 
         // Scan history table
         TableView<Scan> scanTable = new TableView<>();
@@ -1269,24 +1983,33 @@ public class DesktopClientApplication extends Application {
         );
 
         // Enter key navigation
+        TextField finalLocationField = locationField;
         palletField.setOnAction(e -> barcodeField.requestFocus());
         barcodeField.setOnAction(e -> qtyField.requestFocus());
         qtyField.setOnAction(e -> {
-            if (!qtyField.getText().isBlank()) {
+            if (isPlacementTask && finalLocationField != null) {
+                finalLocationField.requestFocus();
+            } else if (!qtyField.getText().isBlank()) {
                 submitBtn.fire();
             } else {
                 commentField.requestFocus();
             }
         });
+        
+        if (locationField != null) {
+            locationField.setOnAction(e -> submitBtn.fire());
+        }
 
         // Submit action
         Label statusLabel = new Label("");
         statusLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
 
+        TextField finalLocationField2 = locationField;
         submitBtn.setOnAction(e -> {
             String palletCode = palletField.getText().trim();
             String barcode = barcodeField.getText().trim();
             String qtyStr = qtyField.getText().trim();
+            String locationCode = finalLocationField2 != null ? finalLocationField2.getText().trim() : null;
 
             if (palletCode.isEmpty()) {
                 showError(statusLabel, "Код паллеты обязателен", palletField);
@@ -1294,6 +2017,12 @@ public class DesktopClientApplication extends Application {
             }
             if (qtyStr.isEmpty()) {
                 showError(statusLabel, "Количество обязательно", qtyField);
+                return;
+            }
+            
+            // Validate location for PLACEMENT tasks
+            if (isPlacementTask && (locationCode == null || locationCode.isEmpty())) {
+                showError(statusLabel, "Код ячейки обязателен для размещения", finalLocationField2);
                 return;
             }
 
@@ -1305,12 +2034,12 @@ public class DesktopClientApplication extends Application {
 
             CompletableFuture.supplyAsync(() -> {
                 try {
-                    return apiClient.recordScan(task.id(), palletCode, barcode, qty, comment);
+                    return apiClient.recordScan(task.id(), palletCode, barcode, qty, comment, locationCode);
                 } catch (Exception ex) {
                     throw new RuntimeException(ex);
                 }
             }).whenComplete((scan, error) -> Platform.runLater(() -> {
-                submitBtn.setDisable(false);
+                submitBtn.setDisable(!isStarted);
                 if (error != null) {
                     showError(statusLabel, "Ошибка: " + error.getMessage(), palletField);
                 } else {
@@ -1320,6 +2049,9 @@ public class DesktopClientApplication extends Application {
                     barcodeField.clear();
                     qtyField.clear();
                     commentField.clear();
+                    if (finalLocationField2 != null) {
+                        finalLocationField2.clear();
+                    }
                     palletField.requestFocus();
                     // Reload scans
                     loadTaskScans(task, scanTable);
@@ -1330,20 +2062,40 @@ public class DesktopClientApplication extends Application {
         // Load initial scans
         loadTaskScans(task, scanTable);
 
-        VBox form = new VBox(8, 
-            palletLabel, palletField,
-            barcodeLabel, barcodeField,
-            qtyLabel, qtyField,
-            commentLabel, commentField,
-            submitBtn,
-            statusLabel
-        );
+        // Build form with conditional location field
+        VBox form;
+        if (isPlacementTask && locationLabel != null && locationField != null) {
+            form = new VBox(8, 
+                palletLabel, palletField,
+                barcodeLabel, barcodeField,
+                qtyLabel, qtyField,
+                locationLabel, locationField,
+                commentLabel, commentField,
+                submitBtn,
+                statusLabel
+            );
+        } else {
+            form = new VBox(8, 
+                palletLabel, palletField,
+                barcodeLabel, barcodeField,
+                qtyLabel, qtyField,
+                commentLabel, commentField,
+                submitBtn,
+                statusLabel
+            );
+        }
 
-        content.getChildren().addAll(header, form, new Label("История сканов:"), scanTable);
+        if (targetLocationInfo != null) {
+            content.getChildren().addAll(header, targetLocationInfo, form, new Label("История сканов:"), scanTable);
+        } else {
+            content.getChildren().addAll(header, form, new Label("История сканов:"), scanTable);
+        }
         VBox.setVgrow(scanTable, Priority.ALWAYS);
 
-        // Auto-focus pallet field
-        Platform.runLater(() -> palletField.requestFocus());
+        // Auto-focus pallet field if task is started
+        if (isStarted) {
+            Platform.runLater(() -> palletField.requestFocus());
+        }
 
         return content;
     }
@@ -1622,6 +2374,496 @@ public class DesktopClientApplication extends Application {
         
         java.util.Optional<javafx.scene.control.ButtonType> result = alert.showAndWait();
         return result.isPresent() && result.get().getButtonData() == javafx.scene.control.ButtonBar.ButtonData.OK_DONE;
+    }
+
+    // ============================================================
+    // ZONE MANAGEMENT METHODS
+    // ============================================================
+
+    private void openZoneCreationDialog(ListView<com.wmsdipl.desktop.model.Zone> zonesView) {
+        Dialog<com.wmsdipl.desktop.model.Zone> dialog = new Dialog<>();
+        dialog.setTitle("Создание зоны");
+        dialog.setHeaderText("Введите данные новой зоны");
+        
+        DialogPane dialogPane = dialog.getDialogPane();
+        dialogPane.getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20, 150, 10, 10));
+        
+        TextField codeField = new TextField();
+        codeField.setPromptText("Код зоны (например, ZONE-A)");
+        TextField nameField = new TextField();
+        nameField.setPromptText("Название");
+        TextField priorityField = new TextField("100");
+        priorityField.setPromptText("Приоритет (число)");
+        TextArea descField = new TextArea();
+        descField.setPromptText("Описание (опционально)");
+        descField.setPrefRowCount(3);
+        
+        grid.add(new Label("Код:"), 0, 0);
+        grid.add(codeField, 1, 0);
+        grid.add(new Label("Название:"), 0, 1);
+        grid.add(nameField, 1, 1);
+        grid.add(new Label("Приоритет:"), 0, 2);
+        grid.add(priorityField, 1, 2);
+        grid.add(new Label("Описание:"), 0, 3);
+        grid.add(descField, 1, 3);
+        
+        dialogPane.setContent(grid);
+        
+        dialog.setResultConverter(btn -> {
+            if (btn == ButtonType.OK) {
+                try {
+                    String code = codeField.getText().trim();
+                    String name = nameField.getText().trim();
+                    Integer priority = priorityField.getText().trim().isEmpty() ? 100 : Integer.parseInt(priorityField.getText().trim());
+                    String desc = descField.getText().trim();
+                    
+                    if (code.isEmpty() || name.isEmpty()) {
+                        showError("Заполните обязательные поля: код, название");
+                        return null;
+                    }
+                    
+                    com.wmsdipl.desktop.model.Zone created = apiClient.createZone(code, name, priority, desc.isEmpty() ? null : desc);
+                    showInfo("Зона успешно создана: " + created.code());
+                    loadTopology(zonesView, null);
+                    return created;
+                } catch (Exception ex) {
+                    showError("Ошибка создания зоны: " + ex.getMessage());
+                    return null;
+                }
+            }
+            return null;
+        });
+        
+        dialog.showAndWait();
+    }
+
+    private void openZoneEditDialog(ListView<com.wmsdipl.desktop.model.Zone> zonesView, com.wmsdipl.desktop.model.Zone zone) {
+        if (zone == null) return;
+        
+        Dialog<com.wmsdipl.desktop.model.Zone> dialog = new Dialog<>();
+        dialog.setTitle("Редактирование зоны");
+        dialog.setHeaderText("Редактировать зону: " + zone.code());
+        
+        DialogPane dialogPane = dialog.getDialogPane();
+        dialogPane.getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20, 150, 10, 10));
+        
+        TextField codeField = new TextField(zone.code());
+        TextField nameField = new TextField(zone.name());
+        TextField priorityField = new TextField(zone.priorityRank() != null ? zone.priorityRank().toString() : "100");
+        TextArea descField = new TextArea(zone.description() != null ? zone.description() : "");
+        descField.setPrefRowCount(3);
+        CheckBox activeCheck = new CheckBox("Активна");
+        activeCheck.setSelected(zone.active() != null ? zone.active() : true);
+        
+        grid.add(new Label("Код:"), 0, 0);
+        grid.add(codeField, 1, 0);
+        grid.add(new Label("Название:"), 0, 1);
+        grid.add(nameField, 1, 1);
+        grid.add(new Label("Приоритет:"), 0, 2);
+        grid.add(priorityField, 1, 2);
+        grid.add(new Label("Описание:"), 0, 3);
+        grid.add(descField, 1, 3);
+        grid.add(activeCheck, 1, 4);
+        
+        dialogPane.setContent(grid);
+        
+        dialog.setResultConverter(btn -> {
+            if (btn == ButtonType.OK) {
+                try {
+                    String code = codeField.getText().trim();
+                    String name = nameField.getText().trim();
+                    Integer priority = priorityField.getText().trim().isEmpty() ? 100 : Integer.parseInt(priorityField.getText().trim());
+                    String desc = descField.getText().trim();
+                    Boolean active = activeCheck.isSelected();
+                    
+                    if (code.isEmpty() || name.isEmpty()) {
+                        showError("Заполните обязательные поля");
+                        return null;
+                    }
+                    
+                    com.wmsdipl.desktop.model.Zone updated = apiClient.updateZone(zone.id(), code, name, priority, desc.isEmpty() ? null : desc, active);
+                    showInfo("Зона успешно обновлена");
+                    loadTopology(zonesView, null);
+                    return updated;
+                } catch (Exception ex) {
+                    showError("Ошибка обновления зоны: " + ex.getMessage());
+                    return null;
+                }
+            }
+            return null;
+        });
+        
+        dialog.showAndWait();
+    }
+
+    private void deleteZone(ListView<com.wmsdipl.desktop.model.Zone> zonesView, com.wmsdipl.desktop.model.Zone zone) {
+        if (zone == null) return;
+        
+        if (!showConfirm("Удалить зону '" + zone.code() + "'?", "Это действие нельзя отменить. Зона должна быть пустой (без ячеек).")) {
+            return;
+        }
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                apiClient.deleteZone(zone.id());
+            } catch (Exception ex) {
+                Platform.runLater(() -> showError("Ошибка удаления зоны: " + ex.getMessage()));
+                return;
+            }
+            Platform.runLater(() -> {
+                showInfo("Зона успешно удалена");
+                loadTopology(zonesView, null);
+            });
+        });
+    }
+
+    // ============================================================
+    // LOCATION MANAGEMENT METHODS
+    // ============================================================
+
+    private void openLocationCreationDialog(TableView<Location> locTable, ListView<com.wmsdipl.desktop.model.Zone> zonesView) {
+        Dialog<Location> dialog = new Dialog<>();
+        dialog.setTitle("Создание ячейки");
+        dialog.setHeaderText("Введите данные новой ячейки");
+        
+        DialogPane dialogPane = dialog.getDialogPane();
+        dialogPane.getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20, 150, 10, 10));
+        
+        ComboBox<com.wmsdipl.desktop.model.Zone> zoneCombo = new ComboBox<>(zonesView.getItems());
+        zoneCombo.setPromptText("Выберите зону");
+        zoneCombo.setCellFactory(lv -> new ListCell<>() {
+            @Override
+            protected void updateItem(com.wmsdipl.desktop.model.Zone item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.code() + " - " + item.name());
+            }
+        });
+        zoneCombo.setButtonCell(new ListCell<>() {
+            @Override
+            protected void updateItem(com.wmsdipl.desktop.model.Zone item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.code() + " - " + item.name());
+            }
+        });
+        
+        ComboBox<String> typeCombo = new ComboBox<>();
+        typeCombo.getItems().addAll("RECEIVING", "STORAGE", "SHIPPING", "QUARANTINE");
+        typeCombo.setPromptText("Выберите тип");
+        typeCombo.setValue("STORAGE"); // Default value
+        
+        TextField codeField = new TextField();
+        codeField.setPromptText("Код ячейки (например, A-01-01)");
+        TextField aisleField = new TextField();
+        aisleField.setPromptText("Проход (опционально)");
+        TextField bayField = new TextField();
+        bayField.setPromptText("Стеллаж (опционально)");
+        TextField levelField = new TextField();
+        levelField.setPromptText("Уровень (опционально)");
+        TextField maxPalletsField = new TextField("1");
+        maxPalletsField.setPromptText("Вместительность (паллет)");
+        maxPalletsField.setTextFormatter(new TextFormatter<>(change -> {
+            String newText = change.getControlNewText();
+            if (newText.isEmpty() || newText.matches("\\d+")) {
+                return change;
+            }
+            return null;
+        }));
+        
+        grid.add(new Label("Зона:"), 0, 0);
+        grid.add(zoneCombo, 1, 0);
+        grid.add(new Label("Код:"), 0, 1);
+        grid.add(codeField, 1, 1);
+        grid.add(new Label("Тип:"), 0, 2);
+        grid.add(typeCombo, 1, 2);
+        grid.add(new Label("Вместительность:"), 0, 3);
+        grid.add(maxPalletsField, 1, 3);
+        grid.add(new Label("Проход:"), 0, 4);
+        grid.add(aisleField, 1, 4);
+        grid.add(new Label("Стеллаж:"), 0, 5);
+        grid.add(bayField, 1, 5);
+        grid.add(new Label("Уровень:"), 0, 6);
+        grid.add(levelField, 1, 6);
+        
+        dialogPane.setContent(grid);
+        
+        dialog.setResultConverter(btn -> {
+            if (btn == ButtonType.OK) {
+                try {
+                    com.wmsdipl.desktop.model.Zone zone = zoneCombo.getValue();
+                    String code = codeField.getText().trim();
+                    String locationType = typeCombo.getValue();
+                    String aisle = aisleField.getText().trim();
+                    String bay = bayField.getText().trim();
+                    String level = levelField.getText().trim();
+                    Integer maxPallets = maxPalletsField.getText().trim().isEmpty() ? 1 : Integer.parseInt(maxPalletsField.getText().trim());
+                    
+                    if (zone == null || code.isEmpty()) {
+                        showError("Заполните обязательные поля: зона и код");
+                        return null;
+                    }
+                    
+                    if (maxPallets <= 0) {
+                        showError("Вместительность должна быть больше 0");
+                        return null;
+                    }
+                    
+                    Location created = apiClient.createLocation(
+                        zone.id(),
+                        code,
+                        locationType,
+                        aisle.isEmpty() ? null : aisle,
+                        bay.isEmpty() ? null : bay,
+                        level.isEmpty() ? null : level,
+                        maxPallets
+                    );
+                    showInfo("Ячейка успешно создана: " + created.code());
+                    loadTopology(zonesView, locTable);
+                    return created;
+                } catch (Exception ex) {
+                    showError("Ошибка создания ячейки: " + ex.getMessage());
+                    return null;
+                }
+            }
+            return null;
+        });
+        
+        dialog.showAndWait();
+    }
+
+    private void openLocationEditDialog(TableView<Location> locTable, Location location, ListView<com.wmsdipl.desktop.model.Zone> zonesView) {
+        if (location == null) return;
+        
+        Dialog<Location> dialog = new Dialog<>();
+        dialog.setTitle("Редактирование ячейки");
+        dialog.setHeaderText("Редактировать ячейку: " + location.code());
+        
+        DialogPane dialogPane = dialog.getDialogPane();
+        dialogPane.getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+        
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.setPadding(new Insets(20, 150, 10, 10));
+        
+        ComboBox<com.wmsdipl.desktop.model.Zone> zoneCombo = new ComboBox<>(zonesView.getItems());
+        zoneCombo.setCellFactory(lv -> new ListCell<>() {
+            @Override
+            protected void updateItem(com.wmsdipl.desktop.model.Zone item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.code() + " - " + item.name());
+            }
+        });
+        zoneCombo.setButtonCell(new ListCell<>() {
+            @Override
+            protected void updateItem(com.wmsdipl.desktop.model.Zone item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.code() + " - " + item.name());
+            }
+        });
+        if (location.zoneId() != null) {
+            zoneCombo.setValue(zonesView.getItems().stream()
+                .filter(z -> z.id().equals(location.zoneId()))
+                .findFirst().orElse(null));
+        }
+        
+        ComboBox<String> typeCombo = new ComboBox<>();
+        typeCombo.getItems().addAll("RECEIVING", "STORAGE", "SHIPPING", "QUARANTINE");
+        typeCombo.setValue(location.locationType() != null ? location.locationType() : "STORAGE");
+        
+        TextField codeField = new TextField(location.code());
+        TextField aisleField = new TextField(location.aisle() != null ? location.aisle() : "");
+        TextField bayField = new TextField(location.bay() != null ? location.bay() : "");
+        TextField levelField = new TextField(location.level() != null ? location.level() : "");
+        TextField maxPalletsField = new TextField(location.maxPallets() != null ? location.maxPallets().toString() : "1");
+        maxPalletsField.setPromptText("Вместительность (паллет)");
+        maxPalletsField.setTextFormatter(new TextFormatter<>(change -> {
+            String newText = change.getControlNewText();
+            if (newText.isEmpty() || newText.matches("\\d+")) {
+                return change;
+            }
+            return null;
+        }));
+        CheckBox activeCheck = new CheckBox("Активна");
+        activeCheck.setSelected(location.active() != null ? location.active() : true);
+        
+        grid.add(new Label("Зона:"), 0, 0);
+        grid.add(zoneCombo, 1, 0);
+        grid.add(new Label("Код:"), 0, 1);
+        grid.add(codeField, 1, 1);
+        grid.add(new Label("Тип:"), 0, 2);
+        grid.add(typeCombo, 1, 2);
+        grid.add(new Label("Вместительность:"), 0, 3);
+        grid.add(maxPalletsField, 1, 3);
+        grid.add(new Label("Проход:"), 0, 4);
+        grid.add(aisleField, 1, 4);
+        grid.add(new Label("Стеллаж:"), 0, 5);
+        grid.add(bayField, 1, 5);
+        grid.add(new Label("Уровень:"), 0, 6);
+        grid.add(levelField, 1, 6);
+        grid.add(activeCheck, 1, 7);
+        
+        dialogPane.setContent(grid);
+        
+        dialog.setResultConverter(btn -> {
+            if (btn == ButtonType.OK) {
+                try {
+                    com.wmsdipl.desktop.model.Zone zone = zoneCombo.getValue();
+                    String code = codeField.getText().trim();
+                    String locationType = typeCombo.getValue();
+                    String aisle = aisleField.getText().trim();
+                    String bay = bayField.getText().trim();
+                    String level = levelField.getText().trim();
+                    Integer maxPallets = maxPalletsField.getText().trim().isEmpty() ? 1 : Integer.parseInt(maxPalletsField.getText().trim());
+                    Boolean active = activeCheck.isSelected();
+                    
+                    if (zone == null || code.isEmpty()) {
+                        showError("Заполните обязательные поля");
+                        return null;
+                    }
+                    
+                    if (maxPallets <= 0) {
+                        showError("Вместительность должна быть больше 0");
+                        return null;
+                    }
+                    
+                    Location updated = apiClient.updateLocation(
+                        location.id(),
+                        zone.id(),
+                        code,
+                        locationType,
+                        aisle.isEmpty() ? null : aisle,
+                        bay.isEmpty() ? null : bay,
+                        level.isEmpty() ? null : level,
+                        maxPallets,
+                        null, // Don't update status here
+                        active
+                    );
+                    showInfo("Ячейка успешно обновлена");
+                    loadTopology(zonesView, locTable);
+                    return updated;
+                } catch (Exception ex) {
+                    showError("Ошибка обновления ячейки: " + ex.getMessage());
+                    return null;
+                }
+            }
+            return null;
+        });
+        
+        dialog.showAndWait();
+    }
+
+    private void toggleLocationBlock(TableView<Location> locTable, Location location) {
+        if (location == null) return;
+        
+        boolean isBlocked = "BLOCKED".equals(location.status());
+        String action = isBlocked ? "разблокировать" : "заблокировать";
+        
+        if (!showConfirm(
+            (isBlocked ? "Разблокировать" : "Заблокировать") + " ячейку '" + location.code() + "'?",
+            "Вы действительно хотите " + action + " эту ячейку?")) {
+            return;
+        }
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                if (isBlocked) {
+                    apiClient.unblockLocation(location.id());
+                } else {
+                    apiClient.blockLocation(location.id());
+                }
+            } catch (Exception ex) {
+                Platform.runLater(() -> showError("Ошибка: " + ex.getMessage()));
+                return;
+            }
+            Platform.runLater(() -> {
+                showInfo("Ячейка успешно " + (isBlocked ? "разблокирована" : "заблокирована"));
+                loadTopology(null, locTable);
+            });
+        });
+    }
+
+    private void deleteLocation(TableView<Location> locTable, Location location) {
+        if (location == null) return;
+        
+        if (!showConfirm("Удалить ячейку '" + location.code() + "'?", "Это действие нельзя отменить. Ячейка не должна быть занята.")) {
+            return;
+        }
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                apiClient.deleteLocation(location.id());
+            } catch (Exception ex) {
+                Platform.runLater(() -> showError("Ошибка удаления ячейки: " + ex.getMessage()));
+                return;
+            }
+            Platform.runLater(() -> {
+                showInfo("Ячейка успешно удалена");
+                loadTopology(null, locTable);
+            });
+        });
+    }
+
+    // Simple alert helpers for topology management
+    private void showInfo(String message) {
+        Alert alert = new Alert(AlertType.INFORMATION);
+        alert.setTitle("Информация");
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+        alert.showAndWait();
+    }
+
+    private void showError(String message) {
+        Alert alert = new Alert(AlertType.ERROR);
+        alert.setTitle("Ошибка");
+        alert.setHeaderText(null);
+        alert.setContentText(message);
+        alert.showAndWait();
+    }
+
+    private boolean showConfirm(String title, String message) {
+        Alert alert = new Alert(AlertType.CONFIRMATION);
+        alert.setTitle("Подтверждение");
+        alert.setHeaderText(title);
+        alert.setContentText(message);
+        
+        java.util.Optional<ButtonType> result = alert.showAndWait();
+        return result.isPresent() && result.get() == ButtonType.OK;
+    }
+    
+    private void handleLogout() {
+        if (!showConfirm("Выход", "Вы действительно хотите выйти из системы?")) {
+            return;
+        }
+        
+        apiClient.logout();
+        
+        // Get the current stage
+        Stage currentStage = (Stage) shell.getScene().getWindow();
+        
+        // Show login dialog again
+        if (showLoginDialog()) {
+            // Refresh the navigation after successful re-login
+            shell.setLeft(buildNav());
+            showReceiptsPane();
+        } else {
+            // If login cancelled or failed, close the application
+            Platform.exit();
+        }
     }
 
     private void applyStyles(Scene scene) {

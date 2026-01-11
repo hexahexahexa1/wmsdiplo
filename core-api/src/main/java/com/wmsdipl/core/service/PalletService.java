@@ -1,6 +1,7 @@
 package com.wmsdipl.core.service;
 
 import com.wmsdipl.core.domain.Location;
+import com.wmsdipl.core.domain.MovementType;
 import com.wmsdipl.core.domain.Pallet;
 import com.wmsdipl.core.domain.PalletMovement;
 import com.wmsdipl.core.domain.PalletStatus;
@@ -51,6 +52,21 @@ public class PalletService {
         return palletRepository.save(pallet);
     }
 
+    /**
+     * Creates multiple pallets in a single batch operation.
+     * More efficient than creating pallets one by one.
+     *
+     * @param pallets list of pallets to create
+     * @return list of created pallets with generated IDs
+     */
+    @Transactional
+    public List<Pallet> createBatch(List<Pallet> pallets) {
+        if (pallets == null || pallets.isEmpty()) {
+            return List.of();
+        }
+        return palletRepository.saveAll(pallets);
+    }
+
     @Transactional
     public Pallet move(Long palletId, Long toLocationId, String movementType, String movedBy) {
         Pallet pallet = palletRepository.findById(palletId)
@@ -66,7 +82,12 @@ public class PalletService {
         movement.setPallet(saved);
         movement.setFromLocation(from);
         movement.setToLocation(to);
-        movement.setMovementType(movementType);
+        // Convert String to MovementType enum
+        try {
+            movement.setMovementType(MovementType.valueOf(movementType));
+        } catch (IllegalArgumentException e) {
+            movement.setMovementType(MovementType.MOVE); // Default fallback
+        }
         movement.setMovedBy(movedBy);
         movementRepository.save(movement);
         return saved;

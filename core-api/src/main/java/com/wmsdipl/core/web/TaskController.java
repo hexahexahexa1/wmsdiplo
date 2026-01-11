@@ -1,12 +1,13 @@
 package com.wmsdipl.core.web;
 
+import com.wmsdipl.contracts.dto.DiscrepancyDto;
 import com.wmsdipl.contracts.dto.RecordScanRequest;
 import com.wmsdipl.contracts.dto.ScanDto;
 import com.wmsdipl.contracts.dto.TaskDto;
-import com.wmsdipl.core.domain.Discrepancy;
 import com.wmsdipl.core.domain.Scan;
 import com.wmsdipl.core.domain.Task;
 import com.wmsdipl.core.domain.TaskType;
+import com.wmsdipl.core.mapper.DiscrepancyMapper;
 import com.wmsdipl.core.mapper.ScanMapper;
 import com.wmsdipl.core.mapper.TaskMapper;
 import com.wmsdipl.core.repository.ScanRepository;
@@ -36,6 +37,7 @@ public class TaskController {
     private final ScanRepository scanRepository;
     private final ScanMapper scanMapper;
     private final TaskMapper taskMapper;
+    private final DiscrepancyMapper discrepancyMapper;
 
     public TaskController(
             TaskService taskService, 
@@ -43,7 +45,8 @@ public class TaskController {
             PlacementWorkflowService placementWorkflowService,
             ScanRepository scanRepository,
             ScanMapper scanMapper,
-            TaskMapper taskMapper
+            TaskMapper taskMapper,
+            DiscrepancyMapper discrepancyMapper
     ) {
         this.taskService = taskService;
         this.receivingWorkflowService = receivingWorkflowService;
@@ -51,6 +54,7 @@ public class TaskController {
         this.scanRepository = scanRepository;
         this.scanMapper = scanMapper;
         this.taskMapper = taskMapper;
+        this.discrepancyMapper = discrepancyMapper;
     }
 
     @GetMapping
@@ -177,14 +181,16 @@ public class TaskController {
 
     @GetMapping("/discrepancies/open")
     @Operation(summary = "List open discrepancies", description = "Retrieves all unresolved discrepancies from warehouse tasks")
-    public List<Discrepancy> openDiscrepancies() {
-        return taskService.findOpenDiscrepancies();
+    public List<DiscrepancyDto> openDiscrepancies() {
+        return taskService.findOpenDiscrepancies().stream()
+                .map(discrepancyMapper::toDto)
+                .collect(Collectors.toList());
     }
 
     @PostMapping("/discrepancies/{id}/resolve")
     @Operation(summary = "Resolve discrepancy", description = "Marks a discrepancy as resolved with a comment")
-    public Discrepancy resolve(@PathVariable Long id, @RequestBody ResolveRequest req) {
-        return taskService.resolveDiscrepancy(id, req.comment);
+    public DiscrepancyDto resolve(@PathVariable Long id, @RequestBody ResolveRequest req) {
+        return discrepancyMapper.toDto(taskService.resolveDiscrepancy(id, req.comment));
     }
 
     @GetMapping("/{id}/has-discrepancies")

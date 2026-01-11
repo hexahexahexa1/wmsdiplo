@@ -2,22 +2,29 @@ package com.wmsdipl.core.service;
 
 import com.wmsdipl.contracts.dto.CreateReceiptRequest;
 import com.wmsdipl.contracts.dto.ImportPayload;
+import com.wmsdipl.contracts.dto.ReceiptDiscrepancyDto;
 import com.wmsdipl.contracts.dto.ReceiptDto;
 import com.wmsdipl.contracts.dto.ReceiptLineDto;
+import com.wmsdipl.contracts.dto.ReceiptSummaryDto;
 import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.domain.ReceiptLine;
 import com.wmsdipl.core.domain.ReceiptStatus;
 import com.wmsdipl.core.domain.Sku;
+import com.wmsdipl.core.domain.Pallet;
 import com.wmsdipl.core.mapper.ReceiptMapper;
 import com.wmsdipl.core.repository.ReceiptRepository;
+import com.wmsdipl.core.repository.PalletRepository;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.CONFLICT;
@@ -29,12 +36,14 @@ public class ReceiptService {
     private final ReceiptRepository receiptRepository;
     private final ReceiptMapper receiptMapper;
     private final SkuService skuService;
+    private final PalletRepository palletRepository;
 
     public ReceiptService(ReceiptRepository receiptRepository, ReceiptMapper receiptMapper, 
-                         SkuService skuService) {
+                         SkuService skuService, PalletRepository palletRepository) {
         this.receiptRepository = receiptRepository;
         this.receiptMapper = receiptMapper;
         this.skuService = skuService;
+        this.palletRepository = palletRepository;
     }
 
     @Transactional(readOnly = true)
@@ -145,6 +154,128 @@ public class ReceiptService {
 
     private BigDecimal defaultZero(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
+    }
+
+    @Transactional(readOnly = true)
+    public ReceiptSummaryDto getSummary(Long id) {
+        Receipt receipt = receiptRepository.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Receipt not found"));
+        
+        List<Pallet> pallets = palletRepository.findByReceipt(receipt);
+        
+        // Group pallets by receipt line
+        Map<Long, List<Pallet>> palletsByLine = pallets.stream()
+            .filter(p -> p.getReceiptLine() != null)
+            .collect(Collectors.groupingBy(p -> p.getReceiptLine().getId()));
+        
+        BigDecimal totalQtyExpected = BigDecimal.ZERO;
+        BigDecimal totalQtyReceived = BigDecimal.ZERO;
+        boolean hasDiscrepancies = false;
+        
+        List<ReceiptSummaryDto.LineSummary> linesSummary = new ArrayList<>();
+        
+        for (ReceiptLine line : receipt.getLines()) {
+            BigDecimal qtyExpected = defaultZero(line.getQtyExpected());
+            
+            List<Pallet> linePallets = palletsByLine.getOrDefault(line.getId(), List.of());
+            BigDecimal qtyReceived = linePallets.stream()
+                .map(Pallet::getQuantity)
+                .map(this::defaultZero)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+            
+            boolean hasDiscrepancy = qtyExpected.compareTo(qtyReceived) != 0;
+            if (hasDiscrepancy) {
+                hasDiscrepancies = true;
+            }
+            
+            totalQtyExpected = totalQtyExpected.add(qtyExpected);
+            totalQtyReceived = totalQtyReceived.add(qtyReceived);
+            
+            linesSummary.add(new ReceiptSummaryDto.LineSummary(
+                line.getId(),
+                line.getLineNo(),
+                line.getSkuId(),
+                line.getUom(),
+                qtyExpected,
+                qtyReceived,
+                linePallets.size(),
+                hasDiscrepancy
+            ));
+        }
+        
+        return new ReceiptSummaryDto(
+            receipt.getId(),
+            receipt.getDocNo(),
+            receipt.getSupplier(),
+            receipt.getStatus().name(),
+            receipt.getLines().size(),
+            pallets.size(),
+            totalQtyExpected,
+            totalQtyReceived,
+            hasDiscrepancies,
+            linesSummary
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public ReceiptDiscrepancyDto getDiscrepancies(Long id) {
+        Receipt receipt = receiptRepository.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Receipt not found"));
+        
+        List<Pallet> pallets = palletRepository.findByReceipt(receipt);
+        
+        Map<Long, List<Pallet>> palletsByLine = pallets.stream()
+            .filter(p -> p.getReceiptLine() != null)
+            .collect(Collectors.groupingBy(p -> p.getReceiptLine().getId()));
+        
+        boolean hasDiscrepancies = false;
+        List<ReceiptDiscrepancyDto.LineDiscrepancy> lineDiscrepancies = new ArrayList<>();
+        
+        for (ReceiptLine line : receipt.getLines()) {
+            BigDecimal qtyExpected = defaultZero(line.getQtyExpected());
+            
+            List<Pallet> linePallets = palletsByLine.getOrDefault(line.getId(), List.of());
+            BigDecimal qtyReceived = linePallets.stream()
+                .map(Pallet::getQuantity)
+                .map(this::defaultZero)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+            
+            BigDecimal difference = qtyReceived.subtract(qtyExpected);
+            String discrepancyType;
+            String severity;
+            
+            if (difference.compareTo(BigDecimal.ZERO) > 0) {
+                discrepancyType = "OVER";
+                severity = "WARNING";
+                hasDiscrepancies = true;
+            } else if (difference.compareTo(BigDecimal.ZERO) < 0) {
+                discrepancyType = "UNDER";
+                severity = "CRITICAL";
+                hasDiscrepancies = true;
+            } else {
+                discrepancyType = "MATCH";
+                severity = "INFO";
+            }
+            
+            lineDiscrepancies.add(new ReceiptDiscrepancyDto.LineDiscrepancy(
+                line.getId(),
+                line.getLineNo(),
+                line.getSkuId(),
+                line.getUom(),
+                qtyExpected,
+                qtyReceived,
+                difference,
+                discrepancyType,
+                severity
+            ));
+        }
+        
+        return new ReceiptDiscrepancyDto(
+            receipt.getId(),
+            receipt.getDocNo(),
+            hasDiscrepancies,
+            lineDiscrepancies
+        );
     }
 }
 

@@ -10,6 +10,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Optional;
@@ -79,7 +80,7 @@ class UserServiceTest {
         when(userRepository.findById(999L)).thenReturn(Optional.empty());
 
         // When & Then
-        assertThrows(IllegalArgumentException.class, () -> userService.findById(999L));
+        assertThrows(ResponseStatusException.class, () -> userService.findById(999L));
         verify(userRepository, times(1)).findById(999L);
     }
 
@@ -106,7 +107,7 @@ class UserServiceTest {
         testUser.setUsername("");
 
         // When & Then
-        assertThrows(IllegalArgumentException.class, () -> userService.create(testUser));
+        assertThrows(ResponseStatusException.class, () -> userService.create(testUser));
         verify(userRepository, never()).save(any(User.class));
     }
 
@@ -116,7 +117,7 @@ class UserServiceTest {
         testUser.setPasswordHash("");
 
         // When & Then
-        assertThrows(IllegalArgumentException.class, () -> userService.create(testUser));
+        assertThrows(ResponseStatusException.class, () -> userService.create(testUser));
         verify(userRepository, never()).save(any(User.class));
     }
 

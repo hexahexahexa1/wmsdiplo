@@ -18,6 +18,11 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+import lombok.Getter;
+import lombok.Setter;
+
+@Getter
+@Setter
 @Entity
 @Table(name = "locations")
 public class Location {
@@ -71,6 +76,10 @@ public class Location {
     @Column(name = "status", nullable = false, length = 32)
     private LocationStatus status = LocationStatus.AVAILABLE;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "location_type", length = 32)
+    private LocationType locationType = LocationType.STORAGE;
+
     @Column(name = "is_active")
     private Boolean active = true;
 
@@ -98,137 +107,5 @@ public class Location {
     @PreUpdate
     void onUpdate() {
         this.updatedAt = LocalDateTime.now();
-    }
-
-    public Long getId() {
-        return id;
-    }
-
-    public Zone getZone() {
-        return zone;
-    }
-
-    public void setZone(Zone zone) {
-        this.zone = zone;
-    }
-
-    public String getCode() {
-        return code;
-    }
-
-    public void setCode(String code) {
-        this.code = code;
-    }
-
-    public String getAisle() {
-        return aisle;
-    }
-
-    public void setAisle(String aisle) {
-        this.aisle = aisle;
-    }
-
-    public String getBay() {
-        return bay;
-    }
-
-    public void setBay(String bay) {
-        this.bay = bay;
-    }
-
-    public String getLevel() {
-        return level;
-    }
-
-    public void setLevel(String level) {
-        this.level = level;
-    }
-
-    public BigDecimal getXCoord() {
-        return xCoord;
-    }
-
-    public void setXCoord(BigDecimal xCoord) {
-        this.xCoord = xCoord;
-    }
-
-    public BigDecimal getYCoord() {
-        return yCoord;
-    }
-
-    public void setYCoord(BigDecimal yCoord) {
-        this.yCoord = yCoord;
-    }
-
-    public BigDecimal getZCoord() {
-        return zCoord;
-    }
-
-    public void setZCoord(BigDecimal zCoord) {
-        this.zCoord = zCoord;
-    }
-
-    public BigDecimal getMaxWeightKg() {
-        return maxWeightKg;
-    }
-
-    public void setMaxWeightKg(BigDecimal maxWeightKg) {
-        this.maxWeightKg = maxWeightKg;
-    }
-
-    public BigDecimal getMaxHeightCm() {
-        return maxHeightCm;
-    }
-
-    public void setMaxHeightCm(BigDecimal maxHeightCm) {
-        this.maxHeightCm = maxHeightCm;
-    }
-
-    public BigDecimal getMaxWidthCm() {
-        return maxWidthCm;
-    }
-
-    public void setMaxWidthCm(BigDecimal maxWidthCm) {
-        this.maxWidthCm = maxWidthCm;
-    }
-
-    public BigDecimal getMaxDepthCm() {
-        return maxDepthCm;
-    }
-
-    public void setMaxDepthCm(BigDecimal maxDepthCm) {
-        this.maxDepthCm = maxDepthCm;
-    }
-
-    public Integer getMaxPallets() {
-        return maxPallets;
-    }
-
-    public void setMaxPallets(Integer maxPallets) {
-        this.maxPallets = maxPallets;
-    }
-
-    public LocationStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(LocationStatus status) {
-        this.status = status;
-    }
-
-    public Boolean getActive() {
-        return active;
-    }
-
-    public void setActive(Boolean active) {
-        this.active = active;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
     }
 }

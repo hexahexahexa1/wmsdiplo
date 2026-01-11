@@ -12,7 +12,10 @@ import com.wmsdipl.desktop.model.Receipt;
 import com.wmsdipl.desktop.model.ReceiptLine;
 import com.wmsdipl.desktop.model.Scan;
 import com.wmsdipl.desktop.model.Sku;
+import com.wmsdipl.desktop.model.StockItem;
+import com.wmsdipl.desktop.model.StockMovement;
 import com.wmsdipl.desktop.model.Task;
+import com.wmsdipl.desktop.model.User;
 import com.wmsdipl.desktop.model.Zone;
 
 import java.io.IOException;
@@ -68,6 +71,11 @@ public class ApiClient {
     public String getCurrentUsername() {
         return currentUsername;
     }
+    
+    public void logout() {
+        this.basicAuth = null;
+        this.currentUsername = null;
+    }
 
     private void setCredentials(String username, String password) {
         String token = username + ":" + password;
@@ -85,7 +93,7 @@ public class ApiClient {
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             return mapper.readValue(response.body(), new TypeReference<>() {});
         }
-        throw new IOException("Unexpected status: " + response.statusCode() + " body=" + response.body());
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/receipts", response.body()));
     }
 
     public Receipt createDraft(String docNo, String supplier) throws IOException, InterruptedException {
@@ -97,8 +105,8 @@ public class ApiClient {
         var lines = mapper.createArrayNode();
         var line = mapper.createObjectNode();
         line.put("lineNo", 1);
-        line.put("uom", "PCS");
-        line.put("qtyExpected", 0);
+        line.put("skuCode", "DEFAULT");
+        line.put("qtyOrdered", 1);
         lines.add(line);
         payload.set("lines", lines);
 
@@ -107,12 +115,11 @@ public class ApiClient {
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload)))
             .build();
-
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             return mapper.readValue(response.body(), Receipt.class);
         }
-        throw new IOException("Create failed: status=" + response.statusCode() + " body=" + response.body());
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/receipts", response.body()));
     }
 
     public void confirm(long id) throws IOException, InterruptedException {
@@ -150,7 +157,7 @@ public class ApiClient {
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             return mapper.readValue(response.body(), new TypeReference<>() {});
         }
-        throw new IOException("Lines failed: status=" + response.statusCode() + " body=" + response.body());
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/receipts/" + receiptId + "/lines", response.body()));
     }
 
     public List<Zone> listZones() throws IOException, InterruptedException {
@@ -225,7 +232,7 @@ public class ApiClient {
         return postForObject("/api/tasks/" + taskId + "/release", null, Task.class);
     }
 
-    public Scan recordScan(Long taskId, String palletCode, String barcode, Integer qty, String comment) throws IOException, InterruptedException {
+    public Scan recordScan(Long taskId, String palletCode, String barcode, Integer qty, String comment, String locationCode) throws IOException, InterruptedException {
         var payload = mapper.createObjectNode();
         payload.put("palletCode", palletCode);
         payload.put("qty", qty);
@@ -234,6 +241,9 @@ public class ApiClient {
         }
         if (comment != null && !comment.isBlank()) {
             payload.put("comment", comment);
+        }
+        if (locationCode != null && !locationCode.isBlank()) {
+            payload.put("locationCode", locationCode);
         }
         return postForObject("/api/tasks/" + taskId + "/scans", payload, Scan.class);
     }
@@ -274,6 +284,138 @@ public class ApiClient {
         return getForList("/api/tasks", new TypeReference<>() {});
     }
 
+    // Zone CRUD operations
+    public Zone createZone(String code, String name, Integer priorityRank, String description) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        payload.put("code", code);
+        payload.put("name", name);
+        if (priorityRank != null) {
+            payload.put("priorityRank", priorityRank);
+        }
+        if (description != null && !description.isBlank()) {
+            payload.put("description", description);
+        }
+        return postForObject("/api/zones", payload, Zone.class);
+    }
+
+    public Zone updateZone(Long id, String code, String name, Integer priorityRank, String description, Boolean active) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        if (code != null) payload.put("code", code);
+        if (name != null) payload.put("name", name);
+        if (priorityRank != null) payload.put("priorityRank", priorityRank);
+        if (description != null) payload.put("description", description);
+        if (active != null) payload.put("active", active);
+        
+        return putForObject("/api/zones/" + id, payload, Zone.class);
+    }
+
+    public void deleteZone(Long id) throws IOException, InterruptedException {
+        deleteResource("/api/zones/" + id);
+    }
+
+    // Location CRUD operations
+    public Location createLocation(Long zoneId, String code, String locationType, String aisle, String bay, String level, Integer maxPallets) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        payload.put("zoneId", zoneId);
+        payload.put("code", code);
+        if (locationType != null && !locationType.isBlank()) payload.put("locationType", locationType);
+        if (aisle != null && !aisle.isBlank()) payload.put("aisle", aisle);
+        if (bay != null && !bay.isBlank()) payload.put("bay", bay);
+        if (level != null && !level.isBlank()) payload.put("level", level);
+        if (maxPallets != null) payload.put("maxPallets", maxPallets);
+        
+        return postForObject("/api/locations", payload, Location.class);
+    }
+
+    public Location updateLocation(Long id, Long zoneId, String code, String locationType, String aisle, String bay, String level, Integer maxPallets, String status, Boolean active) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        if (zoneId != null) payload.put("zoneId", zoneId);
+        if (code != null) payload.put("code", code);
+        if (locationType != null) payload.put("locationType", locationType);
+        if (aisle != null) payload.put("aisle", aisle);
+        if (bay != null) payload.put("bay", bay);
+        if (level != null) payload.put("level", level);
+        if (maxPallets != null) payload.put("maxPallets", maxPallets);
+        if (status != null) payload.put("status", status);
+        if (active != null) payload.put("active", active);
+        
+        return putForObject("/api/locations/" + id, payload, Location.class);
+    }
+
+    public void deleteLocation(Long id) throws IOException, InterruptedException {
+        deleteResource("/api/locations/" + id);
+    }
+
+    public Location blockLocation(Long id) throws IOException, InterruptedException {
+        return postForObject("/api/locations/" + id + "/block", null, Location.class);
+    }
+
+    public Location unblockLocation(Long id) throws IOException, InterruptedException {
+        return postForObject("/api/locations/" + id + "/unblock", null, Location.class);
+    }
+
+    // User CRUD operations
+    public List<User> listUsers() throws IOException, InterruptedException {
+        return getForList("/api/users", new TypeReference<>() {});
+    }
+
+    public User getUser(Long id) throws IOException, InterruptedException {
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/users/" + id))
+            .GET()
+            .header("Accept", "application/json")
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), User.class);
+        }
+        throw new IOException("Get user failed: status=" + response.statusCode() + " body=" + response.body());
+    }
+
+    public User createUser(String username, String password, String fullName, String email, String role, Boolean active) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        payload.put("username", username);
+        payload.put("password", password);
+        if (fullName != null && !fullName.isBlank()) payload.put("fullName", fullName);
+        if (email != null && !email.isBlank()) payload.put("email", email);
+        payload.put("role", role);
+        if (active != null) payload.put("active", active);
+        
+        return postForObject("/api/users", payload, User.class);
+    }
+
+    public User updateUser(Long id, String fullName, String email, String role, Boolean active) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        if (fullName != null) payload.put("fullName", fullName);
+        if (email != null) payload.put("email", email);
+        if (role != null) payload.put("role", role);
+        if (active != null) payload.put("active", active);
+        
+        return putForObject("/api/users/" + id, payload, User.class);
+    }
+
+    public void changePassword(Long id, String newPassword) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        payload.put("password", newPassword);
+        
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/users/" + id + "/password"))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload)))
+            .build();
+        
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return;
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/users/" + id + "/password", response.body()));
+    }
+
+    public void deleteUser(Long id) throws IOException, InterruptedException {
+        deleteResource("/api/users/" + id);
+    }
+
     private void postNoBody(String path) throws IOException, InterruptedException {
         HttpRequest request = withAuth(HttpRequest.newBuilder())
             .uri(URI.create(baseUrl + path))
@@ -284,7 +426,7 @@ public class ApiClient {
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             return;
         }
-        throw new IOException("Request failed: status=" + response.statusCode() + " body=" + response.body());
+        throw new IOException(formatErrorMessage(response.statusCode(), path, response.body()));
     }
 
     private <T> T postForObject(String path, Object payload, Class<T> responseType) throws IOException, InterruptedException {
@@ -304,7 +446,8 @@ public class ApiClient {
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             return mapper.readValue(response.body(), responseType);
         }
-        throw new IOException("Request failed: status=" + response.statusCode() + " body=" + response.body());
+        
+        throw new IOException(formatErrorMessage(response.statusCode(), path, response.body()));
     }
 
     private <T> List<T> getForList(String path, TypeReference<List<T>> type) throws IOException, InterruptedException {
@@ -318,7 +461,208 @@ public class ApiClient {
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             return mapper.readValue(response.body(), type);
         }
-        throw new IOException("Unexpected status: " + response.statusCode() + " body=" + response.body());
+        throw new IOException(formatErrorMessage(response.statusCode(), path, response.body()));
+    }
+
+    private <T> T putForObject(String path, Object payload, Class<T> responseType) throws IOException, InterruptedException {
+        HttpRequest.Builder builder = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + path))
+            .header("Content-Type", "application/json");
+        
+        if (payload == null) {
+            builder.PUT(HttpRequest.BodyPublishers.noBody());
+        } else {
+            builder.PUT(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload)));
+        }
+        
+        HttpRequest request = builder.build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), responseType);
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), path, response.body()));
+    }
+
+    private void deleteResource(String path) throws IOException, InterruptedException {
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + path))
+            .DELETE()
+            .build();
+        
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return;
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), path, response.body()));
+    }
+    
+    private String formatErrorMessage(int statusCode, String path, String body) {
+        String resourceName = extractResourceName(path);
+        
+        switch (statusCode) {
+            case 403:
+                return "Доступ запрещен: у текущего пользователя недостаточно прав для выполнения операции '" 
+                    + resourceName + "'. Требуется роль ADMIN.";
+            case 404:
+                return "Ресурс не найден: " + resourceName;
+            case 400:
+                return "Неверный запрос: " + extractErrorFromBody(body);
+            case 401:
+                return "Требуется авторизация. Пожалуйста, войдите в систему заново.";
+            case 409:
+                // Conflict - try to extract message from body, often contains business logic errors
+                String conflictMessage = extractErrorFromBody(body);
+                return conflictMessage.isEmpty() ? "Конфликт данных при выполнении операции" : conflictMessage;
+            case 500:
+                return "Внутренняя ошибка сервера при выполнении операции '" + resourceName + "'";
+            default:
+                return "Ошибка " + statusCode + ": " + resourceName + " - " + body;
+        }
+    }
+    
+    private String extractResourceName(String path) {
+        // Extract user-friendly resource name from path
+        if (path.contains("/users")) return "управление пользователями";
+        if (path.contains("/locations")) return "управление ячейками";
+        if (path.contains("/zones")) return "управление зонами";
+        if (path.contains("/receipts")) return "управление приемками";
+        if (path.contains("/tasks")) return "управление задачами";
+        if (path.contains("/pallets")) return "управление паллетами";
+        if (path.contains("/skus")) return "управление номенклатурой";
+        return path;
+    }
+    
+    private String extractErrorFromBody(String body) {
+        try {
+            // Try to extract error message from JSON body
+            var jsonNode = mapper.readTree(body);
+            // Spring Boot ResponseStatusException can use "message", "error", or "reason"
+            if (jsonNode.has("message")) {
+                return jsonNode.get("message").asText();
+            }
+            if (jsonNode.has("reason")) {
+                return jsonNode.get("reason").asText();
+            }
+            if (jsonNode.has("error")) {
+                return jsonNode.get("error").asText();
+            }
+        } catch (Exception e) {
+            // If parsing fails, return raw body
+        }
+        return body;
+    }
+
+    // Stock Inventory API methods
+    
+    /**
+     * Get paginated stock inventory with optional filters.
+     * 
+     * @param skuCode SKU code filter (optional)
+     * @param locationCode Location code filter (optional)
+     * @param palletBarcode Pallet barcode filter (partial match, optional)
+     * @param receiptId Receipt ID filter (optional)
+     * @param status Pallet status filter (optional)
+     * @param page Page number (0-based)
+     * @param size Page size
+     * @return Paginated stock items
+     */
+    public StockPage listStock(String skuCode, String locationCode, String palletBarcode, 
+                               Long receiptId, String status, int page, int size) 
+            throws IOException, InterruptedException {
+        StringBuilder url = new StringBuilder(baseUrl + "/api/stock?page=" + page + "&size=" + size);
+        
+        if (skuCode != null && !skuCode.isBlank()) {
+            url.append("&skuCode=").append(skuCode);
+        }
+        if (locationCode != null && !locationCode.isBlank()) {
+            url.append("&locationCode=").append(locationCode);
+        }
+        if (palletBarcode != null && !palletBarcode.isBlank()) {
+            url.append("&palletBarcode=").append(palletBarcode);
+        }
+        if (receiptId != null) {
+            url.append("&receiptId=").append(receiptId);
+        }
+        if (status != null && !status.isBlank()) {
+            url.append("&status=").append(status);
+        }
+        
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(url.toString()))
+            .GET()
+            .header("Accept", "application/json")
+            .build();
+        
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), StockPage.class);
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/stock", response.body()));
+    }
+    
+    /**
+     * Get single pallet stock details.
+     */
+    public StockItem getStockItem(Long palletId) throws IOException, InterruptedException {
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/stock/pallet/" + palletId))
+            .GET()
+            .header("Accept", "application/json")
+            .build();
+        
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), StockItem.class);
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/stock/pallet/" + palletId, response.body()));
+    }
+    
+    /**
+     * Get movement history for a specific pallet.
+     */
+    public List<StockMovement> getPalletHistory(Long palletId) throws IOException, InterruptedException {
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/stock/pallet/" + palletId + "/history"))
+            .GET()
+            .header("Accept", "application/json")
+            .build();
+        
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), new TypeReference<>() {});
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/stock/pallet/" + palletId + "/history", response.body()));
+    }
+    
+    /**
+     * Get stock items by location.
+     */
+    public StockPage getStockByLocation(Long locationId, int page, int size) throws IOException, InterruptedException {
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/stock/location/" + locationId + "?page=" + page + "&size=" + size))
+            .GET()
+            .header("Accept", "application/json")
+            .build();
+        
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), StockPage.class);
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/stock/location/" + locationId, response.body()));
+    }
+    
+    /**
+     * Stock page wrapper for pagination support.
+     */
+    public static class StockPage {
+        public List<StockItem> content;
+        public int totalPages;
+        public long totalElements;
+        public int number;
+        public int size;
+        
+        public StockPage() {}
     }
 
     private HttpRequest.Builder withAuth(HttpRequest.Builder builder) {

@@ -13,6 +13,8 @@ import jakarta.persistence.OneToMany;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -21,6 +23,8 @@ import java.util.List;
 
 @Entity
 @Table(name = "receipts")
+@Getter
+@Setter
 public class Receipt {
 
     @Id
@@ -73,69 +77,5 @@ public class Receipt {
         line.setReceipt(this);
         this.lines.add(line);
     }
-
-    // Getters and setters
-    public Long getId() {
-        return id;
-    }
-
-    public String getExternalKey() {
-        return externalKey;
-    }
-
-    public void setExternalKey(String externalKey) {
-        this.externalKey = externalKey;
-    }
-
-    public String getDocNo() {
-        return docNo;
-    }
-
-    public void setDocNo(String docNo) {
-        this.docNo = docNo;
-    }
-
-    public LocalDate getDocDate() {
-        return docDate;
-    }
-
-    public void setDocDate(LocalDate docDate) {
-        this.docDate = docDate;
-    }
-
-    public String getSupplier() {
-        return supplier;
-    }
-
-    public void setSupplier(String supplier) {
-        this.supplier = supplier;
-    }
-
-    public ReceiptStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(ReceiptStatus status) {
-        this.status = status;
-    }
-
-    public String getMessageId() {
-        return messageId;
-    }
-
-    public void setMessageId(String messageId) {
-        this.messageId = messageId;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public List<ReceiptLine> getLines() {
-        return lines;
-    }
 }
+

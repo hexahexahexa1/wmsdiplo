@@ -18,6 +18,11 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
+import lombok.Getter;
+import lombok.Setter;
+
+@Getter
+@Setter
 @Entity
 @Table(name = "pallets")
 public class Pallet {
@@ -87,121 +92,5 @@ public class Pallet {
     @PreUpdate
     void onUpdate() {
         this.updatedAt = LocalDateTime.now();
-    }
-
-    public Long getId() {
-        return id;
-    }
-
-    public String getCode() {
-        return code;
-    }
-
-    public void setCode(String code) {
-        this.code = code;
-    }
-
-    public String getCodeType() {
-        return codeType;
-    }
-
-    public void setCodeType(String codeType) {
-        this.codeType = codeType;
-    }
-
-    public PalletStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(PalletStatus status) {
-        this.status = status;
-    }
-
-    public Location getLocation() {
-        return location;
-    }
-
-    public void setLocation(Location location) {
-        this.location = location;
-    }
-
-    public Long getSkuId() {
-        return skuId;
-    }
-
-    public void setSkuId(Long skuId) {
-        this.skuId = skuId;
-    }
-
-    public String getLotNumber() {
-        return lotNumber;
-    }
-
-    public void setLotNumber(String lotNumber) {
-        this.lotNumber = lotNumber;
-    }
-
-    public LocalDate getExpiryDate() {
-        return expiryDate;
-    }
-
-    public void setExpiryDate(LocalDate expiryDate) {
-        this.expiryDate = expiryDate;
-    }
-
-    public BigDecimal getQuantity() {
-        return quantity;
-    }
-
-    public void setQuantity(BigDecimal quantity) {
-        this.quantity = quantity;
-    }
-
-    public String getUom() {
-        return uom;
-    }
-
-    public void setUom(String uom) {
-        this.uom = uom;
-    }
-
-    public Receipt getReceipt() {
-        return receipt;
-    }
-
-    public void setReceipt(Receipt receipt) {
-        this.receipt = receipt;
-    }
-
-    public ReceiptLine getReceiptLine() {
-        return receiptLine;
-    }
-
-    public void setReceiptLine(ReceiptLine receiptLine) {
-        this.receiptLine = receiptLine;
-    }
-
-    public BigDecimal getWeightKg() {
-        return weightKg;
-    }
-
-    public void setWeightKg(BigDecimal weightKg) {
-        this.weightKg = weightKg;
-    }
-
-    public BigDecimal getHeightCm() {
-        return heightCm;
-    }
-
-    public void setHeightCm(BigDecimal heightCm) {
-        this.heightCm = heightCm;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
     }
 }

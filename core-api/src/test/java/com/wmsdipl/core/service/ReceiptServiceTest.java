@@ -2,13 +2,17 @@ package com.wmsdipl.core.service;
 
 import com.wmsdipl.contracts.dto.CreateReceiptRequest;
 import com.wmsdipl.contracts.dto.ImportPayload;
+import com.wmsdipl.contracts.dto.ReceiptDiscrepancyDto;
 import com.wmsdipl.contracts.dto.ReceiptDto;
 import com.wmsdipl.contracts.dto.ReceiptLineDto;
+import com.wmsdipl.contracts.dto.ReceiptSummaryDto;
 import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.domain.ReceiptLine;
 import com.wmsdipl.core.domain.ReceiptStatus;
+import com.wmsdipl.core.domain.Pallet;
 import com.wmsdipl.core.mapper.ReceiptMapper;
 import com.wmsdipl.core.repository.ReceiptRepository;
+import com.wmsdipl.core.repository.PalletRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,6 +41,12 @@ class ReceiptServiceTest {
 
     @Mock
     private ReceiptMapper receiptMapper;
+
+    @Mock
+    private SkuService skuService;
+
+    @Mock
+    private PalletRepository palletRepository;
 
     @InjectMocks
     private ReceiptService receiptService;
@@ -202,7 +212,12 @@ class ReceiptServiceTest {
             List.of(importLine)
         );
 
+        com.wmsdipl.core.domain.Sku mockSku = new com.wmsdipl.core.domain.Sku();
+        mockSku.setId(1L);
+        mockSku.setCode("SKU001");
+
         when(receiptRepository.findByMessageId("MSG001")).thenReturn(Optional.empty());
+        when(skuService.findOrCreate("SKU001", "Product Name", "PCS")).thenReturn(mockSku);
         when(receiptRepository.save(any(Receipt.class))).thenReturn(testReceipt);
         when(receiptMapper.toDto(any(Receipt.class))).thenReturn(testReceiptDto);
 
@@ -302,5 +317,255 @@ class ReceiptServiceTest {
 
         // When & Then
         assertThrows(ResponseStatusException.class, () -> receiptService.accept(1L));
+    }
+
+    @Test
+    void shouldGetSummary_WhenReceiptHasLinesAndPallets() throws Exception {
+        // Given
+        Receipt receipt = createReceiptWithLines();
+        List<Pallet> pallets = createPalletsForReceipt(receipt);
+        
+        when(receiptRepository.findById(1L)).thenReturn(Optional.of(receipt));
+        when(palletRepository.findByReceipt(receipt)).thenReturn(pallets);
+        
+        // When
+        ReceiptSummaryDto summary = receiptService.getSummary(1L);
+        
+        // Then
+        assertNotNull(summary);
+        assertEquals(1L, summary.receiptId());
+        assertEquals(2, summary.totalLines());
+        assertEquals(3, summary.totalPallets());
+        assertEquals(0, BigDecimal.valueOf(100).compareTo(summary.totalQtyExpected()));
+        assertEquals(0, BigDecimal.valueOf(95).compareTo(summary.totalQtyReceived()));
+        assertTrue(summary.hasDiscrepancies());
+        assertEquals(2, summary.linesSummary().size());
+        
+        verify(receiptRepository).findById(1L);
+        verify(palletRepository).findByReceipt(receipt);
+    }
+
+    @Test
+    void shouldGetSummary_WhenNoDiscrepancies() throws Exception {
+        // Given
+        Receipt receipt = createReceiptWithLines();
+        List<Pallet> pallets = createMatchingPalletsForReceipt(receipt);
+        
+        when(receiptRepository.findById(1L)).thenReturn(Optional.of(receipt));
+        when(palletRepository.findByReceipt(receipt)).thenReturn(pallets);
+        
+        // When
+        ReceiptSummaryDto summary = receiptService.getSummary(1L);
+        
+        // Then
+        assertNotNull(summary);
+        assertFalse(summary.hasDiscrepancies());
+        assertEquals(0, BigDecimal.valueOf(100).compareTo(summary.totalQtyExpected()));
+        assertEquals(0, BigDecimal.valueOf(100).compareTo(summary.totalQtyReceived()));
+        
+        summary.linesSummary().forEach(line -> 
+            assertFalse(line.hasDiscrepancy(), "Line " + line.lineNo() + " should not have discrepancy")
+        );
+    }
+
+    @Test
+    void shouldGetDiscrepancies_WhenReceiptHasMismatchedQuantities() throws Exception {
+        // Given
+        Receipt receipt = createReceiptWithLines();
+        List<Pallet> pallets = createPalletsForReceipt(receipt);
+        
+        when(receiptRepository.findById(1L)).thenReturn(Optional.of(receipt));
+        when(palletRepository.findByReceipt(receipt)).thenReturn(pallets);
+        
+        // When
+        ReceiptDiscrepancyDto discrepancies = receiptService.getDiscrepancies(1L);
+        
+        // Then
+        assertNotNull(discrepancies);
+        assertEquals(1L, discrepancies.receiptId());
+        assertTrue(discrepancies.hasDiscrepancies());
+        assertEquals(2, discrepancies.lineDiscrepancies().size());
+        
+        // Check first line (matches)
+        ReceiptDiscrepancyDto.LineDiscrepancy line1 = discrepancies.lineDiscrepancies().get(0);
+        assertEquals("MATCH", line1.discrepancyType());
+        assertEquals("INFO", line1.severity());
+        assertEquals(0, BigDecimal.ZERO.compareTo(line1.difference()));
+        
+        // Check second line (under)
+        ReceiptDiscrepancyDto.LineDiscrepancy line2 = discrepancies.lineDiscrepancies().get(1);
+        assertEquals("UNDER", line2.discrepancyType());
+        assertEquals("CRITICAL", line2.severity());
+        assertEquals(0, BigDecimal.valueOf(-5).compareTo(line2.difference()));
+        
+        verify(receiptRepository).findById(1L);
+        verify(palletRepository).findByReceipt(receipt);
+    }
+
+    @Test
+    void shouldGetDiscrepancies_WhenOverReceived() throws Exception {
+        // Given
+        Receipt receipt = createReceiptWithLines();
+        List<Pallet> pallets = createOverReceivedPalletsForReceipt(receipt);
+        
+        when(receiptRepository.findById(1L)).thenReturn(Optional.of(receipt));
+        when(palletRepository.findByReceipt(receipt)).thenReturn(pallets);
+        
+        // When
+        ReceiptDiscrepancyDto discrepancies = receiptService.getDiscrepancies(1L);
+        
+        // Then
+        assertNotNull(discrepancies);
+        assertTrue(discrepancies.hasDiscrepancies());
+        
+        // Find the over-received line
+        ReceiptDiscrepancyDto.LineDiscrepancy overLine = discrepancies.lineDiscrepancies().stream()
+            .filter(line -> "OVER".equals(line.discrepancyType()))
+            .findFirst()
+            .orElseThrow();
+        
+        assertEquals("OVER", overLine.discrepancyType());
+        assertEquals("WARNING", overLine.severity());
+        assertTrue(overLine.difference().compareTo(BigDecimal.ZERO) > 0);
+    }
+
+    @Test
+    void shouldThrowException_WhenReceiptNotFoundForSummary() {
+        // Given
+        when(receiptRepository.findById(999L)).thenReturn(Optional.empty());
+        
+        // When & Then
+        assertThrows(ResponseStatusException.class, () -> receiptService.getSummary(999L));
+        verify(receiptRepository).findById(999L);
+    }
+
+    @Test
+    void shouldThrowException_WhenReceiptNotFoundForDiscrepancies() {
+        // Given
+        when(receiptRepository.findById(999L)).thenReturn(Optional.empty());
+        
+        // When & Then
+        assertThrows(ResponseStatusException.class, () -> receiptService.getDiscrepancies(999L));
+        verify(receiptRepository).findById(999L);
+    }
+
+    @Test
+    void shouldHandleEmptyPalletList_WhenGettingSummary() throws Exception {
+        // Given
+        Receipt receipt = createReceiptWithLines();
+        
+        when(receiptRepository.findById(1L)).thenReturn(Optional.of(receipt));
+        when(palletRepository.findByReceipt(receipt)).thenReturn(List.of());
+        
+        // When
+        ReceiptSummaryDto summary = receiptService.getSummary(1L);
+        
+        // Then
+        assertNotNull(summary);
+        assertEquals(0, summary.totalPallets());
+        assertEquals(0, BigDecimal.ZERO.compareTo(summary.totalQtyReceived()));
+        assertTrue(summary.hasDiscrepancies()); // Expected > 0 but received 0
+    }
+
+    // Helper methods for report tests
+    
+    private Receipt createReceiptWithLines() throws Exception {
+        Receipt receipt = new Receipt();
+        receipt.setDocNo("RCP-001");
+        receipt.setSupplier("SUP-001");
+        receipt.setStatus(ReceiptStatus.ACCEPTED);
+        
+        // Set ID using reflection
+        java.lang.reflect.Field idField = Receipt.class.getDeclaredField("id");
+        idField.setAccessible(true);
+        idField.set(receipt, 1L);
+        
+        ReceiptLine line1 = createReceiptLine(1L, 1, 1L, BigDecimal.valueOf(50));
+        ReceiptLine line2 = createReceiptLine(2L, 2, 2L, BigDecimal.valueOf(50));
+        
+        receipt.addLine(line1);
+        receipt.addLine(line2);
+        
+        return receipt;
+    }
+    
+    private ReceiptLine createReceiptLine(Long id, int lineNo, Long skuId, BigDecimal qtyExpected) throws Exception {
+        ReceiptLine line = new ReceiptLine();
+        
+        // Set ID using reflection
+        java.lang.reflect.Field idField = ReceiptLine.class.getDeclaredField("id");
+        idField.setAccessible(true);
+        idField.set(line, id);
+        
+        line.setLineNo(lineNo);
+        line.setSkuId(skuId);
+        line.setUom("ШТ");
+        line.setQtyExpected(qtyExpected);
+        
+        return line;
+    }
+    
+    private List<Pallet> createPalletsForReceipt(Receipt receipt) {
+        List<Pallet> pallets = new ArrayList<>();
+        
+        ReceiptLine line1 = receipt.getLines().get(0);
+        ReceiptLine line2 = receipt.getLines().get(1);
+        
+        // Line 1: 2 pallets totaling 50 (matches expected)
+        pallets.add(createPallet(1L, receipt, line1, BigDecimal.valueOf(25)));
+        pallets.add(createPallet(2L, receipt, line1, BigDecimal.valueOf(25)));
+        
+        // Line 2: 1 pallet with 45 (under by 5)
+        pallets.add(createPallet(3L, receipt, line2, BigDecimal.valueOf(45)));
+        
+        return pallets;
+    }
+    
+    private List<Pallet> createMatchingPalletsForReceipt(Receipt receipt) {
+        List<Pallet> pallets = new ArrayList<>();
+        
+        ReceiptLine line1 = receipt.getLines().get(0);
+        ReceiptLine line2 = receipt.getLines().get(1);
+        
+        // Both lines match exactly
+        pallets.add(createPallet(1L, receipt, line1, BigDecimal.valueOf(50)));
+        pallets.add(createPallet(2L, receipt, line2, BigDecimal.valueOf(50)));
+        
+        return pallets;
+    }
+    
+    private List<Pallet> createOverReceivedPalletsForReceipt(Receipt receipt) {
+        List<Pallet> pallets = new ArrayList<>();
+        
+        ReceiptLine line1 = receipt.getLines().get(0);
+        ReceiptLine line2 = receipt.getLines().get(1);
+        
+        // Line 1: over by 10
+        pallets.add(createPallet(1L, receipt, line1, BigDecimal.valueOf(60)));
+        
+        // Line 2: matches
+        pallets.add(createPallet(2L, receipt, line2, BigDecimal.valueOf(50)));
+        
+        return pallets;
+    }
+    
+    private Pallet createPallet(Long id, Receipt receipt, ReceiptLine line, BigDecimal quantity) {
+        Pallet pallet = new Pallet();
+        try {
+            java.lang.reflect.Field idField = Pallet.class.getDeclaredField("id");
+            idField.setAccessible(true);
+            idField.set(pallet, id);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        
+        pallet.setCode("PLT-" + id);
+        pallet.setReceipt(receipt);
+        pallet.setReceiptLine(line);
+        pallet.setSkuId(line.getSkuId());
+        pallet.setQuantity(quantity);
+        pallet.setUom(line.getUom());
+        
+        return pallet;
     }
 }

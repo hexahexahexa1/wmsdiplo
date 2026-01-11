@@ -237,6 +237,12 @@
     -fx-background-color: #BBDEFB;
 }
 
+.scan-field:disabled {
+    -fx-opacity: 0.5;
+    -fx-background-color: #f0f0f0;
+    -fx-border-color: #cccccc;
+}
+
 /* Terminal input fields (gray, smaller font) */
 .input-field {
     -fx-border-color: #9E9E9E;
@@ -252,5 +258,11 @@
 .input-field:focused {
     -fx-border-color: #616161;
     -fx-background-color: #F5F5F5;
+}
+
+.input-field:disabled {
+    -fx-opacity: 0.5;
+    -fx-background-color: #f0f0f0;
+    -fx-border-color: #cccccc;
 }
 

@@ -25,6 +25,20 @@ public class ImportServiceClient {
         this.baseUrl = baseUrl;
     }
 
+    public String getCurrentFolder() throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(baseUrl + "/api/import/config"))
+            .header("Accept", "application/json")
+            .GET()
+            .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            Map<String, Object> config = mapper.readValue(response.body(), Map.class);
+            return (String) config.get("folder");
+        }
+        throw new IOException("Get config failed: status=" + response.statusCode() + " body=" + response.body());
+    }
+
     public void updateFolder(String folderPath) throws IOException, InterruptedException {
         var body = mapper.writeValueAsString(Map.of("folder", folderPath));
         HttpRequest request = HttpRequest.newBuilder()

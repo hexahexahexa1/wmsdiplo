@@ -13,12 +13,16 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "tasks")
+@Getter
+@Setter
 public class Task {
 
     @Id
@@ -91,124 +95,5 @@ public class Task {
             priority = 100;
         }
     }
-
-    public Long getId() {
-        return id;
-    }
-
-    public Receipt getReceipt() {
-        return receipt;
-    }
-
-    public void setReceipt(Receipt receipt) {
-        this.receipt = receipt;
-    }
-
-    public ReceiptLine getLine() {
-        return line;
-    }
-
-    public void setLine(ReceiptLine line) {
-        this.line = line;
-    }
-
-    public TaskType getTaskType() {
-        return taskType;
-    }
-
-    public void setTaskType(TaskType taskType) {
-        this.taskType = taskType;
-    }
-
-    public TaskStatus getStatus() {
-        return status;
-    }
-
-    public void setStatus(TaskStatus status) {
-        this.status = status;
-    }
-
-    public String getAssignee() {
-        return assignee;
-    }
-
-    public void setAssignee(String assignee) {
-        this.assignee = assignee;
-    }
-
-    public String getAssignedBy() {
-        return assignedBy;
-    }
-
-    public void setAssignedBy(String assignedBy) {
-        this.assignedBy = assignedBy;
-    }
-
-    public Long getPalletId() {
-        return palletId;
-    }
-
-    public void setPalletId(Long palletId) {
-        this.palletId = palletId;
-    }
-
-    public Long getSourceLocationId() {
-        return sourceLocationId;
-    }
-
-    public void setSourceLocationId(Long sourceLocationId) {
-        this.sourceLocationId = sourceLocationId;
-    }
-
-    public Long getTargetLocationId() {
-        return targetLocationId;
-    }
-
-    public void setTargetLocationId(Long targetLocationId) {
-        this.targetLocationId = targetLocationId;
-    }
-
-    public BigDecimal getQtyAssigned() {
-        return qtyAssigned;
-    }
-
-    public void setQtyAssigned(BigDecimal qtyAssigned) {
-        this.qtyAssigned = qtyAssigned;
-    }
-
-    public BigDecimal getQtyDone() {
-        return qtyDone;
-    }
-
-    public void setQtyDone(BigDecimal qtyDone) {
-        this.qtyDone = qtyDone;
-    }
-
-    public Integer getPriority() {
-        return priority;
-    }
-
-    public void setPriority(Integer priority) {
-        this.priority = priority;
-    }
-
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
-    }
-
-    public LocalDateTime getStartedAt() {
-        return startedAt;
-    }
-
-    public void setStartedAt(LocalDateTime startedAt) {
-        this.startedAt = startedAt;
-    }
-
-    public LocalDateTime getClosedAt() {
-        return closedAt;
-    }
-
-    public void setClosedAt(LocalDateTime closedAt) {
-        this.closedAt = closedAt;
-    }
 }
+

@@ -8,6 +8,7 @@ import com.wmsdipl.core.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -39,6 +40,7 @@ public class UserController {
 
     @PostMapping
     @Operation(summary = "Create user", description = "Creates a new user account with the provided details")
+    @PreAuthorize("hasRole('ADMIN')")
     public UserDto create(@RequestBody UserRequest request) {
         User created = userService.create(userMapper.toEntity(request));
         return userMapper.toDto(created);
@@ -46,6 +48,7 @@ public class UserController {
 
     @PutMapping("/{id}")
     @Operation(summary = "Update user", description = "Updates an existing user's details (excluding password)")
+    @PreAuthorize("hasRole('ADMIN')")
     public UserDto update(@PathVariable Long id, @RequestBody UserRequest request) {
         User user = userService.findById(id);
         userMapper.updateEntity(user, request);
@@ -55,6 +58,7 @@ public class UserController {
 
     @PostMapping("/{id}/password")
     @Operation(summary = "Change user password", description = "Updates a user's password securely")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> changePassword(@PathVariable Long id, @RequestBody UserRequest request) {
         if (request.password() == null || request.password().isBlank()) {
             return ResponseEntity.badRequest().build();
@@ -65,6 +69,7 @@ public class UserController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "Delete user", description = "Removes a user from the system")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         userService.delete(id);
         return ResponseEntity.noContent().build();

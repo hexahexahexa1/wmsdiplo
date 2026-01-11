@@ -1,14 +1,17 @@
 package com.wmsdipl.core.service;
 
 import com.wmsdipl.core.domain.Location;
+import com.wmsdipl.core.domain.LocationStatus;
 import com.wmsdipl.core.domain.Zone;
 import com.wmsdipl.core.repository.LocationRepository;
+import com.wmsdipl.core.repository.PalletRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -23,6 +26,9 @@ class LocationServiceTest {
 
     @Mock
     private LocationRepository locationRepository;
+    
+    @Mock
+    private PalletRepository palletRepository;
 
     @InjectMocks
     private LocationService locationService;
@@ -172,6 +178,7 @@ class LocationServiceTest {
         updateData.setActive(false);
 
         when(locationRepository.findById(1L)).thenReturn(Optional.of(testLocation));
+        when(palletRepository.countByLocation(any(Location.class))).thenReturn(0L);
         when(locationRepository.save(any(Location.class))).thenReturn(testLocation);
 
         // When
@@ -210,12 +217,235 @@ class LocationServiceTest {
     @Test
     void shouldDeleteLocation_WhenValidId() {
         // Given
+        Location location = new Location();
+        location.setStatus(LocationStatus.AVAILABLE);
+        location.setCode("TEST-LOC");
+        
+        when(locationRepository.findById(1L)).thenReturn(Optional.of(location));
         doNothing().when(locationRepository).deleteById(1L);
 
         // When
         locationService.delete(1L);
 
         // Then
+        verify(locationRepository, times(1)).findById(1L);
         verify(locationRepository, times(1)).deleteById(1L);
+    }
+
+    @Test
+    void shouldThrowException_WhenDeletingOccupiedLocation() {
+        // Given
+        Location location = new Location();
+        location.setStatus(LocationStatus.OCCUPIED);
+        location.setCode("OCCUPIED-LOC");
+        
+        when(locationRepository.findById(1L)).thenReturn(Optional.of(location));
+
+        // When & Then
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> locationService.delete(1L)
+        );
+        assertTrue(exception.getMessage().contains("Cannot delete occupied location"));
+        verify(locationRepository, times(1)).findById(1L);
+        verify(locationRepository, never()).deleteById(anyLong());
+    }
+
+    @Test
+    void shouldThrowException_WhenCreatingLocationWithDuplicateCode() {
+        // Given
+        when(locationRepository.existsByCode("LOC-A-01-01-01")).thenReturn(true);
+
+        // When & Then
+        IllegalArgumentException exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> locationService.create(testLocation)
+        );
+        assertEquals("Location with code 'LOC-A-01-01-01' already exists", exception.getMessage());
+        verify(locationRepository, times(1)).existsByCode("LOC-A-01-01-01");
+        verify(locationRepository, never()).save(any(Location.class));
+    }
+
+    @Test
+    void shouldCreateLocation_WhenCodeIsUnique() {
+        // Given
+        when(locationRepository.existsByCode("LOC-A-01-01-01")).thenReturn(false);
+        when(locationRepository.save(any(Location.class))).thenReturn(testLocation);
+
+        // When
+        Location result = locationService.create(testLocation);
+
+        // Then
+        assertNotNull(result);
+        assertEquals("LOC-A-01-01-01", result.getCode());
+        verify(locationRepository, times(1)).existsByCode("LOC-A-01-01-01");
+        verify(locationRepository, times(1)).save(testLocation);
+    }
+
+    @Test
+    void shouldThrowException_WhenUpdatingToExistingCode() {
+        // Given
+        Location updateData = new Location();
+        updateData.setCode("LOC-B-02-02-02");
+        updateData.setZone(testZone);
+        updateData.setAisle("B");
+        updateData.setBay("02");
+        updateData.setLevel("02");
+        updateData.setActive(true);
+
+        when(locationRepository.findById(1L)).thenReturn(Optional.of(testLocation));
+        when(palletRepository.countByLocation(any(Location.class))).thenReturn(0L);
+        when(locationRepository.existsByCode("LOC-B-02-02-02")).thenReturn(true);
+
+        // When & Then
+        IllegalArgumentException exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> locationService.update(1L, updateData)
+        );
+        assertEquals("Location with code 'LOC-B-02-02-02' already exists", exception.getMessage());
+        verify(locationRepository, times(1)).findById(1L);
+        verify(palletRepository, times(1)).countByLocation(any(Location.class));
+        verify(locationRepository, times(1)).existsByCode("LOC-B-02-02-02");
+        verify(locationRepository, never()).save(any(Location.class));
+    }
+    
+    @Test
+    void shouldThrowException_WhenUpdatingOccupiedLocation() {
+        // Given
+        Location updateData = new Location();
+        updateData.setCode("LOC-B-03-03-03");
+        updateData.setZone(testZone);
+        updateData.setAisle("B");
+        updateData.setBay("03");
+        updateData.setLevel("03");
+        updateData.setMaxPallets(5);
+        updateData.setActive(true);
+
+        when(locationRepository.findById(1L)).thenReturn(Optional.of(testLocation));
+        when(palletRepository.countByLocation(any(Location.class))).thenReturn(2L); // Location has 2 pallets
+
+        // When & Then
+        ResponseStatusException exception = assertThrows(
+            ResponseStatusException.class,
+            () -> locationService.update(1L, updateData)
+        );
+        assertEquals("Ячейка занята, изменение невозможно", exception.getReason());
+        verify(locationRepository, times(1)).findById(1L);
+        verify(palletRepository, times(1)).countByLocation(any(Location.class));
+        verify(locationRepository, never()).save(any(Location.class));
+    }
+
+    @Test
+    void shouldBlockLocation_WhenAvailable() {
+        // Given
+        testLocation.setStatus(LocationStatus.AVAILABLE);
+        when(locationRepository.findById(1L)).thenReturn(Optional.of(testLocation));
+        when(locationRepository.save(any(Location.class))).thenReturn(testLocation);
+
+        // When
+        Location result = locationService.blockLocation(1L);
+
+        // Then
+        assertNotNull(result);
+        assertEquals(LocationStatus.BLOCKED, testLocation.getStatus());
+        verify(locationRepository, times(1)).findById(1L);
+        verify(locationRepository, times(1)).save(testLocation);
+    }
+
+    @Test
+    void shouldThrowException_WhenBlockingAlreadyBlockedLocation() {
+        // Given
+        testLocation.setStatus(LocationStatus.BLOCKED);
+        when(locationRepository.findById(1L)).thenReturn(Optional.of(testLocation));
+
+        // When & Then
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> locationService.blockLocation(1L)
+        );
+        assertTrue(exception.getMessage().contains("Location is already blocked"));
+        verify(locationRepository, times(1)).findById(1L);
+        verify(locationRepository, never()).save(any(Location.class));
+    }
+
+    @Test
+    void shouldThrowException_WhenBlockingOccupiedLocation() {
+        // Given
+        testLocation.setStatus(LocationStatus.OCCUPIED);
+        when(locationRepository.findById(1L)).thenReturn(Optional.of(testLocation));
+
+        // When & Then
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> locationService.blockLocation(1L)
+        );
+        assertTrue(exception.getMessage().contains("Cannot block occupied location"));
+        verify(locationRepository, times(1)).findById(1L);
+        verify(locationRepository, never()).save(any(Location.class));
+    }
+
+    @Test
+    void shouldUnblockLocation_WhenBlocked() {
+        // Given
+        testLocation.setStatus(LocationStatus.BLOCKED);
+        when(locationRepository.findById(1L)).thenReturn(Optional.of(testLocation));
+        when(locationRepository.save(any(Location.class))).thenReturn(testLocation);
+
+        // When
+        Location result = locationService.unblockLocation(1L);
+
+        // Then
+        assertNotNull(result);
+        assertEquals(LocationStatus.AVAILABLE, testLocation.getStatus());
+        verify(locationRepository, times(1)).findById(1L);
+        verify(locationRepository, times(1)).save(testLocation);
+    }
+
+    @Test
+    void shouldThrowException_WhenUnblockingNonBlockedLocation() {
+        // Given
+        testLocation.setStatus(LocationStatus.AVAILABLE);
+        when(locationRepository.findById(1L)).thenReturn(Optional.of(testLocation));
+
+        // When & Then
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> locationService.unblockLocation(1L)
+        );
+        assertTrue(exception.getMessage().contains("Location is not blocked"));
+        verify(locationRepository, times(1)).findById(1L);
+        verify(locationRepository, never()).save(any(Location.class));
+    }
+
+    @Test
+    void shouldUpdateStatus_WhenValidId() {
+        // Given
+        testLocation.setStatus(LocationStatus.AVAILABLE);
+        when(locationRepository.findById(1L)).thenReturn(Optional.of(testLocation));
+        when(locationRepository.save(any(Location.class))).thenReturn(testLocation);
+
+        // When
+        Location result = locationService.updateStatus(1L, LocationStatus.OCCUPIED);
+
+        // Then
+        assertNotNull(result);
+        assertEquals(LocationStatus.OCCUPIED, testLocation.getStatus());
+        verify(locationRepository, times(1)).findById(1L);
+        verify(locationRepository, times(1)).save(testLocation);
+    }
+
+    @Test
+    void shouldThrowException_WhenUpdatingStatusOfNonexistentLocation() {
+        // Given
+        when(locationRepository.findById(999L)).thenReturn(Optional.empty());
+
+        // When & Then
+        IllegalArgumentException exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> locationService.updateStatus(999L, LocationStatus.BLOCKED)
+        );
+        assertEquals("Location not found: 999", exception.getMessage());
+        verify(locationRepository, times(1)).findById(999L);
+        verify(locationRepository, never()).save(any(Location.class));
     }
 }

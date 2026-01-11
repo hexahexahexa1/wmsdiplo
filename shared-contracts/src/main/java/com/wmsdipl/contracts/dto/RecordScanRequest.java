@@ -14,6 +14,7 @@ public record RecordScanRequest(
 
     String sscc,
     String barcode,
+    String locationCode,
     String deviceId,
     String comment
 ) {

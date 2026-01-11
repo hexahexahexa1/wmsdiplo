@@ -1,19 +1,29 @@
 package com.wmsdipl.core.web;
 
 import com.wmsdipl.contracts.dto.CreateReceiptRequest;
+import com.wmsdipl.contracts.dto.ReceiptDiscrepancyDto;
 import com.wmsdipl.contracts.dto.ReceiptDto;
 import com.wmsdipl.contracts.dto.ReceiptLineDto;
+import com.wmsdipl.contracts.dto.ReceiptSummaryDto;
+import com.wmsdipl.core.domain.Receipt;
+import com.wmsdipl.core.repository.ReceiptRepository;
+import com.wmsdipl.core.service.CsvExportService;
 import com.wmsdipl.core.service.workflow.PlacementWorkflowService;
 import com.wmsdipl.core.service.workflow.ReceivingWorkflowService;
 import com.wmsdipl.core.service.ReceiptService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+
+import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @RestController
 @RequestMapping("/api/receipts")
@@ -23,13 +33,19 @@ public class ReceiptController {
     private final ReceiptService receiptService;
     private final ReceivingWorkflowService receivingWorkflowService;
     private final PlacementWorkflowService placementWorkflowService;
+    private final CsvExportService csvExportService;
+    private final ReceiptRepository receiptRepository;
 
     public ReceiptController(ReceiptService receiptService,
                              ReceivingWorkflowService receivingWorkflowService,
-                             PlacementWorkflowService placementWorkflowService) {
+                             PlacementWorkflowService placementWorkflowService,
+                             CsvExportService csvExportService,
+                             ReceiptRepository receiptRepository) {
         this.receiptService = receiptService;
         this.receivingWorkflowService = receivingWorkflowService;
         this.placementWorkflowService = placementWorkflowService;
+        this.csvExportService = csvExportService;
+        this.receiptRepository = receiptRepository;
     }
 
     @GetMapping
@@ -110,6 +126,50 @@ public class ReceiptController {
     public ResponseEntity<Void> completePlacement(@PathVariable Long id) {
         placementWorkflowService.completePlacement(id);
         return ResponseEntity.accepted().build();
+    }
+
+    @GetMapping("/{id}/summary")
+    @Operation(summary = "Get receipt summary", description = "Returns summary report with expected vs received quantities by line")
+    public ReceiptSummaryDto getSummary(@PathVariable Long id) {
+        return receiptService.getSummary(id);
+    }
+
+    @GetMapping("/{id}/discrepancies")
+    @Operation(summary = "Get receipt discrepancies", description = "Returns detailed discrepancy report comparing expected vs actual quantities")
+    public ReceiptDiscrepancyDto getDiscrepancies(@PathVariable Long id) {
+        return receiptService.getDiscrepancies(id);
+    }
+
+    @GetMapping("/export")
+    @Operation(summary = "Export all receipts to CSV", description = "Downloads all receipts as CSV file")
+    public ResponseEntity<byte[]> exportAllReceipts() {
+        List<Receipt> receipts = receiptRepository.findAll();
+        byte[] csv = csvExportService.exportReceipts(receipts);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("text/csv"));
+        headers.setContentDispositionFormData("attachment", "receipts.csv");
+
+        return ResponseEntity.ok()
+                .headers(headers)
+                .body(csv);
+    }
+
+    @GetMapping("/{id}/export")
+    @Operation(summary = "Export receipt with lines to CSV", description = "Downloads receipt with all lines as CSV file")
+    public ResponseEntity<byte[]> exportReceiptWithLines(@PathVariable Long id) {
+        Receipt receipt = receiptRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Receipt not found"));
+        
+        byte[] csv = csvExportService.exportReceiptWithLines(receipt);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("text/csv"));
+        headers.setContentDispositionFormData("attachment", "receipt_" + receipt.getDocNo() + ".csv");
+
+        return ResponseEntity.ok()
+                .headers(headers)
+                .body(csv);
     }
 }
 

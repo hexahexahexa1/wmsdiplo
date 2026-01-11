@@ -4,6 +4,7 @@ import com.wmsdipl.contracts.dto.RecordScanRequest;
 import com.wmsdipl.core.domain.Discrepancy;
 import com.wmsdipl.core.domain.Location;
 import com.wmsdipl.core.domain.LocationStatus;
+import com.wmsdipl.core.domain.LocationType;
 import com.wmsdipl.core.domain.Pallet;
 import com.wmsdipl.core.domain.PalletStatus;
 import com.wmsdipl.core.domain.Receipt;
@@ -22,6 +23,7 @@ import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.SkuRepository;
 import com.wmsdipl.core.repository.TaskRepository;
 import com.wmsdipl.core.service.TaskLifecycleService;
+import com.wmsdipl.core.service.StockMovementService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -49,6 +51,7 @@ public class ReceivingWorkflowService {
     private final PalletRepository palletRepository;
     private final LocationRepository locationRepository;
     private final SkuRepository skuRepository;
+    private final StockMovementService stockMovementService;
 
     public ReceivingWorkflowService(
             ReceiptRepository receiptRepository,
@@ -58,7 +61,8 @@ public class ReceivingWorkflowService {
             TaskLifecycleService taskLifecycleService,
             PalletRepository palletRepository,
             LocationRepository locationRepository,
-            SkuRepository skuRepository
+            SkuRepository skuRepository,
+            StockMovementService stockMovementService
     ) {
         this.receiptRepository = receiptRepository;
         this.taskRepository = taskRepository;
@@ -68,6 +72,7 @@ public class ReceivingWorkflowService {
         this.palletRepository = palletRepository;
         this.locationRepository = locationRepository;
         this.skuRepository = skuRepository;
+        this.stockMovementService = stockMovementService;
     }
 
     /**
@@ -162,14 +167,17 @@ public class ReceivingWorkflowService {
         }
         
         // === 6. INITIALIZE PALLET ON FIRST USE ===
-        if (pallet.getSkuId() == null) {
+        boolean isNewPallet = (pallet.getSkuId() == null);
+        Location transitLocation = null;
+        
+        if (isNewPallet) {
             pallet.setSkuId(expectedSkuId);
             pallet.setStatus(PalletStatus.RECEIVING);
             pallet.setReceipt(task.getReceipt());
             pallet.setReceiptLine(line);
             
             // Set transit location
-            Location transitLocation = findTransitLocation();
+            transitLocation = findTransitLocation();
             pallet.setLocation(transitLocation);
             
             // Initialize quantity
@@ -183,7 +191,17 @@ public class ReceivingWorkflowService {
         BigDecimal currentPalletQty = pallet.getQuantity() != null 
             ? pallet.getQuantity() : BigDecimal.ZERO;
         pallet.setQuantity(currentPalletQty.add(qtyDecimal));
-        palletRepository.save(pallet);
+        Pallet savedPallet = palletRepository.save(pallet);
+        
+        // === 7.1. RECORD STOCK MOVEMENT (only for first scan on this pallet) ===
+        if (isNewPallet && transitLocation != null) {
+            stockMovementService.recordReceive(
+                savedPallet, 
+                transitLocation, 
+                task.getAssignee() != null ? task.getAssignee() : "system", 
+                task.getId()
+            );
+        }
         
         // === 8. UPDATE TASK QUANTITY ===
         Receipt receipt = task.getReceipt();
@@ -377,11 +395,11 @@ public class ReceivingWorkflowService {
      */
     private Location findTransitLocation() {
         return locationRepository
-            .findFirstByZone_ZoneTypeAndStatusAndActiveTrueOrderByIdAsc(
-                "RECEIVING", LocationStatus.AVAILABLE)
+            .findFirstByLocationTypeAndStatusAndActiveTrueOrderByIdAsc(
+                LocationType.RECEIVING, LocationStatus.AVAILABLE)
             .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST,
                 "No available transit location found. " +
-                "Create a RECEIVING zone with AVAILABLE locations first."));
+                "Create locations with type RECEIVING and status AVAILABLE first."));
     }
 
     private void createDiscrepancyRecord(Receipt receipt, ReceiptLine line, String type,

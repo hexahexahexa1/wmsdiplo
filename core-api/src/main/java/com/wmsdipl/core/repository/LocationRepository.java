@@ -2,6 +2,7 @@ package com.wmsdipl.core.repository;
 
 import com.wmsdipl.core.domain.Location;
 import com.wmsdipl.core.domain.LocationStatus;
+import com.wmsdipl.core.domain.LocationType;
 import com.wmsdipl.core.domain.Zone;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -16,13 +17,13 @@ public interface LocationRepository extends JpaRepository<Location, Long> {
     List<Location> findByStatusAndActiveTrue(LocationStatus status);
     
     /**
-     * Finds first available location in zone with specified type.
+     * Finds first available location with specified type.
      * Used to determine transit location for receiving workflow.
      * 
-     * @param zoneType type of zone (e.g., "RECEIVING", "STORAGE")
+     * @param locationType type of location (e.g., RECEIVING, STORAGE)
      * @param status location status (typically AVAILABLE)
      * @return first matching location, ordered by ID
      */
-    Optional<Location> findFirstByZone_ZoneTypeAndStatusAndActiveTrueOrderByIdAsc(
-        String zoneType, LocationStatus status);
+    Optional<Location> findFirstByLocationTypeAndStatusAndActiveTrueOrderByIdAsc(
+        LocationType locationType, LocationStatus status);
 }

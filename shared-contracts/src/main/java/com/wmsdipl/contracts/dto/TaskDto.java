@@ -12,6 +12,7 @@ public record TaskDto(
     Long palletId,
     Long sourceLocationId,
     Long targetLocationId,
+    String targetLocationCode,
     Long receiptId,
     String receiptDocNo,
     Long lineId,

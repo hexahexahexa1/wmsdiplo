@@ -3,7 +3,6 @@ package com.wmsdipl.core.service.workflow;
 import com.wmsdipl.contracts.dto.RecordScanRequest;
 import com.wmsdipl.core.domain.Location;
 import com.wmsdipl.core.domain.Pallet;
-import com.wmsdipl.core.domain.PalletMovement;
 import com.wmsdipl.core.domain.PalletStatus;
 import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.domain.ReceiptStatus;
@@ -12,13 +11,13 @@ import com.wmsdipl.core.domain.Task;
 import com.wmsdipl.core.domain.TaskStatus;
 import com.wmsdipl.core.domain.TaskType;
 import com.wmsdipl.core.repository.LocationRepository;
-import com.wmsdipl.core.repository.PalletMovementRepository;
 import com.wmsdipl.core.repository.PalletRepository;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.TaskRepository;
 import com.wmsdipl.core.service.PutawayService;
 import com.wmsdipl.core.service.TaskLifecycleService;
+import com.wmsdipl.core.service.StockMovementService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -48,30 +47,30 @@ public class PlacementWorkflowService {
     private final TaskRepository taskRepository;
     private final PalletRepository palletRepository;
     private final LocationRepository locationRepository;
-    private final PalletMovementRepository palletMovementRepository;
     private final ScanRepository scanRepository;
     private final TaskLifecycleService taskLifecycleService;
     private final ReceiptRepository receiptRepository;
     private final PutawayService putawayService;
+    private final StockMovementService stockMovementService;
 
     public PlacementWorkflowService(
             TaskRepository taskRepository,
             PalletRepository palletRepository,
             LocationRepository locationRepository,
-            PalletMovementRepository palletMovementRepository,
             ScanRepository scanRepository,
             TaskLifecycleService taskLifecycleService,
             ReceiptRepository receiptRepository,
-            PutawayService putawayService
+            PutawayService putawayService,
+            StockMovementService stockMovementService
     ) {
         this.taskRepository = taskRepository;
         this.palletRepository = palletRepository;
         this.locationRepository = locationRepository;
-        this.palletMovementRepository = palletMovementRepository;
         this.scanRepository = scanRepository;
         this.taskLifecycleService = taskLifecycleService;
         this.receiptRepository = receiptRepository;
         this.putawayService = putawayService;
+        this.stockMovementService = stockMovementService;
     }
 
     /**
@@ -118,17 +117,16 @@ public class PlacementWorkflowService {
         // === 4. MOVE PALLET TO TARGET LOCATION ===
         pallet.setLocation(targetLocation);
         pallet.setStatus(PalletStatus.PLACED);
-        palletRepository.save(pallet);
+        Pallet savedPallet = palletRepository.save(pallet);
 
         // === 5. RECORD MOVEMENT ===
-        PalletMovement movement = new PalletMovement();
-        movement.setPallet(pallet);
-        movement.setFromLocation(sourceLocation);
-        movement.setToLocation(targetLocation);
-        movement.setMovementType("PLACEMENT");
-        movement.setTaskId(taskId);
-        movement.setMovedBy(task.getAssignee());
-        palletMovementRepository.save(movement);
+        stockMovementService.recordPlacement(
+            savedPallet,
+            sourceLocation,
+            targetLocation,
+            task.getAssignee() != null ? task.getAssignee() : "system",
+            taskId
+        );
 
         // === 6. CREATE SCAN RECORD ===
         Scan scan = new Scan();
@@ -177,6 +175,25 @@ public class PlacementWorkflowService {
         if (request.palletCode() == null || request.palletCode().isBlank()) {
             throw new ResponseStatusException(BAD_REQUEST,
                 "Pallet code is required");
+        }
+        
+        // Validate locationCode for PLACEMENT tasks
+        if (request.locationCode() == null || request.locationCode().isBlank()) {
+            throw new ResponseStatusException(BAD_REQUEST,
+                "Location code is required for placement tasks");
+        }
+        
+        // Validate that scanned location matches target location
+        if (task.getTargetLocationId() != null) {
+            Location targetLocation = locationRepository.findById(task.getTargetLocationId())
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND,
+                    "Target location not found: " + task.getTargetLocationId()));
+            
+            if (!targetLocation.getCode().equals(request.locationCode())) {
+                throw new ResponseStatusException(BAD_REQUEST,
+                    "Неверная ячейка. Ожидается: " + targetLocation.getCode() + 
+                    ", отсканировано: " + request.locationCode());
+            }
         }
     }
 

@@ -6,9 +6,14 @@ import com.wmsdipl.core.repository.UserRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
+
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
+import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @Service
 @Transactional
@@ -29,15 +34,16 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public User findById(Long id) {
-        return userRepository.findById(id).orElseThrow(() -> new IllegalArgumentException("User not found: " + id));
+        return userRepository.findById(id).orElseThrow(() -> 
+            new ResponseStatusException(NOT_FOUND, "User not found: " + id));
     }
 
     public User create(User user) {
         if (user.getUsername() == null || user.getUsername().isBlank()) {
-            throw new IllegalArgumentException("Username is required");
+            throw new ResponseStatusException(BAD_REQUEST, "Username is required");
         }
         if (user.getPasswordHash() == null || user.getPasswordHash().isBlank()) {
-            throw new IllegalArgumentException("Password is required");
+            throw new ResponseStatusException(BAD_REQUEST, "Password is required");
         }
         user.setPasswordHash(encodeIfNeeded(user.getPasswordHash()));
         user.setCreatedAt(LocalDateTime.now());

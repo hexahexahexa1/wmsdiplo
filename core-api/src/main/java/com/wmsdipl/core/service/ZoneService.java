@@ -31,6 +31,9 @@ public class ZoneService {
 
     @Transactional
     public Zone create(Zone zone) {
+        if (zoneRepository.existsByCode(zone.getCode())) {
+            throw new IllegalArgumentException("Zone with code '" + zone.getCode() + "' already exists");
+        }
         return zoneRepository.save(zone);
     }
 
@@ -38,8 +41,14 @@ public class ZoneService {
     public Zone update(Long id, Zone update) {
         Zone existing = zoneRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Zone not found: " + id));
+        
+        // Check if code is being changed and if new code already exists
+        if (!existing.getCode().equals(update.getCode()) && zoneRepository.existsByCode(update.getCode())) {
+            throw new IllegalArgumentException("Zone with code '" + update.getCode() + "' already exists");
+        }
+        
+        existing.setCode(update.getCode());
         existing.setName(update.getName());
-        existing.setZoneType(update.getZoneType());
         existing.setPriorityRank(update.getPriorityRank());
         existing.setDescription(update.getDescription());
         existing.setActive(update.getActive());
@@ -48,6 +57,15 @@ public class ZoneService {
 
     @Transactional
     public void delete(Long id) {
+        Zone zone = zoneRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Zone not found: " + id));
+        
+        // Check if zone has locations
+        if (!zone.getLocations().isEmpty()) {
+            throw new IllegalStateException("Cannot delete zone with existing locations. Zone has " + 
+                    zone.getLocations().size() + " location(s).");
+        }
+        
         zoneRepository.deleteById(id);
     }
 }

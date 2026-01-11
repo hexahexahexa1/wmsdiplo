@@ -2,6 +2,7 @@ package com.wmsdipl.core.service;
 
 import com.wmsdipl.core.domain.Discrepancy;
 import com.wmsdipl.core.domain.Receipt;
+import com.wmsdipl.core.domain.ReceiptLine;
 import com.wmsdipl.core.domain.Task;
 import com.wmsdipl.core.domain.TaskStatus;
 import com.wmsdipl.core.domain.TaskType;
@@ -242,6 +243,11 @@ class TaskServiceTest {
     @Test
     void shouldCreateReceivingTasks_WhenValidReceiptAndCount() {
         // Given
+        ReceiptLine line1 = new ReceiptLine();
+        line1.setLineNo(1);
+        line1.setSkuId(100L); // Important: SKU must be set
+        testReceipt.addLine(line1);
+        
         when(receiptRepository.findById(1L)).thenReturn(Optional.of(testReceipt));
         when(taskRepository.save(any(Task.class))).thenReturn(testTask);
 
