@@ -44,6 +44,21 @@ public class Scan {
     @Column
     private Boolean discrepancy = false;
 
+    @Column(name = "damage_flag")
+    private Boolean damageFlag = false;
+
+    @Column(name = "damage_type", length = 64)
+    private String damageType;
+
+    @Column(name = "damage_description", length = 512)
+    private String damageDescription;
+
+    @Column(name = "lot_number", length = 128)
+    private String lotNumber;
+
+    @Column(name = "expiry_date")
+    private java.time.LocalDate expiryDate;
+
     @Column(name = "scanned_at")
     private LocalDateTime scannedAt;
 
@@ -123,5 +138,45 @@ public class Scan {
 
     public void setScannedAt(LocalDateTime scannedAt) {
         this.scannedAt = scannedAt;
+    }
+
+    public Boolean getDamageFlag() {
+        return damageFlag;
+    }
+
+    public void setDamageFlag(Boolean damageFlag) {
+        this.damageFlag = damageFlag;
+    }
+
+    public String getDamageType() {
+        return damageType;
+    }
+
+    public void setDamageType(String damageType) {
+        this.damageType = damageType;
+    }
+
+    public String getDamageDescription() {
+        return damageDescription;
+    }
+
+    public void setDamageDescription(String damageDescription) {
+        this.damageDescription = damageDescription;
+    }
+
+    public String getLotNumber() {
+        return lotNumber;
+    }
+
+    public void setLotNumber(String lotNumber) {
+        this.lotNumber = lotNumber;
+    }
+
+    public java.time.LocalDate getExpiryDate() {
+        return expiryDate;
+    }
+
+    public void setExpiryDate(java.time.LocalDate expiryDate) {
+        this.expiryDate = expiryDate;
     }
 }

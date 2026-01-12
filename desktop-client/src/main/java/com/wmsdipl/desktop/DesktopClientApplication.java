@@ -23,12 +23,14 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.DatePicker;
 import javafx.scene.control.Dialog;
 import javafx.scene.control.DialogPane;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.PasswordField;
+import javafx.scene.control.SelectionMode;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
@@ -51,6 +53,7 @@ import javafx.util.Duration;
 import java.math.BigDecimal;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -111,6 +114,7 @@ public class DesktopClientApplication extends Application {
         Button palletsBtn = navButton("Паллеты", activeModule.equals("pallets"), this::showPalletsPane);
         Button stockBtn = navButton("Остатки", activeModule.equals("stock"), this::showStockPane);
         Button tasksBtn = navButton("Задания", activeModule.equals("tasks"), this::showTasksPane);
+        Button analyticsBtn = navButton("Аналитика", activeModule.equals("analytics"), this::showAnalyticsPane);
         Button skusBtn = navButton("Номенклатура", activeModule.equals("skus"), this::showSkusPane);
         Button terminalBtn = navButton("Терминал", activeModule.equals("terminal"), this::showTerminalPane);
         Button usersBtn = navButton("Пользователи", activeModule.equals("users"), this::showUsersPane);
@@ -126,7 +130,7 @@ public class DesktopClientApplication extends Application {
         logoutBtn.setMaxWidth(Double.MAX_VALUE);
         logoutBtn.setOnAction(e -> handleLogout());
 
-        VBox nav = new VBox(14, logo, receiptsBtn, topologyBtn, palletsBtn, stockBtn, tasksBtn, skusBtn, terminalBtn, usersBtn, settingsBtn, spacer, logoutBtn);
+        VBox nav = new VBox(14, logo, receiptsBtn, topologyBtn, palletsBtn, stockBtn, tasksBtn, analyticsBtn, skusBtn, terminalBtn, usersBtn, settingsBtn, spacer, logoutBtn);
         nav.setPadding(new Insets(24, 24, 24, 24));
         nav.setPrefWidth(210);
         nav.setAlignment(Pos.TOP_CENTER);
@@ -262,7 +266,13 @@ public class DesktopClientApplication extends Application {
         supplierCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().supplier()));
         supplierCol.setPrefWidth(160);
 
-        table.getColumns().addAll(docNoCol, msgCol, statusCol, dateCol, supplierCol);
+        TableColumn<Receipt, String> crossDockCol = new TableColumn<>("crossDock");
+        crossDockCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(
+            cell.getValue().crossDock() != null && cell.getValue().crossDock() ? "🚀 Cross-Dock" : ""
+        ));
+        crossDockCol.setPrefWidth(120);
+
+        table.getColumns().addAll(docNoCol, msgCol, statusCol, dateCol, supplierCol, crossDockCol);
         return table;
     }
 
@@ -546,27 +556,27 @@ public class DesktopClientApplication extends Application {
         
         TextField receiptIdFilter = new TextField();
         receiptIdFilter.setPromptText("ID прихода");
-        receiptIdFilter.setPrefWidth(120);
+        receiptIdFilter.setPrefWidth(150);
         
         ComboBox<String> statusFilter = new ComboBox<>();
         statusFilter.getItems().addAll("", "EMPTY", "RECEIVED", "PLACED", "PICKED");
         statusFilter.setValue("");
         statusFilter.setPromptText("Статус");
-        statusFilter.setPrefWidth(130);
+        statusFilter.setPrefWidth(150);
         
-        Button searchBtn = new Button("Поиск");
-        searchBtn.getStyleClass().add("refresh-btn");
-        searchBtn.setPrefHeight(40);
-        searchBtn.setPrefWidth(120);
+        Button searchBtn = new Button("Найти");
+        searchBtn.getStyleClass().add("filter-btn");
         
-        Button clearBtn = new Button("Очистить");
-        clearBtn.getStyleClass().add("refresh-btn");
-        clearBtn.setPrefHeight(40);
-        clearBtn.setPrefWidth(120);
+        Button clearBtn = new Button("Сброс");
+        clearBtn.getStyleClass().add("filter-btn");
         
-        // Filters row
-        HBox filtersRow = new HBox(10, skuCodeFilter, locationCodeFilter, palletBarcodeFilter, receiptIdFilter, statusFilter, searchBtn, clearBtn);
+        // Filters row (first line)
+        HBox filtersRow = new HBox(10, skuCodeFilter, locationCodeFilter, palletBarcodeFilter, receiptIdFilter, statusFilter);
         filtersRow.setAlignment(Pos.CENTER_LEFT);
+        
+        // Buttons row (second line)
+        HBox buttonsRow = new HBox(10, searchBtn, clearBtn);
+        buttonsRow.setAlignment(Pos.CENTER_LEFT);
         
         // Stock table
         TableView<StockItem> stockTable = new TableView<>();
@@ -732,7 +742,7 @@ public class DesktopClientApplication extends Application {
         palletBarcodeFilter.setOnAction(e -> searchBtn.fire());
         receiptIdFilter.setOnAction(e -> searchBtn.fire());
         
-        VBox layout = new VBox(12, header, filtersRow, stockTable, paginationBox);
+        VBox layout = new VBox(12, header, filtersRow, buttonsRow, stockTable, paginationBox);
         layout.setPadding(new Insets(24));
         layout.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
         VBox.setVgrow(stockTable, Priority.ALWAYS);
@@ -785,7 +795,8 @@ public class DesktopClientApplication extends Application {
         
         Button closeBtn = new Button("Закрыть");
         closeBtn.getStyleClass().add("refresh-btn");
-        closeBtn.setPrefWidth(120);
+        closeBtn.setPrefWidth(150);
+        closeBtn.setPrefHeight(35);
         closeBtn.setOnAction(e -> dialog.close());
         
         HBox buttonBox = new HBox(closeBtn);
@@ -810,8 +821,31 @@ public class DesktopClientApplication extends Application {
             }
         }).whenComplete((movements, error) -> Platform.runLater(() -> {
             if (error != null) {
-                historyTable.setPlaceholder(new Label("Ошибка: " + error.getMessage()));
+                // Extract meaningful error message
+                String errorMsg = error.getMessage();
+                if (errorMsg != null && errorMsg.contains("RuntimeException")) {
+                    // Try to extract the actual IOException message
+                    Throwable cause = error.getCause();
+                    if (cause != null && cause.getMessage() != null) {
+                        errorMsg = cause.getMessage();
+                    }
+                }
+                
+                Label errorLabel = new Label("Ошибка загрузки истории:\n" + errorMsg);
+                errorLabel.setStyle("-fx-text-fill: #ff6b6b; -fx-wrap-text: true;");
+                historyTable.setPlaceholder(errorLabel);
+            } else if (movements == null || movements.isEmpty()) {
+                // No movements yet - show friendly message
+                Label emptyLabel = new Label("История перемещений пока пуста.\n\n" +
+                    "Записи появятся после:\n" +
+                    "• Приёмки паллеты (RECEIVE)\n" +
+                    "• Размещения на складе (PLACE)\n" +
+                    "• Перемещения между ячейками (MOVE)\n" +
+                    "• Отбора товара (PICK)");
+                emptyLabel.setStyle("-fx-text-fill: #888; -fx-text-alignment: center;");
+                historyTable.setPlaceholder(emptyLabel);
             } else {
+                // Success - populate table
                 historyTable.setItems(FXCollections.observableArrayList(movements));
                 historyTable.setPlaceholder(new Label("Нет перемещений"));
             }
@@ -828,9 +862,21 @@ public class DesktopClientApplication extends Application {
         receiptFilter.setPromptText("receiptId (опционально)");
         Button refresh = new Button("Обновить");
         refresh.getStyleClass().add("refresh-btn");
+        
+        Button bulkOpsBtn = new Button("Массовые операции");
+        bulkOpsBtn.getStyleClass().add("btn-primary");
+        bulkOpsBtn.setDisable(true);
 
         TableView<com.wmsdipl.desktop.model.Task> table = new TableView<>();
         table.setPlaceholder(new Label("Нет данных"));
+        table.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+        
+        // Enable bulk ops button when tasks are selected
+        table.getSelectionModel().selectedItemProperty().addListener((obs, o, n) -> {
+            bulkOpsBtn.setDisable(table.getSelectionModel().getSelectedItems().isEmpty());
+        });
+        
+        bulkOpsBtn.setOnAction(e -> showBulkOperationsDialog(table));
         
         TableColumn<com.wmsdipl.desktop.model.Task, Object> taskIdCol = column("ID", com.wmsdipl.desktop.model.Task::id);
         taskIdCol.setPrefWidth(50);
@@ -854,7 +900,7 @@ public class DesktopClientApplication extends Application {
         refresh.setOnAction(e -> loadTasks(table, receiptFilter.getText()));
         loadTasks(table, null);
 
-        HBox controls = new HBox(10, receiptFilter, refresh);
+        HBox controls = new HBox(10, receiptFilter, refresh, bulkOpsBtn);
         controls.setAlignment(Pos.CENTER_LEFT);
         VBox layout = new VBox(12, header, controls, table);
         layout.setPadding(new Insets(24));
@@ -1926,6 +1972,51 @@ public class DesktopClientApplication extends Application {
             return null;
         }));
 
+        // Damage tracking section
+        Label damageHeaderLabel = new Label("🚨 Повреждения:");
+        damageHeaderLabel.setStyle("-fx-text-fill: #FF9800; -fx-font-size: 14px; -fx-font-weight: bold;");
+
+        CheckBox damageCheckBox = new CheckBox("Товар поврежден");
+        damageCheckBox.setStyle("-fx-text-fill: white; -fx-font-size: 13px;");
+
+        ComboBox<String> damageTypeCombo = new ComboBox<>();
+        damageTypeCombo.getItems().addAll("PHYSICAL", "WATER", "EXPIRED", "OTHER");
+        damageTypeCombo.setPromptText("Тип повреждения");
+        damageTypeCombo.setPrefHeight(40);
+        damageTypeCombo.getStyleClass().add("input-field");
+        damageTypeCombo.setDisable(true);
+
+        TextArea damageDescriptionField = new TextArea();
+        damageDescriptionField.setPromptText("Описание повреждения");
+        damageDescriptionField.setPrefHeight(60);
+        damageDescriptionField.setMaxHeight(60);
+        damageDescriptionField.getStyleClass().add("input-field");
+        damageDescriptionField.setDisable(true);
+
+        // Enable/disable damage fields based on checkbox
+        damageCheckBox.selectedProperty().addListener((obs, old, selected) -> {
+            damageTypeCombo.setDisable(!selected);
+            damageDescriptionField.setDisable(!selected);
+            if (!selected) {
+                damageTypeCombo.setValue(null);
+                damageDescriptionField.clear();
+            }
+        });
+
+        // Lot tracking section
+        Label lotHeaderLabel = new Label("📦 Партия и срок годности:");
+        lotHeaderLabel.setStyle("-fx-text-fill: #9E9E9E; -fx-font-size: 14px; -fx-font-weight: bold;");
+
+        TextField lotNumberField = new TextField();
+        lotNumberField.setPromptText("Номер партии (опционально)");
+        lotNumberField.getStyleClass().add("input-field");
+        lotNumberField.setPrefHeight(40);
+
+        DatePicker expiryDatePicker = new DatePicker();
+        expiryDatePicker.setPromptText("Срок годности (опционально)");
+        expiryDatePicker.setPrefHeight(40);
+        expiryDatePicker.getStyleClass().add("input-field");
+
         // Location field (only for PLACEMENT tasks)
         Label locationLabel = null;
         TextField locationField = null;
@@ -1961,6 +2052,9 @@ public class DesktopClientApplication extends Application {
         qtyField.setDisable(!isStarted);
         commentField.setDisable(!isStarted);
         submitBtn.setDisable(!isStarted);
+        damageCheckBox.setDisable(!isStarted);
+        lotNumberField.setDisable(!isStarted);
+        expiryDatePicker.setDisable(!isStarted);
         if (locationField != null) {
             locationField.setDisable(!isStarted);
         }
@@ -1979,6 +2073,14 @@ public class DesktopClientApplication extends Application {
                 }
                 return "⚠ Есть расхождение";
             }),
+            column("Брак", s -> {
+                if (s.damageFlag() != null && s.damageFlag()) {
+                    return "🚨 " + (s.damageType() != null ? s.damageType() : "ДА");
+                }
+                return "";
+            }),
+            column("Партия", s -> s.lotNumber() != null ? s.lotNumber() : ""),
+            column("Срок", s -> s.expiryDate() != null ? s.expiryDate().toString() : ""),
             column("Время", s -> s.scannedAt() != null ? s.scannedAt().toString() : "")
         );
 
@@ -2028,13 +2130,23 @@ public class DesktopClientApplication extends Application {
 
             Integer qty = Integer.parseInt(qtyStr);
             String comment = commentField.getText().trim();
+            
+            // Extract damage tracking fields
+            Boolean damageFlag = damageCheckBox.isSelected();
+            String damageType = damageCheckBox.isSelected() ? damageTypeCombo.getValue() : null;
+            String damageDesc = damageCheckBox.isSelected() ? damageDescriptionField.getText().trim() : null;
+            
+            // Extract lot tracking fields
+            String lotNumber = lotNumberField.getText().trim();
+            String expiryDate = expiryDatePicker.getValue() != null ? expiryDatePicker.getValue().toString() : null;
 
             submitBtn.setDisable(true);
             statusLabel.setText("Отправка...");
 
             CompletableFuture.supplyAsync(() -> {
                 try {
-                    return apiClient.recordScan(task.id(), palletCode, barcode, qty, comment, locationCode);
+                    return apiClient.recordScan(task.id(), palletCode, barcode, qty, comment, locationCode,
+                                               damageFlag, damageType, damageDesc, lotNumber, expiryDate);
                 } catch (Exception ex) {
                     throw new RuntimeException(ex);
                 }
@@ -2049,6 +2161,11 @@ public class DesktopClientApplication extends Application {
                     barcodeField.clear();
                     qtyField.clear();
                     commentField.clear();
+                    damageCheckBox.setSelected(false);
+                    damageTypeCombo.setValue(null);
+                    damageDescriptionField.clear();
+                    lotNumberField.clear();
+                    expiryDatePicker.setValue(null);
                     if (finalLocationField2 != null) {
                         finalLocationField2.clear();
                     }
@@ -2070,6 +2187,8 @@ public class DesktopClientApplication extends Application {
                 barcodeLabel, barcodeField,
                 qtyLabel, qtyField,
                 locationLabel, locationField,
+                damageHeaderLabel, damageCheckBox, damageTypeCombo, damageDescriptionField,
+                lotHeaderLabel, lotNumberField, expiryDatePicker,
                 commentLabel, commentField,
                 submitBtn,
                 statusLabel
@@ -2079,6 +2198,8 @@ public class DesktopClientApplication extends Application {
                 palletLabel, palletField,
                 barcodeLabel, barcodeField,
                 qtyLabel, qtyField,
+                damageHeaderLabel, damageCheckBox, damageTypeCombo, damageDescriptionField,
+                lotHeaderLabel, lotNumberField, expiryDatePicker,
                 commentLabel, commentField,
                 submitBtn,
                 statusLabel
@@ -2562,7 +2683,7 @@ public class DesktopClientApplication extends Application {
         });
         
         ComboBox<String> typeCombo = new ComboBox<>();
-        typeCombo.getItems().addAll("RECEIVING", "STORAGE", "SHIPPING", "QUARANTINE");
+        typeCombo.getItems().addAll("RECEIVING", "STORAGE", "SHIPPING", "CROSS_DOCK", "DAMAGED", "QUARANTINE");
         typeCombo.setPromptText("Выберите тип");
         typeCombo.setValue("STORAGE"); // Default value
         
@@ -2864,6 +2985,379 @@ public class DesktopClientApplication extends Application {
             // If login cancelled or failed, close the application
             Platform.exit();
         }
+    }
+
+    private void showAnalyticsPane() {
+        activeModule = "analytics";
+        shell.setLeft(buildNav());
+
+        Label header = new Label("Аналитика приёмки");
+        header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
+
+        // Period selection
+        ComboBox<String> periodCombo = new ComboBox<>();
+        periodCombo.getItems().addAll("Сегодня", "Эта неделя", "Этот месяц");
+        periodCombo.setValue("Сегодня");
+        periodCombo.setPrefHeight(40);
+
+        Button refreshBtn = new Button("Обновить");
+        refreshBtn.getStyleClass().add("refresh-btn");
+        refreshBtn.setPrefHeight(40);
+
+        HBox controls = new HBox(10, new Label("Период:"), periodCombo, refreshBtn);
+        controls.setAlignment(Pos.CENTER_LEFT);
+        controls.setStyle("-fx-text-fill: white;");
+
+        // Analytics display area
+        VBox analyticsBox = new VBox(16);
+        analyticsBox.setPadding(new Insets(16));
+        analyticsBox.setStyle("-fx-background-color: #2c2c2c; -fx-background-radius: 8px;");
+
+        Label loadingLabel = new Label("Загрузка данных...");
+        loadingLabel.setStyle("-fx-text-fill: white; -fx-font-size: 16px;");
+        analyticsBox.getChildren().add(loadingLabel);
+
+        Runnable loadAnalytics = () -> {
+            String period = periodCombo.getValue();
+            
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return switch (period) {
+                        case "Сегодня" -> apiClient.getTodayAnalytics();
+                        case "Эта неделя" -> apiClient.getWeekAnalytics();
+                        case "Этот месяц" -> apiClient.getMonthAnalytics();
+                        default -> apiClient.getTodayAnalytics();
+                    };
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((data, error) -> Platform.runLater(() -> {
+                analyticsBox.getChildren().clear();
+                
+                if (error != null) {
+                    Label errorLabel = new Label("Ошибка: " + error.getMessage());
+                    errorLabel.setStyle("-fx-text-fill: #FF5252; -fx-font-size: 14px;");
+                    analyticsBox.getChildren().add(errorLabel);
+                    return;
+                }
+
+                // Cast data to Map
+                @SuppressWarnings("unchecked")
+                Map<String, Object> dataMap = (Map<String, Object>) data;
+
+                // Display analytics data
+                VBox metricsBox = new VBox(12);
+                metricsBox.setStyle("-fx-text-fill: white;");
+
+                // Receipts by status
+                Label receiptsHeader = new Label("📦 Приходы по статусам");
+                receiptsHeader.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #2196F3;");
+                
+                @SuppressWarnings("unchecked")
+                Map<String, Integer> receiptsByStatus = (Map<String, Integer>) dataMap.get("receiptsByStatus");
+                if (receiptsByStatus != null) {
+                    receiptsByStatus.forEach((status, count) -> {
+                        Label statusLabel = new Label("  " + status + ": " + count);
+                        statusLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+                        metricsBox.getChildren().add(statusLabel);
+                    });
+                }
+
+                // Discrepancies by type
+                Label discrepanciesHeader = new Label("⚠ Расхождения по типам");
+                discrepanciesHeader.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #FF9800;");
+                
+                @SuppressWarnings("unchecked")
+                Map<String, Integer> discrepanciesByType = (Map<String, Integer>) dataMap.get("discrepanciesByType");
+                if (discrepanciesByType != null) {
+                    discrepanciesByType.forEach((type, count) -> {
+                        Label typeLabel = new Label("  " + type + ": " + count);
+                        typeLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+                        metricsBox.getChildren().add(typeLabel);
+                    });
+                }
+
+                // Pallets by status
+                Label palletsHeader = new Label("📊 Паллеты по статусам");
+                palletsHeader.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #4CAF50;");
+                
+                @SuppressWarnings("unchecked")
+                Map<String, Integer> palletsByStatus = (Map<String, Integer>) dataMap.get("palletsByStatus");
+                if (palletsByStatus != null) {
+                    palletsByStatus.forEach((status, count) -> {
+                        Label statusLabel = new Label("  " + status + ": " + count);
+                        statusLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+                        metricsBox.getChildren().add(statusLabel);
+                    });
+                }
+
+                // Key metrics
+                Label metricsHeader = new Label("📈 Ключевые показатели");
+                metricsHeader.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #9C27B0;");
+                
+                Object discrepancyRateObj = dataMap.get("discrepancyRate");
+                Double discrepancyRate = discrepancyRateObj instanceof Number 
+                    ? ((Number) discrepancyRateObj).doubleValue() 
+                    : 0.0;
+                Label discrepancyLabel = new Label(String.format("  Процент расхождений: %.2f%%", discrepancyRate));
+                discrepancyLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+                
+                Object damagedRateObj = dataMap.get("damagedPalletsRate");
+                Double damagedRate = damagedRateObj instanceof Number 
+                    ? ((Number) damagedRateObj).doubleValue() 
+                    : 0.0;
+                Label damagedLabel = new Label(String.format("  Процент брака: %.2f%%", damagedRate));
+                damagedLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+                
+                Object avgTimeObj = dataMap.get("avgReceivingTimeHours");
+                Double avgTime = avgTimeObj instanceof Number 
+                    ? ((Number) avgTimeObj).doubleValue() 
+                    : 0.0;
+                Label avgTimeLabel = new Label(String.format("  Среднее время приёмки: %.2f часов", avgTime));
+                avgTimeLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+
+                metricsBox.getChildren().addAll(
+                    receiptsHeader, 
+                    new Label(""), // spacer
+                    discrepanciesHeader, 
+                    new Label(""), // spacer
+                    palletsHeader,
+                    new Label(""), // spacer
+                    metricsHeader,
+                    discrepancyLabel,
+                    damagedLabel,
+                    avgTimeLabel
+                );
+
+                analyticsBox.getChildren().add(metricsBox);
+            }));
+        };
+
+        refreshBtn.setOnAction(e -> loadAnalytics.run());
+        loadAnalytics.run(); // Initial load
+
+        VBox layout = new VBox(16, header, controls, analyticsBox);
+        layout.setPadding(new Insets(24));
+        layout.setStyle("-fx-background-color: #1c1c1c;");
+        VBox.setVgrow(analyticsBox, Priority.ALWAYS);
+
+        setContent(layout);
+    }
+
+    private void showBulkOperationsDialog(TableView<com.wmsdipl.desktop.model.Task> taskTable) {
+        Stage dialog = new Stage();
+        dialog.setTitle("Массовые операции");
+        dialog.initModality(Modality.APPLICATION_MODAL);
+
+        VBox content = new VBox(16);
+        content.setPadding(new Insets(20));
+        content.setStyle("-fx-background-color: #1c1c1c;");
+
+        Label header = new Label("Массовые операции с задачами");
+        header.setStyle("-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: white;");
+
+        // Selected tasks info
+        var selectedTasks = taskTable.getSelectionModel().getSelectedItems();
+        Label infoLabel = new Label("Выбрано задач: " + selectedTasks.size());
+        infoLabel.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
+
+        TabPane tabs = new TabPane();
+        tabs.setStyle("-fx-background-color: #2c2c2c;");
+
+        // Tab 1: Bulk Assign
+        Tab assignTab = new Tab("Назначить исполнителя");
+        assignTab.setClosable(false);
+        VBox assignBox = new VBox(12);
+        assignBox.setPadding(new Insets(16));
+        assignBox.setStyle("-fx-background-color: #2c2c2c;");
+
+        Label assignLabel = new Label("Исполнитель:");
+        assignLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        TextField assignField = new TextField();
+        assignField.setPromptText("Введите имя пользователя (admin, supervisor)");
+        assignField.setPrefHeight(40);
+
+        Button assignBtn = new Button("Назначить");
+        assignBtn.getStyleClass().add("btn-success");
+        assignBtn.setPrefHeight(40);
+        assignBtn.setOnAction(e -> {
+            String assignee = assignField.getText().trim();
+            if (assignee.isEmpty()) {
+                showError("Введите имя исполнителя");
+                return;
+            }
+            List<Long> taskIds = selectedTasks.stream().map(com.wmsdipl.desktop.model.Task::id).toList();
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.bulkAssignTasks(taskIds, assignee);
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((result, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    showError(error.getMessage());
+                } else {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> map = (Map<String, Object>) result;
+                    showInfo("Задачи назначены: " + map.get("successCount"));
+                    dialog.close();
+                    loadTasks(taskTable, null);
+                }
+            }));
+        });
+
+        assignBox.getChildren().addAll(assignLabel, assignField, assignBtn);
+        assignTab.setContent(assignBox);
+
+        // Tab 2: Bulk Priority
+        Tab priorityTab = new Tab("Установить приоритет");
+        priorityTab.setClosable(false);
+        VBox priorityBox = new VBox(12);
+        priorityBox.setPadding(new Insets(16));
+        priorityBox.setStyle("-fx-background-color: #2c2c2c;");
+
+        Label priorityLabel = new Label("Приоритет:");
+        priorityLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        TextField priorityField = new TextField();
+        priorityField.setPromptText("Введите приоритет (число)");
+        priorityField.setPrefHeight(40);
+
+        Button priorityBtn = new Button("Установить");
+        priorityBtn.getStyleClass().add("btn-primary");
+        priorityBtn.setPrefHeight(40);
+        priorityBtn.setOnAction(e -> {
+            String priorityStr = priorityField.getText().trim();
+            if (priorityStr.isEmpty()) {
+                showError("Введите приоритет");
+                return;
+            }
+            Integer priority = Integer.parseInt(priorityStr);
+            List<Long> taskIds = selectedTasks.stream().map(com.wmsdipl.desktop.model.Task::id).toList();
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.bulkSetPriority(taskIds, priority);
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((result, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    showError(error.getMessage());
+                } else {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> map = (Map<String, Object>) result;
+                    showInfo("Приоритет установлен: " + map.get("successCount"));
+                    dialog.close();
+                    loadTasks(taskTable, null);
+                }
+            }));
+        });
+
+        priorityBox.getChildren().addAll(priorityLabel, priorityField, priorityBtn);
+        priorityTab.setContent(priorityBox);
+
+        // Tab 3: Create Pallets
+        Tab palletsTab = new Tab("Создать паллеты");
+        palletsTab.setClosable(false);
+        VBox palletsBox = new VBox(12);
+        palletsBox.setPadding(new Insets(16));
+        palletsBox.setStyle("-fx-background-color: #2c2c2c;");
+
+        Label prefixLabel = new Label("Префикс:");
+        prefixLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        TextField prefixField = new TextField("PLT");
+        prefixField.setPrefHeight(40);
+
+        Label startLabel = new Label("Начальный номер:");
+        startLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        TextField startField = new TextField("100");
+        startField.setPrefHeight(40);
+
+        Label countLabel = new Label("Количество:");
+        countLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        TextField countField = new TextField("50");
+        countField.setPrefHeight(40);
+
+        Button createBtn = new Button("Создать");
+        createBtn.getStyleClass().add("btn-success");
+        createBtn.setPrefHeight(40);
+        createBtn.setOnAction(e -> {
+            String prefix = prefixField.getText().trim();
+            Integer start = Integer.parseInt(startField.getText().trim());
+            Integer count = Integer.parseInt(countField.getText().trim());
+            
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.bulkCreatePallets(prefix, start, count);
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((result, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    showError(error.getMessage());
+                } else {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> map = (Map<String, Object>) result;
+                    showInfo("Паллеты созданы: " + map.get("createdCount"));
+                    dialog.close();
+                }
+            }));
+        });
+
+        palletsBox.getChildren().addAll(prefixLabel, prefixField, startLabel, startField, countLabel, countField, createBtn);
+        palletsTab.setContent(palletsBox);
+
+        // Tab 4: Cancel Tasks
+        Tab cancelTab = new Tab("Отменить задачи");
+        cancelTab.setClosable(false);
+        VBox cancelBox = new VBox(12);
+        cancelBox.setPadding(new Insets(16));
+        cancelBox.setStyle("-fx-background-color: #2c2c2c;");
+
+        Label cancelWarning = new Label("⚠ Вы собираетесь отменить " + selectedTasks.size() + " задач(и)");
+        cancelWarning.setStyle("-fx-text-fill: #FF9800; -fx-font-size: 14px; -fx-font-weight: bold;");
+
+        Button cancelTasksBtn = new Button("Отменить задачи");
+        cancelTasksBtn.getStyleClass().add("btn-danger");
+        cancelTasksBtn.setPrefHeight(40);
+        cancelTasksBtn.setOnAction(e -> {
+            if (!showConfirm("Подтверждение", "Вы уверены, что хотите отменить выбранные задачи?")) {
+                return;
+            }
+            List<Long> taskIds = selectedTasks.stream().map(com.wmsdipl.desktop.model.Task::id).toList();
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.bulkCancelTasks(taskIds);
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((result, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    showError(error.getMessage());
+                } else {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> map = (Map<String, Object>) result;
+                    showInfo("Задачи отменены: " + map.get("successCount"));
+                    dialog.close();
+                    loadTasks(taskTable, null);
+                }
+            }));
+        });
+
+        cancelBox.getChildren().addAll(cancelWarning, cancelTasksBtn);
+        cancelTab.setContent(cancelBox);
+
+        tabs.getTabs().addAll(assignTab, priorityTab, palletsTab, cancelTab);
+
+        Button closeBtn = new Button("Закрыть");
+        closeBtn.setPrefHeight(40);
+        closeBtn.setOnAction(e -> dialog.close());
+
+        content.getChildren().addAll(header, infoLabel, tabs, closeBtn);
+
+        Scene scene = new Scene(content, 500, 600);
+        applyStyles(scene);
+        dialog.setScene(scene);
+        dialog.showAndWait();
     }
 
     private void applyStyles(Scene scene) {

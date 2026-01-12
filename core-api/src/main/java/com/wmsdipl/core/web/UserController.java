@@ -7,6 +7,7 @@ import com.wmsdipl.core.mapper.UserMapper;
 import com.wmsdipl.core.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -41,7 +42,7 @@ public class UserController {
     @PostMapping
     @Operation(summary = "Create user", description = "Creates a new user account with the provided details")
     @PreAuthorize("hasRole('ADMIN')")
-    public UserDto create(@RequestBody UserRequest request) {
+    public UserDto create(@Valid @RequestBody UserRequest request) {
         User created = userService.create(userMapper.toEntity(request));
         return userMapper.toDto(created);
     }
@@ -49,7 +50,7 @@ public class UserController {
     @PutMapping("/{id}")
     @Operation(summary = "Update user", description = "Updates an existing user's details (excluding password)")
     @PreAuthorize("hasRole('ADMIN')")
-    public UserDto update(@PathVariable Long id, @RequestBody UserRequest request) {
+    public UserDto update(@PathVariable Long id, @Valid @RequestBody UserRequest request) {
         User user = userService.findById(id);
         userMapper.updateEntity(user, request);
         User updated = userService.update(id, user);

@@ -225,7 +225,7 @@ class TaskServiceTest {
         // Then
         assertNotNull(result);
         assertTrue(result.getResolved());
-        assertEquals("Resolved by admin", result.getComment());
+        assertEquals("Resolved by admin", result.getDescription());
         verify(discrepancyRepository, times(1)).save(any(Discrepancy.class));
     }
 

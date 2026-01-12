@@ -28,8 +28,17 @@ public class UserMapper {
         }
         user.setFullName(request.fullName());
         user.setEmail(request.email());
-        user.setRole(UserRole.valueOf(request.role()));
-        user.setActive(request.active());
+        
+        // Set role with default
+        if (request.role() != null && !request.role().isBlank()) {
+            user.setRole(UserRole.valueOf(request.role()));
+        } else {
+            user.setRole(UserRole.OPERATOR);  // Default role
+        }
+        
+        // Set active with default
+        user.setActive(request.active() != null ? request.active() : true);
+        
         return user;
     }
 

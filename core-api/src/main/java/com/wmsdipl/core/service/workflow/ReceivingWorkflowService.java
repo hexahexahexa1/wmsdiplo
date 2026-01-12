@@ -77,7 +77,12 @@ public class ReceivingWorkflowService {
 
     /**
      * Starts the receiving process: CONFIRMED → IN_PROGRESS
-     * Creates a RECEIVING task for each receipt line.
+     * Creates RECEIVING tasks for each receipt line.
+     * 
+     * Multi-Pallet Auto-Split:
+     * - If SKU has palletCapacity defined and qtyExpected > palletCapacity,
+     *   creates multiple tasks to distribute work across pallets
+     * - Otherwise, creates 1 task per line (legacy behavior)
      */
     @Transactional
     public void startReceiving(Long receiptId) {
@@ -97,17 +102,65 @@ public class ReceivingWorkflowService {
             throw new ResponseStatusException(BAD_REQUEST, "Receipt has no lines to receive");
         }
         
-        receipt.getLines().forEach(line -> {
+        // Create tasks for each line (with multi-pallet auto-split if needed)
+        receipt.getLines().forEach(line -> createTasksForLine(receipt, line));
+        
+        receipt.setStatus(ReceiptStatus.IN_PROGRESS);
+    }
+    
+    /**
+     * Creates one or more tasks for a receipt line based on SKU pallet capacity.
+     * 
+     * @param receipt the receipt
+     * @param line the receipt line
+     */
+    private void createTasksForLine(Receipt receipt, ReceiptLine line) {
+        BigDecimal qtyExpected = line.getQtyExpected();
+        
+        // Try to get SKU pallet capacity
+        BigDecimal palletCapacity = null;
+        if (line.getSkuId() != null) {
+            skuRepository.findById(line.getSkuId())
+                .ifPresent(sku -> {
+                    // Intentionally using local variable captured from outer scope
+                });
+            Sku sku = skuRepository.findById(line.getSkuId()).orElse(null);
+            if (sku != null) {
+                palletCapacity = sku.getPalletCapacity();
+            }
+        }
+        
+        // If pallet capacity is defined and qty exceeds it, split into multiple tasks
+        if (palletCapacity != null && palletCapacity.compareTo(BigDecimal.ZERO) > 0 
+            && qtyExpected.compareTo(palletCapacity) > 0) {
+            
+            // Calculate number of tasks needed
+            int taskCount = qtyExpected.divide(palletCapacity, 0, java.math.RoundingMode.UP).intValue();
+            BigDecimal remaining = qtyExpected;
+            
+            for (int i = 1; i <= taskCount; i++) {
+                BigDecimal qtyForThisTask = remaining.min(palletCapacity);
+                
+                Task task = new Task();
+                task.setReceipt(receipt);
+                task.setLine(line);
+                task.setTaskType(TaskType.RECEIVING);
+                task.setStatus(TaskStatus.NEW);
+                task.setQtyAssigned(qtyForThisTask);
+                taskRepository.save(task);
+                
+                remaining = remaining.subtract(qtyForThisTask);
+            }
+        } else {
+            // Create single task (legacy behavior)
             Task task = new Task();
             task.setReceipt(receipt);
             task.setLine(line);
             task.setTaskType(TaskType.RECEIVING);
             task.setStatus(TaskStatus.NEW);
-            task.setQtyAssigned(line.getQtyExpected());
+            task.setQtyAssigned(qtyExpected);
             taskRepository.save(task);
-        });
-        
-        receipt.setStatus(ReceiptStatus.IN_PROGRESS);
+        }
     }
 
     /**
@@ -176,6 +229,19 @@ public class ReceivingWorkflowService {
             pallet.setReceipt(task.getReceipt());
             pallet.setReceiptLine(line);
             
+            // NEW: Set lot number and expiry date from request
+            if (request.lotNumber() != null) {
+                pallet.setLotNumber(request.lotNumber());
+            }
+            if (request.expiryDate() != null) {
+                pallet.setExpiryDate(request.expiryDate());
+            }
+            
+            // NEW: Check for damage flag and set pallet status accordingly
+            if (Boolean.TRUE.equals(request.damageFlag())) {
+                pallet.setStatus(PalletStatus.DAMAGED);
+            }
+            
             // Set transit location
             transitLocation = findTransitLocation();
             pallet.setLocation(transitLocation);
@@ -237,6 +303,25 @@ public class ReceivingWorkflowService {
             hasDiscrepancy = true;
             discrepancyType = discrepancyType != null ? discrepancyType : "SSCC_MISMATCH";
         }
+        
+        // NEW: DAMAGE - Damaged goods detected
+        if (Boolean.TRUE.equals(request.damageFlag())) {
+            hasDiscrepancy = true;
+            discrepancyType = discrepancyType != null ? discrepancyType : "DAMAGE";
+        }
+        
+        // NEW: EXPIRED_PRODUCT - Expiry date is in the past
+        if (request.expiryDate() != null && request.expiryDate().isBefore(java.time.LocalDate.now())) {
+            hasDiscrepancy = true;
+            discrepancyType = discrepancyType != null ? discrepancyType : "EXPIRED_PRODUCT";
+        }
+        
+        // NEW: LOT_MISMATCH - Lot number doesn't match expected
+        if (line.getLotNumberExpected() != null && request.lotNumber() != null
+            && !line.getLotNumberExpected().equals(request.lotNumber())) {
+            hasDiscrepancy = true;
+            discrepancyType = discrepancyType != null ? discrepancyType : "LOT_MISMATCH";
+        }
 
         // === 10. CREATE AND SAVE SCAN ===
         Scan scan = new Scan();
@@ -247,6 +332,26 @@ public class ReceivingWorkflowService {
         scan.setQty(qtyDecimal);
         scan.setDeviceId(request.deviceId());
         scan.setDiscrepancy(hasDiscrepancy);
+        
+        // NEW: Save damage information
+        if (request.damageFlag() != null) {
+            scan.setDamageFlag(request.damageFlag());
+        }
+        if (request.damageType() != null) {
+            scan.setDamageType(request.damageType());
+        }
+        if (request.damageDescription() != null) {
+            scan.setDamageDescription(request.damageDescription());
+        }
+        
+        // NEW: Save lot tracking information
+        if (request.lotNumber() != null) {
+            scan.setLotNumber(request.lotNumber());
+        }
+        if (request.expiryDate() != null) {
+            scan.setExpiryDate(request.expiryDate());
+        }
+        
         Scan savedScan = scanRepository.save(scan);
 
         // === 11. AUTO-START TASK ===
@@ -263,25 +368,17 @@ public class ReceivingWorkflowService {
     }
 
     /**
-     * Completes the receiving workflow: IN_PROGRESS → ACCEPTED or PENDING_RESOLUTION
+     * Completes the receiving workflow: IN_PROGRESS → ACCEPTED or READY_FOR_SHIPMENT
      * 
-     * Receipt moves to ACCEPTED if:
-     * - All tasks are COMPLETED
-     * - All discrepancies are resolved (resolved = true)
-     * 
-     * Receipt moves to PENDING_RESOLUTION if:
-     * - There are unresolved discrepancies (resolved = false or null)
-     * 
-     * Note: Quantity gaps (qtyDone < qtyAssigned) are handled via UNDER_QTY discrepancies.
-     * If operator confirmed completion with shortage, the discrepancy is auto-resolved,
-     * so the receipt should proceed to ACCEPTED, not PENDING_RESOLUTION.
+     * Operator confirms all discrepancies during task completion via dialog in desktop client.
+     * Backend does not check for unresolved discrepancies - operator already made the decision.
      */
     @Transactional
     public Receipt completeReceiving(Long receiptId) {
         Receipt receipt = receiptRepository.findById(receiptId)
             .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Receipt not found"));
         
-        if (receipt.getStatus() != ReceiptStatus.IN_PROGRESS && receipt.getStatus() != ReceiptStatus.PENDING_RESOLUTION) {
+        if (receipt.getStatus() != ReceiptStatus.IN_PROGRESS) {
             throw new ResponseStatusException(BAD_REQUEST, "Receipt is not in receiving state");
         }
         
@@ -295,49 +392,26 @@ public class ReceivingWorkflowService {
             throw new ResponseStatusException(BAD_REQUEST, "All receiving tasks must be completed first");
         }
         
-        // Check only for UNRESOLVED discrepancies
-        // Resolved discrepancies (operator confirmed) should not block ACCEPTED status
-        boolean hasOpenDiscrepancy = discrepancyRepository.findByReceipt(receipt).stream()
-            .anyMatch(d -> d.getResolved() == null || !d.getResolved());
-
-        if (hasOpenDiscrepancy) {
-            receipt.setStatus(ReceiptStatus.PENDING_RESOLUTION);
+        // Operator confirmed all discrepancies during task completion
+        // Proceed to next status based on cross-dock flag
+        if (Boolean.TRUE.equals(receipt.getCrossDock())) {
+            // Cross-dock: skip ACCEPTED and go straight to READY_FOR_SHIPMENT
+            receipt.setStatus(ReceiptStatus.READY_FOR_SHIPMENT);
         } else {
+            // Normal flow: ACCEPTED
             receipt.setStatus(ReceiptStatus.ACCEPTED);
-            
-            // Transition pallets from RECEIVING to RECEIVED
-            // This allows placement tasks to be created
-            List<Pallet> pallets = palletRepository.findByReceipt(receipt);
-            pallets.stream()
-                .filter(p -> p.getStatus() == PalletStatus.RECEIVING)
-                .forEach(p -> {
-                    p.setStatus(PalletStatus.RECEIVED);
-                    palletRepository.save(p);
-                });
         }
         
-        return receipt;
-    }
-
-    /**
-     * Resolves discrepancies and continues workflow: PENDING_RESOLUTION → IN_PROGRESS
-     */
-    @Transactional
-    public Receipt resolveAndContinue(Long receiptId) {
-        Receipt receipt = receiptRepository.findById(receiptId)
-            .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Receipt not found"));
+        // Transition pallets from RECEIVING to RECEIVED
+        // This allows placement tasks to be created
+        List<Pallet> pallets = palletRepository.findByReceipt(receipt);
+        pallets.stream()
+            .filter(p -> p.getStatus() == PalletStatus.RECEIVING)
+            .forEach(p -> {
+                p.setStatus(PalletStatus.RECEIVED);
+                palletRepository.save(p);
+            });
         
-        if (receipt.getStatus() != ReceiptStatus.PENDING_RESOLUTION) {
-            throw new ResponseStatusException(BAD_REQUEST, "Receipt is not pending resolution");
-        }
-        
-        boolean hasOpenDiscrepancy = discrepancyRepository.findByReceipt(receipt).stream()
-            .anyMatch(d -> d.getResolved() == null || !d.getResolved());
-        if (hasOpenDiscrepancy) {
-            throw new ResponseStatusException(BAD_REQUEST, "Resolve all discrepancies first");
-        }
-        
-        receipt.setStatus(ReceiptStatus.IN_PROGRESS);
         return receipt;
     }
 
@@ -371,8 +445,7 @@ public class ReceivingWorkflowService {
                 "Task is not linked to a receipt");
         }
         
-        if (receipt.getStatus() != ReceiptStatus.IN_PROGRESS 
-            && receipt.getStatus() != ReceiptStatus.PENDING_RESOLUTION) {
+        if (receipt.getStatus() != ReceiptStatus.IN_PROGRESS) {
             throw new ResponseStatusException(BAD_REQUEST, 
                 "Receipt is not in receiving state");
         }
@@ -410,7 +483,7 @@ public class ReceivingWorkflowService {
         d.setType(type);
         d.setQtyExpected(expectedQty);
         d.setQtyActual(actualQty);
-        d.setComment(comment);
+        d.setDescription(comment);
         discrepancyRepository.save(d);
     }
 

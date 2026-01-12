@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -42,12 +43,14 @@ public class PutawayRuleController {
 
     @GetMapping
     @Operation(summary = "List all putaway rules", description = "Retrieves all configured putaway rules for location selection strategies")
+    @Transactional(readOnly = true)
     public List<PutawayRuleDto> list() {
         return repository.findAll().stream().map(mapper::toDto).toList();
     }
 
     @GetMapping("/{id}")
     @Operation(summary = "Get putaway rule by ID", description = "Retrieves a single putaway rule by its unique identifier")
+    @Transactional(readOnly = true)
     public ResponseEntity<PutawayRuleDto> get(@PathVariable Long id) {
         return repository.findById(id)
                 .map(mapper::toDto)

@@ -20,6 +20,7 @@ public class ReceiptMapper {
             receipt.getSupplier(),
             receipt.getStatus().name(),
             receipt.getMessageId(),
+            receipt.getCrossDock(),
             receipt.getCreatedAt()
         );
     }
@@ -32,7 +33,9 @@ public class ReceiptMapper {
             line.getPackagingId(),
             line.getUom(),
             line.getQtyExpected(),
-            line.getSsccExpected()
+            line.getSsccExpected(),
+            line.getLotNumberExpected(),
+            line.getExpiryDateExpected()
         );
     }
 
@@ -44,6 +47,8 @@ public class ReceiptMapper {
         line.setUom(lineReq.uom());
         line.setQtyExpected(defaultZero(lineReq.qtyExpected()));
         line.setSsccExpected(lineReq.ssccExpected());
+        line.setLotNumberExpected(lineReq.lotNumberExpected());
+        line.setExpiryDateExpected(lineReq.expiryDateExpected());
         return line;
     }
 

@@ -70,6 +70,7 @@ class ReceiptServiceTest {
             "Test Supplier",
             "DRAFT",
             null,
+            false,  // crossDock
             LocalDateTime.now()
         );
 
@@ -79,13 +80,16 @@ class ReceiptServiceTest {
             1L,
             "PCS",
             BigDecimal.TEN,
-            "SSCC001"
+            "SSCC001",
+            null,  // lotNumberExpected
+            null   // expiryDateExpected
         );
 
         testCreateRequest = new CreateReceiptRequest(
             "DOC001",
             LocalDate.now(),
             "Test Supplier",
+            false,  // crossDock
             List.of(line)
         );
     }
@@ -139,7 +143,7 @@ class ReceiptServiceTest {
         line.setLineNo(1);
         testReceipt.addLine(line);
 
-        ReceiptLineDto lineDto = new ReceiptLineDto(1L, 1, 100L, 1L, "PCS", BigDecimal.TEN, "SSCC001");
+        ReceiptLineDto lineDto = new ReceiptLineDto(1L, 1, 100L, 1L, "PCS", BigDecimal.TEN, "SSCC001", null, null);
 
         when(receiptRepository.findById(1L)).thenReturn(Optional.of(testReceipt));
         when(receiptMapper.toLineDto(any(ReceiptLine.class))).thenReturn(lineDto);
@@ -184,12 +188,13 @@ class ReceiptServiceTest {
     void shouldThrowException_WhenDocNoIsBlank() {
         // Given
         CreateReceiptRequest.Line line = new CreateReceiptRequest.Line(
-            1, 100L, 1L, "PCS", BigDecimal.TEN, "SSCC001"
+            1, 100L, 1L, "PCS", BigDecimal.TEN, "SSCC001", null, null
         );
         CreateReceiptRequest invalidRequest = new CreateReceiptRequest(
             "",
             LocalDate.now(),
             "Test Supplier",
+            false,
             List.of(line)
         );
 

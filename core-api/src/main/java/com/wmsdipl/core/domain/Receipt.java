@@ -50,6 +50,9 @@ public class Receipt {
     @Column(name = "message_id", unique = true)
     private String messageId;
 
+    @Column(name = "cross_dock")
+    private Boolean crossDock = false;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 

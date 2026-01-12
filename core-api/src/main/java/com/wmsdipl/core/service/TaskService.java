@@ -126,23 +126,56 @@ public class TaskService {
         Discrepancy discrepancy = discrepancyRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Discrepancy not found: " + id));
         discrepancy.setResolved(true);
-        discrepancy.setComment(comment);
+        discrepancy.setDescription(comment);
         return discrepancyRepository.save(discrepancy);
     }
 
     /**
-     * Checks if a task has any scans with discrepancies.
+     * Checks if a task has any scans with QUANTITY discrepancies.
+     * Quality issues (damage, expired products) are NOT considered discrepancies
+     * for the purpose of completion confirmation, as they don't affect quantity matching.
      * 
      * @param taskId task ID
-     * @return true if at least one scan has discrepancy flag set to true
+     * @return true if at least one scan has a quantity-related discrepancy 
+     *         (excludes DAMAGE and EXPIRED_PRODUCT)
      */
     @Transactional(readOnly = true)
     public boolean hasDiscrepancies(Long taskId) {
         Task task = taskLifecycleService.getTask(taskId);
         List<Scan> scans = scanRepository.findByTask(task);
-        return scans.stream().anyMatch(scan -> 
-            scan.getDiscrepancy() != null && scan.getDiscrepancy()
-        );
+        
+        // Only count as discrepancy if:
+        // 1. discrepancy flag is true AND
+        // 2. It's NOT a quality issue (damage or expired product)
+        return scans.stream().anyMatch(scan -> {
+            if (scan.getDiscrepancy() == null || !scan.getDiscrepancy()) {
+                return false;
+            }
+            
+            // Exclude quality issues - they don't affect quantity matching
+            boolean isDamage = Boolean.TRUE.equals(scan.getDamageFlag());
+            boolean isExpired = scan.getExpiryDate() != null 
+                && scan.getExpiryDate().isBefore(java.time.LocalDate.now());
+            
+            // Return true only if it's a quantity discrepancy (not a quality issue)
+            return !isDamage && !isExpired;
+        });
+    }
+
+    /**
+     * Updates the priority of a specific task.
+     * Higher priority values mean higher urgency (e.g., 200 > 100).
+     * Default priority is 100.
+     * 
+     * @param taskId the task ID
+     * @param priority the new priority value
+     * @return the updated task
+     */
+    @Transactional
+    public Task setPriority(Long taskId, Integer priority) {
+        Task task = taskLifecycleService.getTask(taskId);
+        task.setPriority(priority);
+        return taskRepository.save(task);
     }
 
     /**

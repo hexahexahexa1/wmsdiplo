@@ -71,6 +71,7 @@ public class ReceiptService {
         receipt.setDocNo(request.docNo());
         receipt.setDocDate(request.docDate());
         receipt.setSupplier(request.supplier());
+        receipt.setCrossDock(request.crossDock() != null ? request.crossDock() : false);
         receipt.setStatus(ReceiptStatus.DRAFT);
         request.lines().forEach(lineReq -> receipt.addLine(receiptMapper.toLine(lineReq)));
         try {

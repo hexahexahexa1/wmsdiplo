@@ -1,6 +1,7 @@
 package com.wmsdipl.contracts.dto;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 public record ReceiptLineDto(Long id,
                              Integer lineNo,
@@ -8,5 +9,7 @@ public record ReceiptLineDto(Long id,
                              Long packagingId,
                              String uom,
                              BigDecimal qtyExpected,
-                             String ssccExpected) {
+                             String ssccExpected,
+                             String lotNumberExpected,
+                             LocalDate expiryDateExpected) {
 }

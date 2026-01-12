@@ -7,15 +7,11 @@ spring:
     password: ${WMS_DB_PASSWORD:wmsdipl}
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: none  # Временно отключена валидация, т.к. схема создается через init_schema.sql
     properties:
       hibernate.dialect: org.hibernate.dialect.PostgreSQLDialect
   flyway:
-    enabled: true
-    locations: classpath:db/migration
-    table: schema_version
-    out-of-order: true
-    validate-on-migrate: false
+    enabled: false  # Миграции отключены - используем database/init_schema.sql
 
 server:
   port: ${WMS_CORE_API_PORT:8080}

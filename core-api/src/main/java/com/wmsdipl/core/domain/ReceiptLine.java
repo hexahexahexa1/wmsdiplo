@@ -48,4 +48,10 @@ public class ReceiptLine {
 
     @Column(name = "line_no")
     private Integer lineNo;
+
+    @Column(name = "lot_number_expected", length = 128)
+    private String lotNumberExpected;
+
+    @Column(name = "expiry_date_expected")
+    private java.time.LocalDate expiryDateExpected;
 }

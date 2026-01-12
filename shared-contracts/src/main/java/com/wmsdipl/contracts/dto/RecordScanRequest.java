@@ -3,6 +3,7 @@ package com.wmsdipl.contracts.dto;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import java.time.LocalDate;
 
 public record RecordScanRequest(
     @NotBlank(message = "Pallet code is required")
@@ -16,6 +17,13 @@ public record RecordScanRequest(
     String barcode,
     String locationCode,
     String deviceId,
-    String comment
+    String comment,
+    
+    // NEW FIELDS for receiving improvements
+    Boolean damageFlag,          // Flag for damaged goods
+    String damageType,            // PHYSICAL_DAMAGE, WATER_DAMAGE, EXPIRED, TEMPERATURE_ABUSE, CONTAMINATION, OTHER
+    String damageDescription,     // Free text description of damage
+    String lotNumber,             // Lot/batch number
+    LocalDate expiryDate          // Expiry date
 ) {
 }

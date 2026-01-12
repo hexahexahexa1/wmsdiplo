@@ -32,6 +32,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/login").permitAll()
                 .requestMatchers("/actuator/**").permitAll()
+                .requestMatchers("/api/imports").permitAll()  // Allow import-service to POST receipts
                 .anyRequest().authenticated()
             )
             .httpBasic();

@@ -35,20 +35,32 @@ public class Discrepancy {
     @JoinColumn(name = "line_id")
     private ReceiptLine line;
 
-    @Column(length = 64)
+    @Column(name = "task_id")
+    private Long taskId;
+
+    @Column(name = "pallet_id")
+    private Long palletId;
+
+    @Column(length = 50, nullable = false)
     private String type;
 
-    @Column(name = "qty_expected", precision = 18, scale = 3)
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
+    @Column(name = "qty_expected", precision = 10, scale = 2)
     private BigDecimal qtyExpected;
 
-    @Column(name = "qty_actual", precision = 18, scale = 3)
+    @Column(name = "qty_actual", precision = 10, scale = 2)
     private BigDecimal qtyActual;
-
-    @Column(length = 512)
-    private String comment;
 
     @Column
     private Boolean resolved = false;
+
+    @Column(name = "resolved_by", length = 100)
+    private String resolvedBy;
+
+    @Column(name = "resolved_at")
+    private LocalDateTime resolvedAt;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;

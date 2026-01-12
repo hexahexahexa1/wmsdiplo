@@ -13,7 +13,13 @@ import java.util.Optional;
 public interface PalletMovementRepository extends JpaRepository<PalletMovement, Long> {
     List<PalletMovement> findByPallet(Pallet pallet);
     
-    List<PalletMovement> findByPalletOrderByMovedAtDesc(Pallet pallet);
+    @Query("SELECT pm FROM PalletMovement pm " +
+           "LEFT JOIN FETCH pm.pallet " +
+           "LEFT JOIN FETCH pm.fromLocation " +
+           "LEFT JOIN FETCH pm.toLocation " +
+           "WHERE pm.pallet = :pallet " +
+           "ORDER BY pm.movedAt DESC")
+    List<PalletMovement> findByPalletOrderByMovedAtDesc(@Param("pallet") Pallet pallet);
     
     @Query("SELECT pm FROM PalletMovement pm WHERE pm.pallet = :pallet AND pm.movedAt <= :asOfDate ORDER BY pm.movedAt DESC")
     List<PalletMovement> findByPalletBeforeDate(@Param("pallet") Pallet pallet, @Param("asOfDate") LocalDateTime asOfDate);

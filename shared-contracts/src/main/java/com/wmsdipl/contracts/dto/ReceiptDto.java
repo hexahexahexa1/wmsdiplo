@@ -9,5 +9,6 @@ public record ReceiptDto(Long id,
 						 String supplier,
 						 String status,
 						 String messageId,
+						 Boolean crossDock,
 						 LocalDateTime createdAt) {
 }

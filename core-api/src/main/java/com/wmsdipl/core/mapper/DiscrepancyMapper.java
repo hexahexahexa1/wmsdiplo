@@ -34,7 +34,7 @@ public class DiscrepancyMapper {
             discrepancy.getType(),
             discrepancy.getQtyExpected(),
             discrepancy.getQtyActual(),
-            discrepancy.getComment(),
+            discrepancy.getDescription(),
             discrepancy.getResolved(),
             discrepancy.getCreatedAt()
         );
@@ -59,7 +59,7 @@ public class DiscrepancyMapper {
         discrepancy.setType(request.type());
         discrepancy.setQtyExpected(request.qtyExpected());
         discrepancy.setQtyActual(request.qtyActual());
-        discrepancy.setComment(request.comment());
+        discrepancy.setDescription(request.comment());
         
         return discrepancy;
     }
@@ -88,7 +88,7 @@ public class DiscrepancyMapper {
         }
         
         if (request.comment() != null) {
-            discrepancy.setComment(request.comment());
+            discrepancy.setDescription(request.comment());
         }
         
         if (request.resolved() != null) {

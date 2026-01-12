@@ -18,9 +18,7 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
   
   flyway:
-    enabled: true
-    locations: classpath:db/migration
-    baseline-on-migrate: true
+    enabled: false  # Миграции отключены - используем database/init_schema.sql
 
 server:
   port: ${WMS_IMPORT_PORT:8090}
@@ -35,6 +33,6 @@ wms:
     poll-interval-ms: ${WMS_IMPORT_POLL_MS:2000}
   core-api:
     base-url: ${WMS_CORE_API_BASE:http://localhost:8080}
-    username: ${WMS_CORE_API_USERNAME:testuser}
-    password: ${WMS_CORE_API_PASSWORD:password}
+    username: ${WMS_CORE_API_USERNAME:admin}
+    password: ${WMS_CORE_API_PASSWORD:admin}
 

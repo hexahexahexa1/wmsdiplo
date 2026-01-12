@@ -97,7 +97,9 @@ class ReceiptControllerTest {
                 null,            // packagingId
                 "ШТ",            // uom
                 BigDecimal.TEN,  // qtyExpected
-                null             // ssccExpected
+                null,            // ssccExpected
+                null,            // lotNumberExpected
+                null             // expiryDateExpected
         );
         when(receiptService.listLines(1L)).thenReturn(List.of(line));
 
@@ -348,6 +350,7 @@ class ReceiptControllerTest {
                 "SUP-001",              // supplier
                 "DRAFT",                // status (String)
                 null,                   // messageId
+                false,                  // crossDock
                 LocalDateTime.now()     // createdAt
         );
     }

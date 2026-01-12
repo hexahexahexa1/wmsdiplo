@@ -28,15 +28,27 @@ public class ClosestAvailableStrategy implements PutawayStrategy {
         List<Zone> zones = context.getPreferredZone() != null
             ? List.of(context.getPreferredZone())
             : Collections.emptyList();
+        
+        // Get target location type from context (STORAGE, CROSS_DOCK, or DAMAGED)
+        var locationType = context.getTargetLocationType();
+        
+        // If no zones specified, find any available location of target type
         if (zones.isEmpty()) {
-            return findFirstFit(locationRepository.findByStatusAndActiveTrue(LocationStatus.AVAILABLE));
+            return findFirstFit(
+                locationRepository.findByLocationTypeAndStatusAndActiveTrue(locationType, LocationStatus.AVAILABLE)
+            );
         }
+        
+        // Try to find location in preferred zone with target type
         for (Zone zone : zones) {
-            Optional<Location> fit = findFirstFit(locationRepository.findByZoneAndStatusAndActiveTrue(zone, LocationStatus.AVAILABLE));
+            Optional<Location> fit = findFirstFit(
+                locationRepository.findByZoneAndLocationTypeAndStatusAndActiveTrue(zone, locationType, LocationStatus.AVAILABLE)
+            );
             if (fit.isPresent()) {
                 return fit;
             }
         }
+        
         return Optional.empty();
     }
 

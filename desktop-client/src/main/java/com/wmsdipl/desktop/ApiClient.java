@@ -24,6 +24,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.List;
+import java.util.Map;
 import java.util.Base64;
 import java.nio.charset.StandardCharsets;
 
@@ -49,6 +50,7 @@ public class ApiClient {
     }
 
     public boolean login(String username, String password) throws IOException, InterruptedException {
+        System.out.println("[DEBUG] ApiClient.login: Attempting login for user: " + username);
         var payload = mapper.createObjectNode();
         payload.put("username", username);
         payload.put("password", password);
@@ -60,11 +62,14 @@ public class ApiClient {
             .build();
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        System.out.println("[DEBUG] ApiClient.login: Response status: " + response.statusCode());
         if (response.statusCode() == 200) {
             setCredentials(username, password);
             this.currentUsername = username;
+            System.out.println("[DEBUG] ApiClient.login: Login successful, credentials saved");
             return true;
         }
+        System.out.println("[WARNING] ApiClient.login: Login failed with status " + response.statusCode() + ", body: " + response.body());
         return false;
     }
 
@@ -232,7 +237,9 @@ public class ApiClient {
         return postForObject("/api/tasks/" + taskId + "/release", null, Task.class);
     }
 
-    public Scan recordScan(Long taskId, String palletCode, String barcode, Integer qty, String comment, String locationCode) throws IOException, InterruptedException {
+    public Scan recordScan(Long taskId, String palletCode, String barcode, Integer qty, String comment, String locationCode,
+                           Boolean damageFlag, String damageType, String damageDescription, 
+                           String lotNumber, String expiryDate) throws IOException, InterruptedException {
         var payload = mapper.createObjectNode();
         payload.put("palletCode", palletCode);
         payload.put("qty", qty);
@@ -244,6 +251,23 @@ public class ApiClient {
         }
         if (locationCode != null && !locationCode.isBlank()) {
             payload.put("locationCode", locationCode);
+        }
+        // Damage tracking fields
+        if (damageFlag != null && damageFlag) {
+            payload.put("damageFlag", true);
+            if (damageType != null && !damageType.isBlank()) {
+                payload.put("damageType", damageType);
+            }
+            if (damageDescription != null && !damageDescription.isBlank()) {
+                payload.put("damageDescription", damageDescription);
+            }
+        }
+        // Lot tracking fields
+        if (lotNumber != null && !lotNumber.isBlank()) {
+            payload.put("lotNumber", lotNumber);
+        }
+        if (expiryDate != null && !expiryDate.isBlank()) {
+            payload.put("expiryDate", expiryDate);
         }
         return postForObject("/api/tasks/" + taskId + "/scans", payload, Scan.class);
     }
@@ -498,6 +522,9 @@ public class ApiClient {
     }
     
     private String formatErrorMessage(int statusCode, String path, String body) {
+        System.out.println("[ERROR] ApiClient: HTTP " + statusCode + " for " + path);
+        System.out.println("[ERROR] ApiClient: Response body: " + (body == null || body.isEmpty() ? "<empty>" : body));
+        
         String resourceName = extractResourceName(path);
         
         switch (statusCode) {
@@ -665,9 +692,182 @@ public class ApiClient {
         public StockPage() {}
     }
 
+    // ========== Bulk Operations API ==========
+
+    /**
+     * Bulk assign tasks to operator.
+     */
+    public Map<String, Object> bulkAssignTasks(List<Long> taskIds, String assignee) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        var taskIdsArray = mapper.createArrayNode();
+        taskIds.forEach(taskIdsArray::add);
+        payload.set("taskIds", taskIdsArray);
+        payload.put("assignee", assignee);
+        
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/bulk/assign"))
+            .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), new TypeReference<>() {});
+        }
+        throw new IOException("Bulk assign failed: status=" + response.statusCode() + " body=" + response.body());
+    }
+
+    /**
+     * Bulk set priority for tasks.
+     */
+    public Map<String, Object> bulkSetPriority(List<Long> taskIds, Integer priority) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        var taskIdsArray = mapper.createArrayNode();
+        taskIds.forEach(taskIdsArray::add);
+        payload.set("taskIds", taskIdsArray);
+        payload.put("priority", priority);
+        
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/bulk/priority"))
+            .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), new TypeReference<>() {});
+        }
+        throw new IOException("Bulk set priority failed: status=" + response.statusCode() + " body=" + response.body());
+    }
+
+    /**
+     * Bulk create pallets.
+     */
+    public Map<String, Object> bulkCreatePallets(String prefix, Integer startNumber, Integer count) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        payload.put("prefix", prefix);
+        payload.put("startNumber", startNumber);
+        payload.put("count", count);
+        
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/bulk/pallets"))
+            .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), new TypeReference<>() {});
+        }
+        throw new IOException("Bulk create pallets failed: status=" + response.statusCode() + " body=" + response.body());
+    }
+
+    /**
+     * Bulk cancel tasks.
+     */
+    public Map<String, Object> bulkCancelTasks(List<Long> taskIds) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        var taskIdsArray = mapper.createArrayNode();
+        taskIds.forEach(taskIdsArray::add);
+        payload.set("taskIds", taskIdsArray);
+        
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/bulk/cancel"))
+            .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), new TypeReference<>() {});
+        }
+        throw new IOException("Bulk cancel tasks failed: status=" + response.statusCode() + " body=" + response.body());
+    }
+
+    // ========== Analytics API ==========
+
+    /**
+     * Get receiving analytics for date range.
+     */
+    public Map<String, Object> getReceivingAnalytics(String fromDate, String toDate) throws IOException, InterruptedException {
+        String url = "/api/analytics/receiving";
+        if (fromDate != null && toDate != null) {
+            url += "?fromDate=" + fromDate + "&toDate=" + toDate;
+        }
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + url))
+            .GET()
+            .header("Accept", "application/json")
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), new TypeReference<>() {});
+        }
+        throw new IOException("Get analytics failed: status=" + response.statusCode() + " body=" + response.body());
+    }
+
+    /**
+     * Get today's receiving analytics.
+     */
+    public Map<String, Object> getTodayAnalytics() throws IOException, InterruptedException {
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/analytics/receiving/today"))
+            .GET()
+            .header("Accept", "application/json")
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), new TypeReference<>() {});
+        }
+        throw new IOException("Get today analytics failed: status=" + response.statusCode() + " body=" + response.body());
+    }
+
+    /**
+     * Get this week's receiving analytics.
+     */
+    public Map<String, Object> getWeekAnalytics() throws IOException, InterruptedException {
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/analytics/receiving/week"))
+            .GET()
+            .header("Accept", "application/json")
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), new TypeReference<>() {});
+        }
+        throw new IOException("Get week analytics failed: status=" + response.statusCode() + " body=" + response.body());
+    }
+
+    /**
+     * Get this month's receiving analytics.
+     */
+    public Map<String, Object> getMonthAnalytics() throws IOException, InterruptedException {
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/analytics/receiving/month"))
+            .GET()
+            .header("Accept", "application/json")
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), new TypeReference<>() {});
+        }
+        throw new IOException("Get month analytics failed: status=" + response.statusCode() + " body=" + response.body());
+    }
+
     private HttpRequest.Builder withAuth(HttpRequest.Builder builder) {
         if (basicAuth != null && !basicAuth.isBlank()) {
             builder.header("Authorization", "Basic " + basicAuth);
+            System.out.println("[DEBUG] ApiClient: Adding Authorization header (basicAuth set)");
+        } else {
+            System.out.println("[WARNING] ApiClient: No credentials available for authentication!");
         }
         return builder;
     }

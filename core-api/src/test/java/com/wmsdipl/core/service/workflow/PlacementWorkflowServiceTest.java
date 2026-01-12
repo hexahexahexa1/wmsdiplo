@@ -152,7 +152,8 @@ class PlacementWorkflowServiceTest {
         idField.set(testPallet, 1L);
         
         RecordScanRequest request = new RecordScanRequest(
-            "PALLET001", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null
+            "PALLET001", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null,
+            null, null, null, null, null
         );
 
         when(taskLifecycleService.getTask(1L)).thenReturn(testTask);
@@ -190,7 +191,8 @@ class PlacementWorkflowServiceTest {
         // Given
         testTask.setTaskType(TaskType.RECEIVING);
         RecordScanRequest request = new RecordScanRequest(
-            "PALLET001", 10, "SSCC001", "BARCODE001", null, "DEVICE001", null
+            "PALLET001", 10, "SSCC001", "BARCODE001", null, "DEVICE001", null,
+            null, null, null, null, null
         );
 
         when(taskLifecycleService.getTask(1L)).thenReturn(testTask);
@@ -205,7 +207,8 @@ class PlacementWorkflowServiceTest {
         // Given
         testTask.setStatus(TaskStatus.NEW);
         RecordScanRequest request = new RecordScanRequest(
-            "PALLET001", 10, "SSCC001", "BARCODE001", null, "DEVICE001", null
+            "PALLET001", 10, "SSCC001", "BARCODE001", null, "DEVICE001", null,
+            null, null, null, null, null
         );
 
         when(taskLifecycleService.getTask(1L)).thenReturn(testTask);
@@ -219,7 +222,8 @@ class PlacementWorkflowServiceTest {
     void shouldThrowException_WhenPalletNotFound() {
         // Given
         RecordScanRequest request = new RecordScanRequest(
-            "INVALID", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null
+            "INVALID", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null,
+            null, null, null, null, null
         );
 
         when(taskLifecycleService.getTask(1L)).thenReturn(testTask);
@@ -236,7 +240,8 @@ class PlacementWorkflowServiceTest {
         // Given
         testTask.setPalletId(999L);
         RecordScanRequest request = new RecordScanRequest(
-            "PALLET001", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null
+            "PALLET001", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null,
+            null, null, null, null, null
         );
 
         when(taskLifecycleService.getTask(1L)).thenReturn(testTask);

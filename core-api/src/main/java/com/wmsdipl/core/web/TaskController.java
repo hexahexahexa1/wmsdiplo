@@ -199,6 +199,17 @@ public class TaskController {
         return taskService.hasDiscrepancies(id);
     }
 
+    @PostMapping("/{id}/priority")
+    @Operation(
+        summary = "Set task priority", 
+        description = "Updates the priority of a task. Higher values mean higher urgency (e.g., 200 > 100)."
+    )
+    @ApiResponse(responseCode = "200", description = "Priority updated successfully")
+    @ApiResponse(responseCode = "404", description = "Task not found")
+    public TaskDto setPriority(@PathVariable Long id, @RequestBody SetPriorityRequest req) {
+        return taskMapper.toDto(taskService.setPriority(id, req.priority));
+    }
+
     private static class AssignRequest {
         public String assignee;
         public String assignedBy;
@@ -212,5 +223,9 @@ public class TaskController {
 
     private static class ResolveRequest {
         public String comment;
+    }
+
+    private static class SetPriorityRequest {
+        public Integer priority;
     }
 }

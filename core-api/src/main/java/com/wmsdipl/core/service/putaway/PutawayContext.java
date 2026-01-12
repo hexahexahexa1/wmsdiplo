@@ -1,6 +1,7 @@
 package com.wmsdipl.core.service.putaway;
 
 import com.wmsdipl.core.domain.Location;
+import com.wmsdipl.core.domain.LocationType;
 import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.domain.Zone;
 
@@ -10,13 +11,15 @@ public class PutawayContext {
     private final String velocityClass;
     private final String skuCategory;
     private final Location currentLocation;
+    private final LocationType targetLocationType;
 
-    public PutawayContext(Receipt receipt, Zone preferredZone, String velocityClass, String skuCategory, Location currentLocation) {
+    public PutawayContext(Receipt receipt, Zone preferredZone, String velocityClass, String skuCategory, Location currentLocation, LocationType targetLocationType) {
         this.receipt = receipt;
         this.preferredZone = preferredZone;
         this.velocityClass = velocityClass;
         this.skuCategory = skuCategory;
         this.currentLocation = currentLocation;
+        this.targetLocationType = targetLocationType;
     }
 
     public Receipt getReceipt() {
@@ -37,5 +40,9 @@ public class PutawayContext {
 
     public Location getCurrentLocation() {
         return currentLocation;
+    }
+
+    public LocationType getTargetLocationType() {
+        return targetLocationType;
     }
 }

@@ -86,7 +86,9 @@ class ReceiptMapperTest {
             200L,
             "ШТ",
             BigDecimal.TEN,
-            "SSCC001"
+            "SSCC001",
+            null,  // lotNumberExpected
+            null   // expiryDateExpected
         );
 
         // When
@@ -111,7 +113,9 @@ class ReceiptMapperTest {
             200L,
             "ШТ",
             null, // null quantity
-            "SSCC001"
+            "SSCC001",
+            null,  // lotNumberExpected
+            null   // expiryDateExpected
         );
 
         // When

@@ -11,6 +11,7 @@ public record CreateReceiptRequest(
     @NotBlank String docNo,
     LocalDate docDate,
     String supplier,
+    Boolean crossDock,
     @NotNull List<Line> lines
 ) {
     public record Line(
@@ -19,6 +20,8 @@ public record CreateReceiptRequest(
         Long packagingId,
         String uom,
         BigDecimal qtyExpected,
-        String ssccExpected
+        String ssccExpected,
+        String lotNumberExpected,
+        LocalDate expiryDateExpected
     ) {}
 }

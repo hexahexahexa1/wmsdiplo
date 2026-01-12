@@ -28,8 +28,11 @@ public class ConsolidationStrategy implements PutawayStrategy {
     @Override
     public Optional<Location> findLocation(Pallet pallet, PutawayContext context) {
         if (pallet.getSkuId() != null) {
-            // Try locations that already hold the same SKU and are not blocked.
+            var locationType = context.getTargetLocationType();
+            
+            // Try locations that already hold the same SKU, match the target type, and are not blocked.
             Optional<Location> match = locationRepository.findAll().stream()
+                .filter(loc -> loc.getLocationType() == locationType) // Filter by target location type
                 .filter(loc -> loc.getStatus() == LocationStatus.AVAILABLE || loc.getStatus() == LocationStatus.OCCUPIED)
                 .filter(loc -> palletRepository.findByLocation(loc).stream()
                     .anyMatch(p -> pallet.getSkuId().equals(p.getSkuId())))

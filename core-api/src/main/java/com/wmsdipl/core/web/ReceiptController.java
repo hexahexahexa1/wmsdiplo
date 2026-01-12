@@ -100,13 +100,6 @@ public class ReceiptController {
         return ResponseEntity.accepted().build();
     }
 
-    @PostMapping("/{id}/resolve-pending")
-    @Operation(summary = "Resolve pending issues", description = "Resolves pending discrepancies and continues workflow")
-    public ResponseEntity<Void> resolvePending(@PathVariable Long id) {
-        receivingWorkflowService.resolveAndContinue(id);
-        return ResponseEntity.accepted().build();
-    }
-
     @PostMapping("/{id}/cancel")
     @Operation(summary = "Cancel receipt", description = "Cancels the receipt workflow")
     public ResponseEntity<Void> cancel(@PathVariable Long id) {

@@ -102,7 +102,8 @@ public class PutawayService {
     }
 
     /**
-     * Generates PLACEMENT tasks for all received pallets in a receipt.
+     * Generates placement tasks for all pallets that need placement.
+     * Processes pallets in RECEIVED, DAMAGED, and QUARANTINE statuses.
      * For each pallet, determines the target location and creates a task.
      * Updates pallet status to IN_TRANSIT.
      * 
@@ -115,10 +116,19 @@ public class PutawayService {
         Receipt receipt = receiptRepository.findById(receiptId)
                 .orElseThrow(() -> new IllegalArgumentException("Receipt not found: " + receiptId));
 
-        List<Pallet> pallets = palletRepository.findByReceiptAndStatus(receipt, PalletStatus.RECEIVED);
+        // Get all pallets that need placement
+        List<Pallet> receivedPallets = palletRepository.findByReceiptAndStatus(receipt, PalletStatus.RECEIVED);
+        List<Pallet> damagedPallets = palletRepository.findByReceiptAndStatus(receipt, PalletStatus.DAMAGED);
+        List<Pallet> quarantinePallets = palletRepository.findByReceiptAndStatus(receipt, PalletStatus.QUARANTINE);
+        
+        List<Pallet> allPallets = new ArrayList<>();
+        allPallets.addAll(receivedPallets);
+        allPallets.addAll(damagedPallets);
+        allPallets.addAll(quarantinePallets);
+        
         List<Task> tasks = new ArrayList<>();
 
-        for (Pallet pallet : pallets) {
+        for (Pallet pallet : allPallets) {
             Optional<Location> targetOpt = determineLocationForPallet(pallet);
             if (targetOpt.isEmpty()) {
                 continue; // No suitable location found, skip this pallet

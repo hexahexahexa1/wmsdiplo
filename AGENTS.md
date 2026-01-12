@@ -3,6 +3,246 @@
 ## Overview
 This document provides essential development guidelines for agentic coding assistants working on the WMSDIPL (Warehouse Management System) project. WMSDIPL is a multi-module Java 17 application with Spring Boot REST APIs, import services, and JavaFX desktop clients.
 
+**Note**: The original comprehensive AGENTS.md is preserved below. This top section provides quick reference for common operations.
+
+## Quick Reference (150-line Summary)
+
+### Build & Test Commands
+```bash
+# Build
+gradle build                           # Build all modules
+gradle :core-api:build                # Build specific module
+gradle clean build                    # Clean rebuild
+
+# Test
+gradle test                           # All tests
+gradle :core-api:test                 # Module tests
+gradle :core-api:test --tests "*ReceiptServiceTest"              # Single test class
+gradle :core-api:test --tests "*TaskServiceTest.shouldAssign*"   # Single test method
+
+# Run
+gradle :core-api:bootRun              # Start API (port 8080)
+gradle :import-service:bootRun        # Start import service
+gradle :desktop-client:run            # Start JavaFX client
+
+# Database
+docker compose up -d postgres         # Start PostgreSQL
+docker compose down                   # Stop containers
+
+# Verification
+gradle check                          # Run all checks
+gradle compileJava                    # Compile only
+```
+
+### Project Structure
+```
+WMSDIPL/
+├── shared-contracts/       # DTOs, request/response objects (Java records)
+├── core-api/              # Spring Boot REST API + PostgreSQL
+│   ├── domain/            # JPA entities, enums
+│   ├── repository/        # Spring Data JPA repositories
+│   ├── service/           # Business logic (works with entities, NOT DTOs)
+│   │   ├── workflow/      # Multi-step workflow orchestration
+│   │   └── putaway/       # Strategy pattern implementations
+│   ├── mapper/            # DTO ↔ Entity conversion
+│   ├── web/               # REST controllers (uses mappers + services)
+│   └── config/            # Spring configuration
+├── import-service/        # XML import processing service
+└── desktop-client/        # JavaFX desktop application
+```
+
+### Code Style Essentials
+
+#### Import Order
+```java
+import java.time.LocalDateTime;        // Java standard library
+import java.util.List;
+
+import org.springframework.stereotype.Service;  // Third-party libraries
+
+import com.wmsdipl.contracts.dto.ReceiptDto;    // Project packages
+import com.wmsdipl.core.domain.Receipt;
+```
+
+#### Naming Conventions
+- **Classes**: `PascalCase` (e.g., `ReceiptService`, `TaskController`, `PutawayStrategy`)
+- **Methods**: `camelCase` (e.g., `findById()`, `createReceipt()`, `isActive()`)
+- **Variables**: `camelCase` (e.g., `userRepository`, `createdAt`, `isProcessed`)
+- **Constants**: `UPPER_SNAKE_CASE` (e.g., `MAX_RETRY_COUNT`, `DEFAULT_TIMEOUT`)
+- **Test methods**: BDD style (e.g., `shouldReturnReceipt_WhenValidId()`)
+
+#### Layered Architecture Rules
+```java
+// ❌ WRONG: Service depends on DTOs
+@Service
+public class ReceiptService {
+    public ReceiptDto create(CreateReceiptRequest dto) { ... }  // NO!
+}
+
+// ✅ CORRECT: Service works with entities, mapper handles DTOs
+@Service
+public class ReceiptService {
+    public Receipt create(Receipt receipt) { ... }  // Returns entity
+}
+
+@RestController
+public class ReceiptController {
+    private final ReceiptService service;
+    private final ReceiptMapper mapper;
+    
+    @PostMapping
+    public ReceiptDto create(@Valid @RequestBody CreateReceiptRequest request) {
+        Receipt entity = mapper.toEntity(request);    // DTO → Entity
+        Receipt saved = service.create(entity);
+        return mapper.toDto(saved);                   // Entity → DTO
+    }
+}
+```
+
+#### Error Handling
+```java
+// Use Optional instead of null
+public Optional<Location> findLocation(Long id) { ... }
+
+// Throw specific exceptions
+throw new IllegalArgumentException("Invalid input: " + value);
+throw new IllegalStateException("Receipt already confirmed");
+throw new ResponseStatusException(NOT_FOUND, "Receipt not found: " + id);
+throw new ResponseStatusException(CONFLICT, "Duplicate barcode");
+```
+
+#### Transaction Management
+```java
+@Service
+@Transactional  // Class-level for all methods
+public class ReceiptService {
+    
+    @Transactional(readOnly = true)  // Read-only optimization
+    public List<Receipt> findAll() { ... }
+    
+    // Write methods use default @Transactional
+    public Receipt save(Receipt receipt) { ... }
+}
+```
+
+#### Dependency Injection
+```java
+// ✅ CORRECT: Constructor injection
+@Service
+public class TaskService {
+    private final TaskRepository taskRepository;
+    private final UserService userService;
+    
+    public TaskService(TaskRepository taskRepository, UserService userService) {
+        this.taskRepository = taskRepository;
+        this.userService = userService;
+    }
+}
+
+// ❌ WRONG: Field injection
+@Autowired
+private TaskRepository taskRepository;  // Don't use @Autowired
+```
+
+#### Code Formatting
+- **Indentation**: 4 spaces (no tabs)
+- **Line length**: 120 characters max
+- **Braces**: Opening brace on same line
+- **Blank lines**: Between import groups, between methods
+
+#### JPA & Database
+```java
+@Entity
+@Table(name = "receipts")
+public class Receipt {
+    @Enumerated(EnumType.STRING)  // ✅ Use STRING, never ORDINAL
+    private ReceiptStatus status;
+    
+    @OneToMany(mappedBy = "receipt")
+    private List<ReceiptLine> lines;
+}
+```
+
+#### Lombok Annotations
+```java
+@Data                          // Generates getters, setters, toString, equals, hashCode
+@AllArgsConstructor           // All-args constructor
+@NoArgsConstructor            // No-args constructor (required for JPA)
+@Builder                      // Builder pattern
+public class Receipt { ... }
+```
+
+#### Logging
+```java
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+@Service
+public class ReceiptService {
+    private static final Logger log = LoggerFactory.getLogger(ReceiptService.class);
+    
+    public void process(Long id) {
+        log.info("Processing receipt: {}", id);  // ✅ Parameterized
+        log.error("Failed to process: {}", id, exception);
+        // ❌ Don't: log.info("Processing: " + id);  // String concatenation
+    }
+}
+```
+
+### Critical Rules (Must Follow)
+1. **Services NEVER depend on DTOs** - use domain entities only
+2. **Controllers use Mappers** - convert DTOs ↔ Entities
+3. **Return `Optional<T>`** instead of null
+4. **Constructor injection** - not `@Autowired` fields
+5. **`@Transactional`** on service methods, `readOnly = true` for queries
+6. **`@Enumerated(EnumType.STRING)`** for all enums (never ORDINAL)
+7. **Test naming**: BDD style like `shouldReturnUser_WhenValidId()`
+8. **Planning Mode**: Ask requirements questions BEFORE coding new features
+
+### Common Pitfalls to Avoid
+- ❌ Returning `null` (use `Optional<T>`)
+- ❌ Services depending on DTOs (use entities)
+- ❌ Catching generic `Exception` (be specific)
+- ❌ Hardcoded values (use configuration)
+- ❌ `@Autowired` fields (use constructor injection)
+- ❌ Mixing UI and business logic in controllers
+- ❌ Duplicating DTOs across modules (use shared-contracts)
+- ❌ Creating circular service dependencies
+
+### Testing Examples
+```java
+@ExtendWith(MockitoExtension.class)
+class ReceiptServiceTest {
+    @Mock private ReceiptRepository receiptRepository;
+    @InjectMocks private ReceiptService receiptService;
+    
+    @Test
+    void shouldReturnReceipt_WhenValidId() {
+        // Given
+        Receipt receipt = new Receipt();
+        when(receiptRepository.findById(1L)).thenReturn(Optional.of(receipt));
+        
+        // When
+        Receipt result = receiptService.findById(1L);
+        
+        // Then
+        assertNotNull(result);
+        verify(receiptRepository).findById(1L);
+    }
+}
+```
+
+### Environment Variables
+- **Database**: PostgreSQL via Docker Compose
+- **Ports**: Core API (8080), Import Service (8090)
+- **Default User**: `admin` / `admin`
+- **Config**: `application.yml` + environment variables for secrets
+
+### Copilot Integration
+See `.github/copilot-instructions.md` for project setup guidelines when initializing new development environments.
+
+---
+
 ## Planning Mode: Requirements Gathering & Analysis
 
 **CRITICAL**: When a user requests a new feature, refactoring, or significant change, you MUST enter "Planning Mode" BEFORE writing any code.
@@ -801,6 +1041,6 @@ The project was recently restructured to improve modularity and reduce service c
 
 ## Environment & Credentials
 - **Database**: PostgreSQL via Docker (see docker-compose.yml)
-- **Test user**: `testuser` / `password`
+- **Default user**: `admin` / `admin`
 - **Ports**: Core API (8080), Import Service (8090)
 - **Config**: Use `application.yml` + environment variables for secrets

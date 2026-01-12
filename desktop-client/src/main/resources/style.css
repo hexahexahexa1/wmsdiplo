@@ -85,6 +85,22 @@
     -fx-background-color: #1d1d20;
 }
 
+.filter-btn {
+    -fx-background-color: #0b0b0d;
+    -fx-text-fill: white;
+    -fx-background-radius: 26;
+    -fx-padding: 12 20;
+    -fx-font-weight: 800;
+    -fx-font-size: 15px;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.22), 14, 0.30, 0, 4);
+    -fx-min-width: 100;
+    -fx-pref-width: 100;
+}
+
+.filter-btn:hover {
+    -fx-background-color: #1d1d20;
+}
+
 .table-view {
     -fx-background-color: transparent;
     -fx-control-inner-background: transparent;

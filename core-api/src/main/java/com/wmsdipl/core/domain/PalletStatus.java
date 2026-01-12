@@ -8,5 +8,7 @@ public enum PalletStatus {
     IN_TRANSIT,
     PLACED,
     PICKING,
-    SHIPPED
+    SHIPPED,
+    DAMAGED,      // Товар с повреждением
+    QUARANTINE    // Товар на карантине
 }

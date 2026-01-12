@@ -27,6 +27,11 @@ public class ScanMapper {
             scan.getQty(),
             scan.getDeviceId(),
             scan.getDiscrepancy(),
+            scan.getDamageFlag(),
+            scan.getDamageType(),
+            scan.getDamageDescription(),
+            scan.getLotNumber(),
+            scan.getExpiryDate(),
             scan.getScannedAt()
         );
     }

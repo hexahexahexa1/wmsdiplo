@@ -62,11 +62,16 @@ public class StockMapper {
 
     /**
      * Convert PalletMovement entity to StockMovementDto.
+     * Handles null values gracefully to prevent NullPointerException.
      * 
      * @param movement PalletMovement entity
      * @return StockMovementDto
      */
     public StockMovementDto toStockMovementDto(PalletMovement movement) {
+        if (movement == null) {
+            return null;
+        }
+        
         return new StockMovementDto(
             movement.getId(),
             movement.getPallet() != null ? movement.getPallet().getId() : null,

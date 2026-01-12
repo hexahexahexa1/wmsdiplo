@@ -17,6 +17,29 @@ public interface LocationRepository extends JpaRepository<Location, Long> {
     List<Location> findByStatusAndActiveTrue(LocationStatus status);
     
     /**
+     * Finds locations by type and status (active only).
+     * Used for placement strategies to filter by location type.
+     * 
+     * @param locationType type of location (e.g., STORAGE, CROSS_DOCK, DAMAGED)
+     * @param status location status (typically AVAILABLE)
+     * @return list of matching locations
+     */
+    List<Location> findByLocationTypeAndStatusAndActiveTrue(
+        LocationType locationType, LocationStatus status);
+    
+    /**
+     * Finds locations by zone, type, and status (active only).
+     * Used for placement strategies with zone preference.
+     * 
+     * @param zone the zone to filter by
+     * @param locationType type of location (e.g., STORAGE, CROSS_DOCK, DAMAGED)
+     * @param status location status (typically AVAILABLE)
+     * @return list of matching locations
+     */
+    List<Location> findByZoneAndLocationTypeAndStatusAndActiveTrue(
+        Zone zone, LocationType locationType, LocationStatus status);
+    
+    /**
      * Finds first available location with specified type.
      * Used to determine transit location for receiving workflow.
      * 

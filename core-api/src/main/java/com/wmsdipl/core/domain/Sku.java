@@ -25,6 +25,9 @@ public class Sku {
     @Column(nullable = false, length = 32)
     private String uom;
 
+    @Column(name = "pallet_capacity", precision = 10, scale = 2)
+    private java.math.BigDecimal palletCapacity;
+
     public Sku() {}
 
     public Sku(String code, String name, String uom) {

@@ -113,14 +113,16 @@ public class StockController {
 
     /**
      * Get movement history for a specific pallet.
+     * Returns empty list if no history exists (which is normal for newly created pallets).
      * 
      * @param palletId Pallet ID
-     * @return List of movements ordered by date descending
+     * @return List of movements ordered by date descending (empty list if no history)
      */
     @GetMapping("/pallet/{palletId}/history")
     @Operation(
         summary = "Get pallet movement history", 
-        description = "Retrieves chronological movement history for a pallet (newest first)"
+        description = "Retrieves chronological movement history for a pallet (newest first). " +
+                     "Returns empty list if no movements have been recorded yet."
     )
     public List<StockMovementDto> getPalletHistory(
             @Parameter(description = "Pallet ID")
@@ -129,6 +131,7 @@ public class StockController {
         List<PalletMovement> movements = stockService.getPalletHistory(palletId);
         return movements.stream()
                 .map(stockMapper::toStockMovementDto)
+                .filter(dto -> dto != null) // Filter out any null results from mapping errors
                 .collect(Collectors.toList());
     }
 

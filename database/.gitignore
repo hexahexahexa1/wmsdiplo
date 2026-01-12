@@ -1,0 +1,10 @@
+# Ignore temporary backups
+*_backup_*.sql
+schema.sql
+
+# Keep main files
+!init_schema.sql
+!test_data.sql
+!*.bat
+!*.sh
+!README.md

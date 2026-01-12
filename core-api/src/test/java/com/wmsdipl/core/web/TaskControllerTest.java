@@ -221,6 +221,11 @@ class TaskControllerTest {
                 BigDecimal.TEN,     // qty
                 "DEVICE-01",        // deviceId
                 false,              // discrepancy
+                false,              // damageFlag
+                null,               // damageType
+                null,               // damageDescription
+                null,               // lotNumber
+                null,               // expiryDate
                 LocalDateTime.now() // scannedAt
         );
 
@@ -249,6 +254,11 @@ class TaskControllerTest {
                 BigDecimal.TEN,     // qty
                 "DEVICE-01",        // deviceId
                 false,              // discrepancy
+                false,              // damageFlag
+                null,               // damageType
+                null,               // damageDescription
+                null,               // lotNumber
+                null,               // expiryDate
                 LocalDateTime.now() // scannedAt
         );
 
@@ -279,7 +289,7 @@ class TaskControllerTest {
     @Test
     void shouldRecordPlacementScan_WhenTaskTypeIsPlacement() throws Exception {
         // Given
-        Task task = createMockTask(1L, TaskType.PLACEMENT);
+        Task task = createMockTask(1L, TaskType.RECEIVING);
         Scan scan = createMockScan(1L);
         ScanDto scanDto = new ScanDto(
                 1L,                 // id
@@ -290,6 +300,11 @@ class TaskControllerTest {
                 BigDecimal.TEN,     // qty
                 "DEVICE-01",        // deviceId
                 false,              // discrepancy
+                false,              // damageFlag
+                null,               // damageType
+                null,               // damageDescription
+                null,               // lotNumber
+                null,               // expiryDate
                 LocalDateTime.now() // scannedAt
         );
 

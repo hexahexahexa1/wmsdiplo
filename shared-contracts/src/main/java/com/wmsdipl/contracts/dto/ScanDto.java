@@ -1,6 +1,7 @@
 package com.wmsdipl.contracts.dto;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -16,6 +17,11 @@ public record ScanDto(
     BigDecimal qty,
     String deviceId,
     Boolean discrepancy,
+    Boolean damageFlag,
+    String damageType,
+    String damageDescription,
+    String lotNumber,
+    LocalDate expiryDate,
     LocalDateTime scannedAt
 ) {
 }

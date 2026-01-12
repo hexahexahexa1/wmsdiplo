@@ -120,7 +120,7 @@ public class TaskLifecycleService {
                 
                 // Auto-resolve: user confirmed completion despite shortage
                 discrepancy.setResolved(true);
-                discrepancy.setComment("Shortage confirmed by operator during task completion. " +
+                discrepancy.setDescription("Shortage confirmed by operator during task completion. " +
                     "Expected: " + qtyAssigned + ", Received: " + qtyDone);
                 
                 discrepancyRepository.save(discrepancy);
