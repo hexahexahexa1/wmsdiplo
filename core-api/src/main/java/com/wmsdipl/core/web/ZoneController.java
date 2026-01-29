@@ -31,6 +31,7 @@ public class ZoneController {
 
     @GetMapping
     @Operation(summary = "List all zones", description = "Retrieves all warehouse zones (e.g., receiving, picking, shipping)")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR', 'PC_OPERATOR')")
     public List<ZoneDto> getAll() {
         return zoneService.getAll().stream()
                 .map(zoneMapper::toDto)
@@ -39,6 +40,7 @@ public class ZoneController {
 
     @GetMapping("/{id}")
     @Operation(summary = "Get zone by ID", description = "Retrieves a single zone by its unique identifier")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR', 'PC_OPERATOR')")
     public ResponseEntity<ZoneDto> getById(@PathVariable Long id) {
         return zoneService.getById(id)
                 .map(zoneMapper::toDto)
@@ -47,8 +49,8 @@ public class ZoneController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
-    @Operation(summary = "Create zone", description = "Creates a new warehouse zone (ADMIN/SUPERVISOR only)")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Create zone", description = "Creates a new warehouse zone (ADMIN only)")
     public ResponseEntity<ZoneDto> create(@Valid @RequestBody CreateZoneRequest request) {
         Zone zone = zoneMapper.toEntity(request);
         Zone created = zoneService.create(zone);
@@ -57,8 +59,8 @@ public class ZoneController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
-    @Operation(summary = "Update zone", description = "Updates an existing zone's details (ADMIN/SUPERVISOR only)")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Update zone", description = "Updates an existing zone's details (ADMIN only)")
     public ResponseEntity<ZoneDto> update(@PathVariable Long id, @Valid @RequestBody UpdateZoneRequest request) {
         Zone existing = zoneService.getById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Zone not found: " + id));

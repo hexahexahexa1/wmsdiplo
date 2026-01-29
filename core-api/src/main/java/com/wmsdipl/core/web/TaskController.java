@@ -19,6 +19,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -29,6 +30,7 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/tasks")
 @Tag(name = "Tasks", description = "Warehouse task management operations including receiving, putaway, and discrepancy handling")
+@PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR', 'OPERATOR')")
 public class TaskController {
 
     private final TaskService taskService;
@@ -80,6 +82,7 @@ public class TaskController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
     @Operation(summary = "Create task", description = "Creates a new warehouse task")
     public ResponseEntity<TaskDto> create(@RequestBody Task task) {
         Task created = taskService.create(task);
@@ -88,9 +91,27 @@ public class TaskController {
     }
 
     @PostMapping("/{id}/assign")
-    @Operation(summary = "Assign task", description = "Assigns a task to a warehouse worker")
-    public TaskDto assign(@PathVariable Long id, @RequestBody AssignRequest req) {
-        return taskMapper.toDto(taskService.assign(id, req.assignee, req.assignedBy));
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR', 'OPERATOR')")
+    @Operation(summary = "Assign task", description = "Assigns a task to a warehouse worker. Operators can only assign NEW tasks to themselves.")
+    public TaskDto assign(@PathVariable Long id, @RequestBody AssignRequest req, java.security.Principal principal) {
+        String currentUser = principal.getName();
+        var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        boolean isAdminOrSupervisor = auth.getAuthorities().stream()
+            .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN") || a.getAuthority().equals("ROLE_SUPERVISOR"));
+        
+        if (!isAdminOrSupervisor) {
+            // It's an operator
+            if (!currentUser.equals(req.assignee)) {
+                throw new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN, "Operators can only assign tasks to themselves");
+            }
+            
+            Task task = taskService.get(id);
+            if (task.getStatus() != com.wmsdipl.core.domain.TaskStatus.NEW) {
+                throw new ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "Operators can only assign NEW tasks");
+            }
+        }
+        
+        return taskMapper.toDto(taskService.assign(id, req.assignee, req.assignedBy != null ? req.assignedBy : currentUser));
     }
 
     @PostMapping("/{id}/start")
@@ -106,6 +127,7 @@ public class TaskController {
     }
 
     @PostMapping("/{id}/cancel")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
     @Operation(summary = "Cancel task", description = "Cancels a task that is no longer needed")
     public TaskDto cancel(@PathVariable Long id) {
         return taskMapper.toDto(taskService.cancel(id));
@@ -161,6 +183,7 @@ public class TaskController {
     }
 
     @PostMapping("/generate")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
     @Operation(summary = "Generate tasks", description = "Generates multiple tasks for a receipt (e.g., receiving or putaway tasks)")
     @ApiResponse(responseCode = "202", description = "Tasks generation accepted")
     @ApiResponse(responseCode = "400", description = "Invalid request or receipt lines missing SKU")
@@ -180,6 +203,7 @@ public class TaskController {
     }
 
     @GetMapping("/discrepancies/open")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
     @Operation(summary = "List open discrepancies", description = "Retrieves all unresolved discrepancies from warehouse tasks")
     public List<DiscrepancyDto> openDiscrepancies() {
         return taskService.findOpenDiscrepancies().stream()
@@ -188,6 +212,7 @@ public class TaskController {
     }
 
     @PostMapping("/discrepancies/{id}/resolve")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
     @Operation(summary = "Resolve discrepancy", description = "Marks a discrepancy as resolved with a comment")
     public DiscrepancyDto resolve(@PathVariable Long id, @RequestBody ResolveRequest req) {
         return discrepancyMapper.toDto(taskService.resolveDiscrepancy(id, req.comment));
@@ -200,6 +225,7 @@ public class TaskController {
     }
 
     @PostMapping("/{id}/priority")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
     @Operation(
         summary = "Set task priority", 
         description = "Updates the priority of a task. Higher values mean higher urgency (e.g., 200 > 100)."

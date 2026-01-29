@@ -11,10 +11,13 @@ import com.wmsdipl.core.repository.DiscrepancyRepository;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.TaskRepository;
+import com.wmsdipl.core.service.workflow.PlacementWorkflowService;
+import com.wmsdipl.core.service.workflow.ReceivingWorkflowService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
@@ -31,19 +34,25 @@ public class TaskService {
     private final DiscrepancyRepository discrepancyRepository;
     private final ScanRepository scanRepository;
     private final TaskLifecycleService taskLifecycleService;
+    private final ReceivingWorkflowService receivingWorkflowService;
+    private final PlacementWorkflowService placementWorkflowService;
 
     public TaskService(
             TaskRepository taskRepository,
             ReceiptRepository receiptRepository,
             DiscrepancyRepository discrepancyRepository,
             ScanRepository scanRepository,
-            TaskLifecycleService taskLifecycleService
+            TaskLifecycleService taskLifecycleService,
+            ReceivingWorkflowService receivingWorkflowService,
+            PlacementWorkflowService placementWorkflowService
     ) {
         this.taskRepository = taskRepository;
         this.receiptRepository = receiptRepository;
         this.discrepancyRepository = discrepancyRepository;
         this.scanRepository = scanRepository;
         this.taskLifecycleService = taskLifecycleService;
+        this.receivingWorkflowService = receivingWorkflowService;
+        this.placementWorkflowService = placementWorkflowService;
     }
 
     @Transactional(readOnly = true)
@@ -81,7 +90,18 @@ public class TaskService {
 
     @Transactional
     public Task complete(Long id) {
-        return taskLifecycleService.complete(id);
+        Task completedTask = taskLifecycleService.complete(id);
+        
+        // Auto-complete receipt based on task type
+        if (completedTask.getReceipt() != null) {
+            if (completedTask.getTaskType() == TaskType.RECEIVING) {
+                receivingWorkflowService.checkAndCompleteReceipt(completedTask.getReceipt().getId());
+            } else if (completedTask.getTaskType() == TaskType.PLACEMENT) {
+                placementWorkflowService.autoCompleteReceiptIfAllTasksCompleted(completedTask.getReceipt().getId());
+            }
+        }
+        
+        return completedTask;
     }
 
     @Transactional
@@ -92,7 +112,7 @@ public class TaskService {
     /**
      * Releases a task back to NEW status.
      * Operator can release an assigned/in-progress task back to the pool.
-     * The work already done (qtyDone, scans) is preserved.
+     * The work already done (qtyDone, scans) is wiped to allow a fresh start.
      * 
      * @param id task ID
      * @return released task
@@ -111,7 +131,10 @@ public class TaskService {
         task.setStatus(TaskStatus.NEW);
         task.setAssignee(null);
         task.setStartedAt(null);
-        // qtyDone is NOT reset - work already done is preserved
+        task.setQtyDone(BigDecimal.ZERO);
+        
+        // Delete all associated scans for a fresh start
+        scanRepository.deleteByTask(task);
         
         return taskRepository.save(task);
     }

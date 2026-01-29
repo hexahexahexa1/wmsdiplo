@@ -101,11 +101,27 @@ public class TaskLifecycleService {
     public Task complete(Long id) {
         Task task = getTask(id);
         
-        // Check for UNDER_QTY discrepancy
+        // Validation: Cannot complete empty task
         BigDecimal qtyDone = task.getQtyDone() != null ? task.getQtyDone() : BigDecimal.ZERO;
-        BigDecimal qtyAssigned = task.getQtyAssigned();
+        if (qtyDone.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.BAD_REQUEST, 
+                "Нельзя завершить задание: ничего не отсканировано");
+        }
+
+        BigDecimal qtyAssigned = task.getQtyAssigned() != null ? task.getQtyAssigned() : BigDecimal.ZERO;
+
+        // Specific validation for PLACEMENT tasks: no discrepancies allowed
+        if (task.getTaskType() == TaskType.PLACEMENT) {
+            if (qtyDone.compareTo(qtyAssigned) != 0) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "Нельзя завершить размещение при наличии расхождений. Ожидалось: " + qtyAssigned + ", Размещено: " + qtyDone);
+            }
+        }
         
-        if (qtyAssigned != null && qtyDone.compareTo(qtyAssigned) < 0) {
+        // Check for UNDER_QTY discrepancy (for RECEIVING tasks)
+        if (task.getTaskType() == TaskType.RECEIVING && qtyAssigned.compareTo(BigDecimal.ZERO) > 0 && qtyDone.compareTo(qtyAssigned) < 0) {
             // Create UNDER_QTY discrepancy record (auto-resolved)
             Receipt receipt = task.getReceipt();
             ReceiptLine line = task.getLine();

@@ -17,4 +17,6 @@ public interface ScanRepository extends JpaRepository<Scan, Long> {
      * @return scans ordered by scannedAt descending
      */
     List<Scan> findByTaskOrderByScannedAtDesc(Task task);
+
+    void deleteByTask(Task task);
 }

@@ -289,7 +289,7 @@ class TaskControllerTest {
     @Test
     void shouldRecordPlacementScan_WhenTaskTypeIsPlacement() throws Exception {
         // Given
-        Task task = createMockTask(1L, TaskType.RECEIVING);
+        Task task = createMockTask(1L, TaskType.PLACEMENT);
         Scan scan = createMockScan(1L);
         ScanDto scanDto = new ScanDto(
                 1L,                 // id

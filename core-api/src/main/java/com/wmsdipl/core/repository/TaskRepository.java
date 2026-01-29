@@ -29,4 +29,6 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
      * Used to filter "My tasks in progress", "My assigned tasks", etc.
      */
     List<Task> findByAssigneeAndStatus(String assignee, TaskStatus status);
+
+    long countByTargetLocationIdAndStatusIn(Long targetLocationId, java.util.Collection<TaskStatus> statuses);
 }

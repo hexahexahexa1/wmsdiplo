@@ -85,7 +85,7 @@ public class ReceivingWorkflowService {
      * - Otherwise, creates 1 task per line (legacy behavior)
      */
     @Transactional
-    public void startReceiving(Long receiptId) {
+    public int startReceiving(Long receiptId) {
         Receipt receipt = receiptRepository.findById(receiptId)
             .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Receipt not found"));
         
@@ -103,9 +103,13 @@ public class ReceivingWorkflowService {
         }
         
         // Create tasks for each line (with multi-pallet auto-split if needed)
-        receipt.getLines().forEach(line -> createTasksForLine(receipt, line));
+        int[] count = {0};
+        receipt.getLines().forEach(line -> {
+            count[0] += createTasksForLine(receipt, line);
+        });
         
         receipt.setStatus(ReceiptStatus.IN_PROGRESS);
+        return count[0];
     }
     
     /**
@@ -113,9 +117,11 @@ public class ReceivingWorkflowService {
      * 
      * @param receipt the receipt
      * @param line the receipt line
+     * @return number of tasks created
      */
-    private void createTasksForLine(Receipt receipt, ReceiptLine line) {
+    private int createTasksForLine(Receipt receipt, ReceiptLine line) {
         BigDecimal qtyExpected = line.getQtyExpected();
+        int tasksCreated = 0;
         
         // Try to get SKU pallet capacity
         BigDecimal palletCapacity = null;
@@ -148,6 +154,7 @@ public class ReceivingWorkflowService {
                 task.setStatus(TaskStatus.NEW);
                 task.setQtyAssigned(qtyForThisTask);
                 taskRepository.save(task);
+                tasksCreated++;
                 
                 remaining = remaining.subtract(qtyForThisTask);
             }
@@ -160,7 +167,9 @@ public class ReceivingWorkflowService {
             task.setStatus(TaskStatus.NEW);
             task.setQtyAssigned(qtyExpected);
             taskRepository.save(task);
+            tasksCreated++;
         }
+        return tasksCreated;
     }
 
     /**
@@ -229,19 +238,6 @@ public class ReceivingWorkflowService {
             pallet.setReceipt(task.getReceipt());
             pallet.setReceiptLine(line);
             
-            // NEW: Set lot number and expiry date from request
-            if (request.lotNumber() != null) {
-                pallet.setLotNumber(request.lotNumber());
-            }
-            if (request.expiryDate() != null) {
-                pallet.setExpiryDate(request.expiryDate());
-            }
-            
-            // NEW: Check for damage flag and set pallet status accordingly
-            if (Boolean.TRUE.equals(request.damageFlag())) {
-                pallet.setStatus(PalletStatus.DAMAGED);
-            }
-            
             // Set transit location
             transitLocation = findTransitLocation();
             pallet.setLocation(transitLocation);
@@ -250,6 +246,21 @@ public class ReceivingWorkflowService {
             if (pallet.getQuantity() == null) {
                 pallet.setQuantity(BigDecimal.ZERO);
             }
+        }
+
+        // UPDATE ATTRIBUTES ON EVERY SCAN (Not just first scan)
+        // Update lot/expiry if provided
+        if (request.lotNumber() != null) {
+            pallet.setLotNumber(request.lotNumber());
+        }
+        if (request.expiryDate() != null) {
+            pallet.setExpiryDate(request.expiryDate());
+        }
+        
+        // Check for damage flag and update pallet status if damaged
+        // If ANY scan is damaged, the whole pallet is considered DAMAGED
+        if (Boolean.TRUE.equals(request.damageFlag())) {
+            pallet.setStatus(PalletStatus.DAMAGED);
         }
         
         // === 7. ACCUMULATE QUANTITY ON PALLET ===
@@ -413,6 +424,31 @@ public class ReceivingWorkflowService {
             });
         
         return receipt;
+    }
+
+    /**
+     * Automatically checks if all receiving tasks are completed, and if so,
+     * transitions the receipt to ACCEPTED (or READY_FOR_SHIPMENT).
+     * 
+     * Called by TaskService when a receiving task is completed.
+     */
+    @Transactional
+    public void checkAndCompleteReceipt(Long receiptId) {
+        Receipt receipt = receiptRepository.findById(receiptId).orElse(null);
+        if (receipt == null || receipt.getStatus() != ReceiptStatus.IN_PROGRESS) {
+            return;
+        }
+
+        List<Task> tasks = taskRepository.findByReceiptIdAndTaskType(receiptId, TaskType.RECEIVING);
+        if (tasks.isEmpty()) {
+            return;
+        }
+
+        boolean allCompleted = tasks.stream().allMatch(t -> t.getStatus() == TaskStatus.COMPLETED);
+        if (allCompleted) {
+            // Reuse logic from completeReceiving
+            completeReceiving(receiptId);
+        }
     }
 
     /**

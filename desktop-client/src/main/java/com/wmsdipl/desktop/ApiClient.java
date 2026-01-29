@@ -35,6 +35,7 @@ public class ApiClient {
     private final String baseUrl;
     private String basicAuth;
     private String currentUsername;
+    private User currentUser;
 
     public ApiClient() {
         this(System.getenv().getOrDefault("WMS_CORE_API_BASE", "http://localhost:8080"));
@@ -49,7 +50,7 @@ public class ApiClient {
         this.baseUrl = baseUrl;
     }
 
-    public boolean login(String username, String password) throws IOException, InterruptedException {
+    public User login(String username, String password) throws IOException, InterruptedException {
         System.out.println("[DEBUG] ApiClient.login: Attempting login for user: " + username);
         var payload = mapper.createObjectNode();
         payload.put("username", username);
@@ -66,20 +67,26 @@ public class ApiClient {
         if (response.statusCode() == 200) {
             setCredentials(username, password);
             this.currentUsername = username;
-            System.out.println("[DEBUG] ApiClient.login: Login successful, credentials saved");
-            return true;
+            this.currentUser = mapper.readValue(response.body(), User.class);
+            System.out.println("[DEBUG] ApiClient.login: Login successful, credentials saved. Role: " + currentUser.role());
+            return currentUser;
         }
         System.out.println("[WARNING] ApiClient.login: Login failed with status " + response.statusCode() + ", body: " + response.body());
-        return false;
+        return null;
     }
 
     public String getCurrentUsername() {
         return currentUsername;
     }
     
+    public User getCurrentUser() {
+        return currentUser;
+    }
+    
     public void logout() {
         this.basicAuth = null;
         this.currentUsername = null;
+        this.currentUser = null;
     }
 
     private void setCredentials(String username, String password) {
@@ -135,16 +142,18 @@ public class ApiClient {
         postNoBody("/api/receipts/" + id + "/accept");
     }
 
-    public void startReceiving(long id) throws IOException, InterruptedException {
-        postNoBody("/api/receipts/" + id + "/start-receiving");
+    public Integer startReceiving(long id) throws IOException, InterruptedException {
+        Map<String, Integer> res = postForObject("/api/receipts/" + id + "/start-receiving", null, new TypeReference<Map<String, Integer>>(){});
+        return res.get("count");
     }
 
     public void completeReceiving(long id) throws IOException, InterruptedException {
         postNoBody("/api/receipts/" + id + "/complete-receiving");
     }
 
-    public void startPlacement(long id) throws IOException, InterruptedException {
-        postNoBody("/api/receipts/" + id + "/start-placement");
+    public Integer startPlacement(long id) throws IOException, InterruptedException {
+        Map<String, Integer> res = postForObject("/api/receipts/" + id + "/start-placement", null, new TypeReference<Map<String, Integer>>(){});
+        return res.get("count");
     }
 
     public void completePlacement(long id) throws IOException, InterruptedException {
@@ -474,6 +483,27 @@ public class ApiClient {
         throw new IOException(formatErrorMessage(response.statusCode(), path, response.body()));
     }
 
+    private <T> T postForObject(String path, Object payload, TypeReference<T> responseType) throws IOException, InterruptedException {
+        HttpRequest.Builder builder = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + path))
+            .header("Content-Type", "application/json");
+        
+        if (payload == null) {
+            builder.POST(HttpRequest.BodyPublishers.noBody());
+        } else {
+            builder.POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload)));
+        }
+        
+        HttpRequest request = builder.build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), responseType);
+        }
+        
+        throw new IOException(formatErrorMessage(response.statusCode(), path, response.body()));
+    }
+
     private <T> List<T> getForList(String path, TypeReference<List<T>> type) throws IOException, InterruptedException {
         HttpRequest request = withAuth(HttpRequest.newBuilder())
             .uri(URI.create(baseUrl + path))
@@ -532,6 +562,10 @@ public class ApiClient {
                 return "Доступ запрещен: у текущего пользователя недостаточно прав для выполнения операции '" 
                     + resourceName + "'. Требуется роль ADMIN.";
             case 404:
+                String bodyMsg = extractErrorFromBody(body);
+                if (bodyMsg != null && !bodyMsg.isEmpty() && !bodyMsg.equals(body)) {
+                    return bodyMsg;
+                }
                 return "Ресурс не найден: " + resourceName;
             case 400:
                 return "Неверный запрос: " + extractErrorFromBody(body);

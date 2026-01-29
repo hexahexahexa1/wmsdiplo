@@ -31,6 +31,7 @@ import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.SelectionMode;
+import javafx.scene.control.Separator;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
@@ -86,21 +87,29 @@ public class DesktopClientApplication extends Application {
         shell.setPrefSize(1100, 720);
         shell.setStyle("-fx-background-color: #1c1c1c;");
 
-        VBox nav = buildNav();
-        shell.setLeft(nav);
-
         contentHolder = new VBox();
         contentHolder.setPadding(new Insets(18));
         contentHolder.setSpacing(12);
         shell.setCenter(contentHolder);
 
-        showReceiptsPane();
-
-        Scene scene = new Scene(shell);
-        applyStyles(scene);
-        stage.setScene(scene);
-        stage.setTitle("WMSDIPL");
-        stage.show();
+        // Determine start page based on role
+        String role = apiClient.getCurrentUser().role();
+        
+        Platform.runLater(() -> {
+            if ("OPERATOR".equalsIgnoreCase(role)) {
+                activeModule = "terminal";
+                showTerminalPane();
+            } else {
+                activeModule = "receipts";
+                showReceiptsPane();
+            }
+            
+            Scene scene = new Scene(shell);
+            applyStyles(scene);
+            stage.setScene(scene);
+            stage.setTitle("WMSDIPL - " + apiClient.getCurrentUser().username() + " [" + role + "]");
+            stage.show();
+        });
     }
 
     private VBox buildNav() {
@@ -109,32 +118,55 @@ public class DesktopClientApplication extends Application {
         logo.setAlignment(Pos.CENTER);
         logo.setMaxWidth(Double.MAX_VALUE);
 
-        Button receiptsBtn = navButton("Приходы", activeModule.equals("receipts"), this::showReceiptsPane);
-        Button topologyBtn = navButton("Топология", activeModule.equals("topology"), this::showTopologyPane);
-        Button palletsBtn = navButton("Паллеты", activeModule.equals("pallets"), this::showPalletsPane);
-        Button stockBtn = navButton("Остатки", activeModule.equals("stock"), this::showStockPane);
-        Button tasksBtn = navButton("Задания", activeModule.equals("tasks"), this::showTasksPane);
-        Button analyticsBtn = navButton("Аналитика", activeModule.equals("analytics"), this::showAnalyticsPane);
-        Button skusBtn = navButton("Номенклатура", activeModule.equals("skus"), this::showSkusPane);
-        Button terminalBtn = navButton("Терминал", activeModule.equals("terminal"), this::showTerminalPane);
-        Button usersBtn = navButton("Пользователи", activeModule.equals("users"), this::showUsersPane);
-        Button settingsBtn = navButton("Настройки", activeModule.equals("settings"), this::showSettingsPane);
-        
-        // Spacer to push logout button to bottom
-        VBox spacer = new VBox();
-        VBox.setVgrow(spacer, Priority.ALWAYS);
-        
-        Button logoutBtn = new Button("Выйти");
-        logoutBtn.getStyleClass().add("nav-button");
-        logoutBtn.setStyle("-fx-background-color: #8B0000; -fx-text-fill: white;");
-        logoutBtn.setMaxWidth(Double.MAX_VALUE);
-        logoutBtn.setOnAction(e -> handleLogout());
+        String role = apiClient.getCurrentUser() != null ? apiClient.getCurrentUser().role() : "OPERATOR";
 
-        VBox nav = new VBox(14, logo, receiptsBtn, topologyBtn, palletsBtn, stockBtn, tasksBtn, analyticsBtn, skusBtn, terminalBtn, usersBtn, settingsBtn, spacer, logoutBtn);
+        VBox nav = new VBox(14, logo);
         nav.setPadding(new Insets(24, 24, 24, 24));
         nav.setPrefWidth(210);
         nav.setAlignment(Pos.TOP_CENTER);
         nav.setStyle("-fx-background-color: #0e0e10;");
+
+        if (!"OPERATOR".equalsIgnoreCase(role)) {
+            nav.getChildren().add(navButton(I18n.get("nav.receipts"), activeModule.equals("receipts"), this::showReceiptsPane));
+            nav.getChildren().add(navButton(I18n.get("nav.topology"), activeModule.equals("topology"), this::showTopologyPane));
+            nav.getChildren().add(navButton(I18n.get("nav.pallets"), activeModule.equals("pallets"), this::showPalletsPane));
+            nav.getChildren().add(navButton(I18n.get("nav.stock"), activeModule.equals("stock"), this::showStockPane));
+        }
+
+        if (!"OPERATOR".equalsIgnoreCase(role) && !"PC_OPERATOR".equalsIgnoreCase(role)) {
+            nav.getChildren().add(navButton(I18n.get("nav.tasks"), activeModule.equals("tasks"), this::showTasksPane));
+        }
+
+        if (!"OPERATOR".equalsIgnoreCase(role)) {
+            nav.getChildren().add(navButton(I18n.get("nav.analytics"), activeModule.equals("analytics"), this::showAnalyticsPane));
+        }
+
+        if (!"OPERATOR".equalsIgnoreCase(role) && !"PC_OPERATOR".equalsIgnoreCase(role)) {
+            nav.getChildren().add(navButton(I18n.get("nav.skus"), activeModule.equals("skus"), this::showSkusPane));
+        }
+
+        if (!"PC_OPERATOR".equalsIgnoreCase(role)) {
+            nav.getChildren().add(navButton(I18n.get("nav.terminal"), activeModule.equals("terminal"), this::showTerminalPane));
+        }
+
+        if ("ADMIN".equalsIgnoreCase(role)) {
+            nav.getChildren().add(navButton(I18n.get("nav.users"), activeModule.equals("users"), this::showUsersPane));
+        }
+        
+        nav.getChildren().add(navButton(I18n.get("nav.settings"), activeModule.equals("settings"), this::showSettingsPane));
+        
+        // Spacer to push logout button to bottom
+        VBox spacer = new VBox();
+        VBox.setVgrow(spacer, Priority.ALWAYS);
+        nav.getChildren().add(spacer);
+        
+        Button logoutBtn = new Button(I18n.get("nav.logout"));
+        logoutBtn.getStyleClass().add("nav-button");
+        logoutBtn.setStyle("-fx-background-color: #8B0000; -fx-text-fill: white;");
+        logoutBtn.setMaxWidth(Double.MAX_VALUE);
+        logoutBtn.setOnAction(e -> handleLogout());
+        nav.getChildren().add(logoutBtn);
+
         return nav;
     }
 
@@ -154,22 +186,22 @@ public class DesktopClientApplication extends Application {
         shell.setLeft(buildNav());
 
         TextField filterField = new TextField();
-        filterField.setPromptText("Введите номер акта......");
+        filterField.setPromptText(I18n.get("receipts.filter.placeholder"));
         filterField.setId("searchField");
         filterField.setPrefWidth(520);
         filterField.setPrefHeight(48);
-        Button refreshBtn = new Button("Обновить");
+        Button refreshBtn = new Button(I18n.get("btn.refresh"));
         refreshBtn.getStyleClass().add("refresh-btn");
         refreshBtn.setPrefWidth(200);
         refreshBtn.setPrefHeight(48);
         refreshBtn.setMinWidth(200);
 
-        Button confirmBtn = new Button("Подтвердить");
-        Button startReceivingBtn = new Button("Начать приёмку");
-        Button completeReceivingBtn = new Button("Завершить приёмку");
-        Button acceptBtn = new Button("Принять");
-        Button startPlacementBtn = new Button("Начать размещение");
-        Button tasksBtn = new Button("Задания");
+        Button confirmBtn = new Button(I18n.get("receipts.btn.confirm"));
+        Button startReceivingBtn = new Button(I18n.get("receipts.btn.start_receiving"));
+        Button completeReceivingBtn = new Button(I18n.get("receipts.btn.complete_receiving"));
+        Button acceptBtn = new Button(I18n.get("receipts.btn.accept"));
+        Button startPlacementBtn = new Button(I18n.get("receipts.btn.start_placement"));
+        Button tasksBtn = new Button(I18n.get("receipts.btn.tasks"));
 
         confirmBtn.getStyleClass().add("refresh-btn");
         startReceivingBtn.getStyleClass().add("refresh-btn");
@@ -203,10 +235,42 @@ public class DesktopClientApplication extends Application {
         tasksBtn.setDisable(true);
 
         confirmBtn.setOnAction(e -> withSelectedReceipt(table, r -> asyncAction(() -> apiClient.confirm(r.id()), table)));
-        startReceivingBtn.setOnAction(e -> withSelectedReceipt(table, r -> asyncAction(() -> apiClient.startReceiving(r.id()), table)));
+        
+        startReceivingBtn.setOnAction(e -> withSelectedReceipt(table, r -> {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    int count = apiClient.startReceiving(r.id());
+                    Platform.runLater(() -> showNotification(I18n.format("tasks.created.notification", count)));
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((v, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    new Alert(AlertType.ERROR, I18n.format("common.error", error.getMessage())).showAndWait();
+                }
+                loadReceipts(table, "");
+            }));
+        }));
+        
         completeReceivingBtn.setOnAction(e -> withSelectedReceipt(table, r -> asyncAction(() -> apiClient.completeReceiving(r.id()), table)));
         acceptBtn.setOnAction(e -> withSelectedReceipt(table, r -> asyncAction(() -> apiClient.accept(r.id()), table)));
-        startPlacementBtn.setOnAction(e -> withSelectedReceipt(table, r -> asyncAction(() -> apiClient.startPlacement(r.id()), table)));
+        
+        startPlacementBtn.setOnAction(e -> withSelectedReceipt(table, r -> {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    int count = apiClient.startPlacement(r.id());
+                    Platform.runLater(() -> showNotification(I18n.format("tasks.created.notification", count)));
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((v, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    new Alert(AlertType.ERROR, I18n.format("common.error", error.getMessage())).showAndWait();
+                }
+                loadReceipts(table, "");
+            }));
+        }));
+        
         tasksBtn.setOnAction(e -> withSelectedReceipt(table, this::showTasksDialog));
 
         HBox filterRow = new HBox(14, filterField, refreshBtn);
@@ -228,7 +292,7 @@ public class DesktopClientApplication extends Application {
     private TableView<Receipt> buildReceiptTable() {
         TableView<Receipt> table = new TableView<>();
         table.setId("receiptTable");
-        table.setPlaceholder(new Label("Нет данных"));
+        table.setPlaceholder(new Label(I18n.get("common.no_data")));
         table.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
         table.setFixedCellSize(72);
 
@@ -242,31 +306,31 @@ public class DesktopClientApplication extends Application {
             return row;
         });
 
-        TableColumn<Receipt, String> docNoCol = new TableColumn<>("docNo");
+        TableColumn<Receipt, String> docNoCol = new TableColumn<>(I18n.get("receipts.table.doc_no"));
         docNoCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().docNo()));
         docNoCol.setPrefWidth(160);
 
-        TableColumn<Receipt, String> msgCol = new TableColumn<>("messageId");
+        TableColumn<Receipt, String> msgCol = new TableColumn<>(I18n.get("receipts.table.message_id"));
         msgCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().messageId()));
         msgCol.setPrefWidth(180);
 
-        TableColumn<Receipt, String> statusCol = new TableColumn<>("status");
+        TableColumn<Receipt, String> statusCol = new TableColumn<>(I18n.get("receipts.table.status"));
         statusCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(
-            cell.getValue().status() != null ? cell.getValue().status() : ""
+            translateStatus(cell.getValue().status())
         ));
         statusCol.setPrefWidth(140);
 
-        TableColumn<Receipt, String> dateCol = new TableColumn<>("docDate");
+        TableColumn<Receipt, String> dateCol = new TableColumn<>(I18n.get("receipts.table.doc_date"));
         dateCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(
             cell.getValue().docDate() != null ? dateFmt.format(cell.getValue().docDate()) : ""
         ));
         dateCol.setPrefWidth(160);
 
-        TableColumn<Receipt, String> supplierCol = new TableColumn<>("supplier");
+        TableColumn<Receipt, String> supplierCol = new TableColumn<>(I18n.get("receipts.table.supplier"));
         supplierCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().supplier()));
         supplierCol.setPrefWidth(160);
 
-        TableColumn<Receipt, String> crossDockCol = new TableColumn<>("crossDock");
+        TableColumn<Receipt, String> crossDockCol = new TableColumn<>(I18n.get("receipts.table.cross_dock"));
         crossDockCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(
             cell.getValue().crossDock() != null && cell.getValue().crossDock() ? "🚀 Cross-Dock" : ""
         ));
@@ -279,11 +343,11 @@ public class DesktopClientApplication extends Application {
     private void showLinesDialog(Receipt receipt) {
         Stage dialog = new Stage();
         dialog.initModality(Modality.APPLICATION_MODAL);
-        dialog.setTitle("Состав: " + receipt.docNo());
+        dialog.setTitle(I18n.format("receipts.dialog.lines_title", receipt.docNo()));
 
         TableView<com.wmsdipl.desktop.model.ReceiptLine> lineTable = new TableView<>();
         lineTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
-        lineTable.setPlaceholder(new Label("Загрузка..."));
+        lineTable.setPlaceholder(new Label(I18n.get("common.loading")));
 
         TableColumn<com.wmsdipl.desktop.model.ReceiptLine, Number> lineNoCol = new TableColumn<>("lineNo");
         lineNoCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().lineNo()));
@@ -315,14 +379,14 @@ public class DesktopClientApplication extends Application {
             })
             .whenComplete((lines, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    Alert alert = new Alert(AlertType.ERROR, "Ошибка загрузки строк: " + error.getMessage());
+                    Alert alert = new Alert(AlertType.ERROR, I18n.format("common.error", error.getMessage()));
                     alert.initOwner(dialog);
                     alert.showAndWait();
-                    lineTable.setPlaceholder(new Label("Ошибка"));
+                    lineTable.setPlaceholder(new Label(I18n.get("common.alert.error")));
                     return;
                 }
                 lineTable.setItems(FXCollections.observableArrayList(lines));
-                lineTable.setPlaceholder(new Label("Нет строк"));
+                lineTable.setPlaceholder(new Label(I18n.get("common.no_data")));
             }));
     }
 
@@ -337,7 +401,7 @@ public class DesktopClientApplication extends Application {
             })
             .whenComplete((receipts, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    table.setPlaceholder(new Label("Ошибка: " + error.getMessage()));
+                    table.setPlaceholder(new Label(I18n.format("common.error", error.getMessage())));
                     table.setItems(FXCollections.observableArrayList());
                     return;
                 }
@@ -352,95 +416,138 @@ public class DesktopClientApplication extends Application {
             }));
     }
 
+    private String translateStatus(String status) {
+        if (status == null) return "";
+        String key = "status." + status;
+        String val = I18n.get(key);
+        return val.startsWith("!") ? status : val;
+    }
+
     private void showTopologyPane() {
         activeModule = "topology";
         shell.setLeft(buildNav());
 
-        Label header = new Label("Топология склада");
+        String role = apiClient.getCurrentUser() != null ? apiClient.getCurrentUser().role() : "OPERATOR";
+        boolean isAdmin = "ADMIN".equals(role);
+        boolean isSupervisor = "SUPERVISOR".equals(role);
+        boolean canEdit = isAdmin;
+        boolean canBlock = isAdmin || isSupervisor;
+
+        Label header = new Label(I18n.get("topology.header"));
         header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
 
         ListView<com.wmsdipl.desktop.model.Zone> zonesView = new ListView<>();
         zonesView.setPrefWidth(240);
 
         // Zone management buttons
-        Button createZoneBtn = new Button("+ Создать зону");
-        createZoneBtn.getStyleClass().add("btn-success");
-        createZoneBtn.setOnAction(e -> openZoneCreationDialog(zonesView));
-        
-        Button editZoneBtn = new Button("✏ Редактировать");
-        editZoneBtn.getStyleClass().add("btn-primary");
-        editZoneBtn.setDisable(true);
-        editZoneBtn.setOnAction(e -> openZoneEditDialog(zonesView, zonesView.getSelectionModel().getSelectedItem()));
-        
-        Button deleteZoneBtn = new Button("🗑 Удалить зону");
-        deleteZoneBtn.getStyleClass().add("btn-danger");
-        deleteZoneBtn.setDisable(true);
-        deleteZoneBtn.setOnAction(e -> deleteZone(zonesView, zonesView.getSelectionModel().getSelectedItem()));
-        
-        zonesView.getSelectionModel().selectedItemProperty().addListener((obs, o, z) -> {
-            boolean selected = z != null;
-            editZoneBtn.setDisable(!selected);
-            deleteZoneBtn.setDisable(!selected);
-        });
-        
-        HBox zoneBtns = new HBox(8, createZoneBtn, editZoneBtn, deleteZoneBtn);
+        HBox zoneBtns = new HBox(8);
         zoneBtns.setPadding(new Insets(8, 0, 0, 0));
 
+        if (canEdit) {
+            Button createZoneBtn = new Button(I18n.get("topology.btn.create_zone"));
+            createZoneBtn.getStyleClass().add("btn-success");
+            createZoneBtn.setOnAction(e -> openZoneCreationDialog(zonesView));
+            
+            Button editZoneBtn = new Button(I18n.get("topology.btn.edit"));
+            editZoneBtn.getStyleClass().add("btn-primary");
+            editZoneBtn.setDisable(true);
+            editZoneBtn.setOnAction(e -> openZoneEditDialog(zonesView, zonesView.getSelectionModel().getSelectedItem()));
+            
+            Button deleteZoneBtn = new Button(I18n.get("topology.btn.delete"));
+            deleteZoneBtn.getStyleClass().add("btn-danger");
+            deleteZoneBtn.setDisable(true);
+            deleteZoneBtn.setOnAction(e -> deleteZone(zonesView, zonesView.getSelectionModel().getSelectedItem()));
+            
+            zonesView.getSelectionModel().selectedItemProperty().addListener((obs, o, z) -> {
+                boolean selected = z != null;
+                editZoneBtn.setDisable(!selected);
+                deleteZoneBtn.setDisable(!selected);
+            });
+            
+            zoneBtns.getChildren().addAll(createZoneBtn, editZoneBtn, deleteZoneBtn);
+        }
+
         TableView<Location> locTable = new TableView<>();
-        locTable.setPlaceholder(new Label("Нет ячеек"));
-        TableColumn<Location, String> locCode = new TableColumn<>("code");
+        locTable.setPlaceholder(new Label(I18n.get("placeholder.no_cells")));
+        
+        TableColumn<Location, String> locCode = new TableColumn<>(I18n.get("topology.table.code"));
         locCode.setCellValueFactory(c -> new SimpleObjectProperty<>(c.getValue().code()));
-        TableColumn<Location, String> locType = new TableColumn<>("type");
+        
+        TableColumn<Location, String> locType = new TableColumn<>(I18n.get("topology.table.type"));
         locType.setCellValueFactory(c -> new SimpleObjectProperty<>(c.getValue().locationType() != null ? c.getValue().locationType() : ""));
-        TableColumn<Location, String> locStatus = new TableColumn<>("status");
-        locStatus.setCellValueFactory(c -> new SimpleObjectProperty<>(c.getValue().status()));
-        TableColumn<Location, Number> locMax = new TableColumn<>("maxPallets");
+        
+        TableColumn<Location, String> locStatus = new TableColumn<>(I18n.get("topology.table.status"));
+        locStatus.setCellValueFactory(c -> new SimpleObjectProperty<>(translateStatus(c.getValue().status())));
+        
+        TableColumn<Location, Number> locMax = new TableColumn<>(I18n.get("topology.table.max_pallets"));
         locMax.setCellValueFactory(c -> new SimpleObjectProperty<>(c.getValue().maxPallets()));
-        TableColumn<Location, String> locZone = new TableColumn<>("zone");
+        
+        TableColumn<Location, String> locZone = new TableColumn<>(I18n.get("topology.table.zone"));
         locZone.setCellValueFactory(c -> new SimpleObjectProperty<>(c.getValue().zoneCode() != null ? c.getValue().zoneCode() : ""));
+        
         locTable.getColumns().addAll(locCode, locType, locStatus, locMax, locZone);
 
         // Location management buttons
-        Button createLocBtn = new Button("+ Создать ячейку");
-        createLocBtn.getStyleClass().add("btn-success");
-        createLocBtn.setOnAction(e -> openLocationCreationDialog(locTable, zonesView));
-        
-        Button editLocBtn = new Button("✏ Редактировать");
-        editLocBtn.getStyleClass().add("btn-primary");
-        editLocBtn.setDisable(true);
-        editLocBtn.setOnAction(e -> openLocationEditDialog(locTable, locTable.getSelectionModel().getSelectedItem(), zonesView));
-        
-        Button blockLocBtn = new Button("🔒 Заблокировать");
-        blockLocBtn.getStyleClass().add("btn-warning");
-        blockLocBtn.setDisable(true);
-        blockLocBtn.setOnAction(e -> toggleLocationBlock(locTable, locTable.getSelectionModel().getSelectedItem()));
-        
-        Button deleteLocBtn = new Button("🗑 Удалить");
-        deleteLocBtn.getStyleClass().add("btn-danger");
-        deleteLocBtn.setDisable(true);
-        deleteLocBtn.setOnAction(e -> deleteLocation(locTable, locTable.getSelectionModel().getSelectedItem()));
-        
-        locTable.getSelectionModel().selectedItemProperty().addListener((obs, o, loc) -> {
-            boolean selected = loc != null;
-            editLocBtn.setDisable(!selected);
-            deleteLocBtn.setDisable(!selected);
-            
-            if (selected) {
-                boolean isBlocked = "BLOCKED".equals(loc.status());
-                blockLocBtn.setText(isBlocked ? "🔓 Разблокировать" : "🔒 Заблокировать");
-                blockLocBtn.setDisable(false);
-            } else {
-                blockLocBtn.setDisable(true);
-            }
-        });
-        
-        HBox locBtns = new HBox(8, createLocBtn, editLocBtn, blockLocBtn, deleteLocBtn);
+        HBox locBtns = new HBox(8);
         locBtns.setPadding(new Insets(8, 0, 0, 0));
 
-        VBox left = new VBox(10, new Label("Зоны"), zonesView, zoneBtns);
+        Button editLocBtn = null;
+        Button deleteLocBtn = null;
+        Button blockLocBtn = null;
+
+        if (canEdit) {
+            Button createLocBtn = new Button(I18n.get("topology.btn.create_location"));
+            createLocBtn.getStyleClass().add("btn-success");
+            createLocBtn.setOnAction(e -> openLocationCreationDialog(locTable, zonesView));
+            
+            editLocBtn = new Button(I18n.get("topology.btn.edit"));
+            editLocBtn.getStyleClass().add("btn-primary");
+            editLocBtn.setDisable(true);
+            Button finalEditBtn = editLocBtn;
+            editLocBtn.setOnAction(e -> openLocationEditDialog(locTable, locTable.getSelectionModel().getSelectedItem(), zonesView));
+            
+            deleteLocBtn = new Button(I18n.get("topology.btn.delete"));
+            deleteLocBtn.getStyleClass().add("btn-danger");
+            deleteLocBtn.setDisable(true);
+            Button finalDeleteBtn = deleteLocBtn;
+            deleteLocBtn.setOnAction(e -> deleteLocation(locTable, locTable.getSelectionModel().getSelectedItem()));
+            
+            locBtns.getChildren().addAll(createLocBtn, editLocBtn, deleteLocBtn);
+        }
+
+        if (canBlock) {
+            blockLocBtn = new Button(I18n.get("topology.btn.block"));
+            blockLocBtn.getStyleClass().add("btn-warning");
+            blockLocBtn.setDisable(true);
+            Button finalBlockBtn = blockLocBtn;
+            blockLocBtn.setOnAction(e -> toggleLocationBlock(locTable, locTable.getSelectionModel().getSelectedItem()));
+            locBtns.getChildren().add(blockLocBtn);
+        }
+        
+        Button finalEditLocBtn = editLocBtn;
+        Button finalDeleteLocBtn = deleteLocBtn;
+        Button finalBlockLocBtn = blockLocBtn;
+
+        locTable.getSelectionModel().selectedItemProperty().addListener((obs, o, loc) -> {
+            boolean selected = loc != null;
+            if (finalEditLocBtn != null) finalEditLocBtn.setDisable(!selected);
+            if (finalDeleteLocBtn != null) finalDeleteLocBtn.setDisable(!selected);
+            
+            if (finalBlockLocBtn != null) {
+                if (selected) {
+                    boolean isBlocked = "BLOCKED".equals(loc.status());
+                    finalBlockLocBtn.setText(isBlocked ? I18n.get("topology.btn.unblock") : I18n.get("topology.btn.block"));
+                    finalBlockLocBtn.setDisable(false);
+                } else {
+                    finalBlockLocBtn.setDisable(true);
+                }
+            }
+        });
+
+        VBox left = new VBox(10, new Label(I18n.get("topology.zones")), zonesView, zoneBtns);
         left.setPadding(new Insets(12));
         left.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
-        VBox right = new VBox(10, new Label("Ячейки"), locTable, locBtns);
+        VBox right = new VBox(10, new Label(I18n.get("topology.locations")), locTable, locBtns);
         right.setPadding(new Insets(12));
         right.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
 
@@ -468,7 +575,7 @@ public class DesktopClientApplication extends Application {
                     if (zonesView != null) zonesView.setItems(FXCollections.observableArrayList());
                     if (locTable != null) {
                         locTable.setItems(FXCollections.observableArrayList());
-                        locTable.setPlaceholder(new Label("Ошибка: " + error.getMessage()));
+                        locTable.setPlaceholder(new Label(I18n.format("common.error", error.getMessage())));
                     }
                     return;
                 }
@@ -502,28 +609,33 @@ public class DesktopClientApplication extends Application {
         activeModule = "pallets";
         shell.setLeft(buildNav());
 
-        Label header = new Label("Паллеты");
+        Label header = new Label(I18n.get("pallets.header"));
         header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
         
-        Button refresh = new Button("Обновить");
+        Button refresh = new Button(I18n.get("btn.refresh"));
         refresh.getStyleClass().add("refresh-btn");
         
-        Button createBtn = new Button("Создать паллету");
+        Button createBtn = new Button(I18n.get("pallets.btn.create"));
         createBtn.getStyleClass().add("refresh-btn");
         createBtn.setOnAction(e -> showCreatePalletDialog());
         
-        HBox toolbar = new HBox(12, refresh, createBtn);
+        Button bulkCreateBtn = new Button(I18n.get("pallets.btn.bulk_create"));
+        bulkCreateBtn.getStyleClass().add("refresh-btn");
+        bulkCreateBtn.setOnAction(e -> showBulkCreatePalletsDialog());
+        
+        HBox toolbar = new HBox(12, refresh, createBtn, bulkCreateBtn);
 
         TableView<Pallet> table = new TableView<>();
-        table.setPlaceholder(new Label("Нет данных"));
-        table.getColumns().addAll(
-            column("code", p -> p.code()),
-            column("status", p -> p.status()),
-            column("location", p -> p.location() != null ? p.location().code() : ""),
-            column("skuId", p -> p.skuId()),
-            column("qty", p -> p.quantity()),
-            column("receiptId", p -> p.receipt() != null ? p.receipt().id() : null)
-        );
+        table.setPlaceholder(new Label(I18n.get("placeholder.no_data")));
+        
+        TableColumn<Pallet, Object> codeCol = column(I18n.get("pallets.table.code"), p -> p.code());
+        TableColumn<Pallet, Object> statusCol = column(I18n.get("pallets.table.status"), p -> translateStatus(p.status()));
+        TableColumn<Pallet, Object> locCol = column(I18n.get("pallets.table.location"), p -> p.location() != null ? p.location().code() : "");
+        TableColumn<Pallet, Object> skuCol = column(I18n.get("pallets.table.sku"), p -> p.skuId());
+        TableColumn<Pallet, Object> qtyCol = column(I18n.get("pallets.table.qty"), p -> p.quantity());
+        TableColumn<Pallet, Object> receiptCol = column(I18n.get("pallets.table.receipt"), p -> p.receipt() != null ? p.receipt().id() : null);
+        
+        table.getColumns().addAll(codeCol, statusCol, locCol, skuCol, qtyCol, receiptCol);
 
         refresh.setOnAction(e -> loadList(table, () -> apiClient.listPallets()));
         loadList(table, () -> apiClient.listPallets());
@@ -538,36 +650,36 @@ public class DesktopClientApplication extends Application {
         activeModule = "stock";
         shell.setLeft(buildNav());
 
-        Label header = new Label("Остатки на складе");
+        Label header = new Label(I18n.get("stock.header"));
         header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
         
         // Filter fields
         TextField skuCodeFilter = new TextField();
-        skuCodeFilter.setPromptText("Код SKU");
+        skuCodeFilter.setPromptText(I18n.get("stock.filter.sku"));
         skuCodeFilter.setPrefWidth(150);
         
         TextField locationCodeFilter = new TextField();
-        locationCodeFilter.setPromptText("Код ячейки");
+        locationCodeFilter.setPromptText(I18n.get("stock.filter.location"));
         locationCodeFilter.setPrefWidth(150);
         
         TextField palletBarcodeFilter = new TextField();
-        palletBarcodeFilter.setPromptText("Баркод паллеты");
+        palletBarcodeFilter.setPromptText(I18n.get("stock.filter.pallet"));
         palletBarcodeFilter.setPrefWidth(150);
         
         TextField receiptIdFilter = new TextField();
-        receiptIdFilter.setPromptText("ID прихода");
+        receiptIdFilter.setPromptText(I18n.get("stock.filter.receipt"));
         receiptIdFilter.setPrefWidth(150);
         
         ComboBox<String> statusFilter = new ComboBox<>();
         statusFilter.getItems().addAll("", "EMPTY", "RECEIVED", "PLACED", "PICKED");
         statusFilter.setValue("");
-        statusFilter.setPromptText("Статус");
+        statusFilter.setPromptText(I18n.get("stock.filter.status"));
         statusFilter.setPrefWidth(150);
         
-        Button searchBtn = new Button("Найти");
+        Button searchBtn = new Button(I18n.get("stock.btn.search"));
         searchBtn.getStyleClass().add("filter-btn");
         
-        Button clearBtn = new Button("Сброс");
+        Button clearBtn = new Button(I18n.get("stock.btn.clear"));
         clearBtn.getStyleClass().add("filter-btn");
         
         // Filters row (first line)
@@ -580,41 +692,41 @@ public class DesktopClientApplication extends Application {
         
         // Stock table
         TableView<StockItem> stockTable = new TableView<>();
-        stockTable.setPlaceholder(new Label("Нет данных"));
+        stockTable.setPlaceholder(new Label(I18n.get("placeholder.no_data")));
         stockTable.setPrefHeight(500);
         stockTable.setFixedCellSize(50);
         
-        TableColumn<StockItem, Object> palletIdCol = column("ID", StockItem::palletId);
+        TableColumn<StockItem, Object> palletIdCol = column(I18n.get("stock.table.id"), StockItem::palletId);
         palletIdCol.setPrefWidth(60);
         
-        TableColumn<StockItem, Object> palletCodeCol = column("Паллета", StockItem::palletCode);
+        TableColumn<StockItem, Object> palletCodeCol = column(I18n.get("stock.table.pallet"), StockItem::palletCode);
         palletCodeCol.setPrefWidth(120);
         
-        TableColumn<StockItem, Object> skuCodeCol = column("SKU", StockItem::skuCode);
+        TableColumn<StockItem, Object> skuCodeCol = column(I18n.get("stock.table.sku"), StockItem::skuCode);
         skuCodeCol.setPrefWidth(120);
         
-        TableColumn<StockItem, Object> skuNameCol = column("Название", StockItem::skuName);
+        TableColumn<StockItem, Object> skuNameCol = column(I18n.get("stock.table.name"), StockItem::skuName);
         skuNameCol.setPrefWidth(200);
         
-        TableColumn<StockItem, Object> qtyCol = column("Кол-во", StockItem::quantity);
+        TableColumn<StockItem, Object> qtyCol = column(I18n.get("stock.table.qty"), StockItem::quantity);
         qtyCol.setPrefWidth(80);
         
-        TableColumn<StockItem, Object> uomCol = column("Ед.изм", StockItem::uom);
+        TableColumn<StockItem, Object> uomCol = column(I18n.get("stock.table.uom"), StockItem::uom);
         uomCol.setPrefWidth(70);
         
-        TableColumn<StockItem, Object> locationCol = column("Ячейка", s -> s.locationCode() != null ? s.locationCode() : "Не размещено");
+        TableColumn<StockItem, Object> locationCol = column(I18n.get("stock.table.location"), s -> s.locationCode() != null ? s.locationCode() : I18n.get("stock.value.not_placed"));
         locationCol.setPrefWidth(120);
         
-        TableColumn<StockItem, Object> statusCol = column("Статус", StockItem::palletStatus);
+        TableColumn<StockItem, Object> statusCol = column(I18n.get("stock.table.status"), s -> translateStatus(s.palletStatus()));
         statusCol.setPrefWidth(100);
         
-        TableColumn<StockItem, Object> receiptCol = column("Приход", s -> s.receiptDocNumber() != null ? s.receiptDocNumber() : "");
+        TableColumn<StockItem, Object> receiptCol = column(I18n.get("stock.table.receipt"), s -> s.receiptDocNumber() != null ? s.receiptDocNumber() : "");
         receiptCol.setPrefWidth(150);
         
-        TableColumn<StockItem, Object> lotCol = column("Партия", s -> s.lotNumber() != null ? s.lotNumber() : "");
+        TableColumn<StockItem, Object> lotCol = column(I18n.get("stock.table.lot"), s -> s.lotNumber() != null ? s.lotNumber() : "");
         lotCol.setPrefWidth(100);
         
-        TableColumn<StockItem, Object> expiryCol = column("Срок годн.", s -> s.expiryDate() != null ? s.expiryDate().toString() : "");
+        TableColumn<StockItem, Object> expiryCol = column(I18n.get("stock.table.expiry"), s -> s.expiryDate() != null ? s.expiryDate().toString() : "");
         expiryCol.setPrefWidth(100);
         
         stockTable.getColumns().addAll(palletIdCol, palletCodeCol, skuCodeCol, skuNameCol, 
@@ -632,19 +744,19 @@ public class DesktopClientApplication extends Application {
         });
         
         // Pagination controls
-        Label pageLabel = new Label("Страница: 0");
+        Label pageLabel = new Label(I18n.format("stock.pagination.page", 1, 1));
         pageLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
         
-        Button prevBtn = new Button("◀ Пред");
+        Button prevBtn = new Button(I18n.get("stock.btn.prev"));
         prevBtn.getStyleClass().add("refresh-btn");
         prevBtn.setPrefHeight(36);
         prevBtn.setDisable(true);
         
-        Button nextBtn = new Button("След ▶");
+        Button nextBtn = new Button(I18n.get("stock.btn.next"));
         nextBtn.getStyleClass().add("refresh-btn");
         nextBtn.setPrefHeight(36);
         
-        Label totalLabel = new Label("Всего: 0");
+        Label totalLabel = new Label(I18n.format("stock.pagination.total", 0));
         totalLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
         
         HBox paginationBox = new HBox(12, prevBtn, pageLabel, nextBtn, totalLabel);
@@ -668,13 +780,13 @@ public class DesktopClientApplication extends Application {
                 try {
                     receiptId = Long.parseLong(receiptIdStr);
                 } catch (NumberFormatException ex) {
-                    stockTable.setPlaceholder(new Label("Неверный ID прихода"));
+                    stockTable.setPlaceholder(new Label(I18n.get("placeholder.invalid_receipt")));
                     return;
                 }
             }
             
             final Long finalReceiptId = receiptId;
-            stockTable.setPlaceholder(new Label("Загрузка..."));
+            stockTable.setPlaceholder(new Label(I18n.get("placeholder.loading")));
             
             CompletableFuture.supplyAsync(() -> {
                 try {
@@ -692,19 +804,19 @@ public class DesktopClientApplication extends Application {
                 }
             }).whenComplete((page, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    stockTable.setPlaceholder(new Label("Ошибка: " + error.getMessage()));
+                    stockTable.setPlaceholder(new Label(I18n.format("common.error", error.getMessage())));
                     stockTable.setItems(FXCollections.observableArrayList());
                     return;
                 }
                 
                 stockTable.setItems(FXCollections.observableArrayList(page.content));
-                pageLabel.setText("Страница: " + (currentPage[0] + 1) + " / " + Math.max(1, page.totalPages));
-                totalLabel.setText("Всего: " + page.totalElements);
+                pageLabel.setText(I18n.format("stock.pagination.page", currentPage[0] + 1, Math.max(1, page.totalPages)));
+                totalLabel.setText(I18n.format("stock.pagination.total", page.totalElements));
                 
                 prevBtn.setDisable(currentPage[0] == 0);
                 nextBtn.setDisable(currentPage[0] >= page.totalPages - 1);
                 
-                stockTable.setPlaceholder(new Label("Нет данных"));
+                stockTable.setPlaceholder(new Label(I18n.get("placeholder.no_data")));
             }));
         };
         
@@ -756,31 +868,31 @@ public class DesktopClientApplication extends Application {
     private void showMovementHistoryDialog(StockItem stockItem) {
         Stage dialog = new Stage();
         dialog.initModality(Modality.APPLICATION_MODAL);
-        dialog.setTitle("История перемещений - " + stockItem.palletCode());
+        dialog.setTitle(I18n.format("movement.dialog.title", stockItem.palletCode()));
         
         TableView<StockMovement> historyTable = new TableView<>();
-        historyTable.setPlaceholder(new Label("Загрузка..."));
+        historyTable.setPlaceholder(new Label(I18n.get("common.loading")));
         historyTable.setPrefHeight(400);
         
-        TableColumn<StockMovement, Object> idCol = column("ID", StockMovement::id);
+        TableColumn<StockMovement, Object> idCol = column(I18n.get("movement.col.id"), StockMovement::id);
         idCol.setPrefWidth(50);
         
-        TableColumn<StockMovement, Object> typeCol = column("Тип", StockMovement::movementType);
+        TableColumn<StockMovement, Object> typeCol = column(I18n.get("movement.col.type"), StockMovement::movementType);
         typeCol.setPrefWidth(100);
         
-        TableColumn<StockMovement, Object> fromLocCol = column("Откуда", m -> m.fromLocationCode() != null ? m.fromLocationCode() : "-");
+        TableColumn<StockMovement, Object> fromLocCol = column(I18n.get("movement.col.from"), m -> m.fromLocationCode() != null ? m.fromLocationCode() : "-");
         fromLocCol.setPrefWidth(120);
         
-        TableColumn<StockMovement, Object> toLocCol = column("Куда", m -> m.toLocationCode() != null ? m.toLocationCode() : "-");
+        TableColumn<StockMovement, Object> toLocCol = column(I18n.get("movement.col.to"), m -> m.toLocationCode() != null ? m.toLocationCode() : "-");
         toLocCol.setPrefWidth(120);
         
-        TableColumn<StockMovement, Object> qtyCol = column("Кол-во", StockMovement::quantity);
+        TableColumn<StockMovement, Object> qtyCol = column(I18n.get("movement.col.qty"), StockMovement::quantity);
         qtyCol.setPrefWidth(80);
         
-        TableColumn<StockMovement, Object> movedByCol = column("Кем", StockMovement::movedBy);
+        TableColumn<StockMovement, Object> movedByCol = column(I18n.get("movement.col.by"), StockMovement::movedBy);
         movedByCol.setPrefWidth(120);
         
-        TableColumn<StockMovement, Object> movedAtCol = column("Когда", m -> {
+        TableColumn<StockMovement, Object> movedAtCol = column(I18n.get("movement.col.when"), m -> {
             if (m.movedAt() != null) {
                 return m.movedAt().toString().substring(0, 19).replace('T', ' ');
             }
@@ -788,12 +900,12 @@ public class DesktopClientApplication extends Application {
         });
         movedAtCol.setPrefWidth(150);
         
-        TableColumn<StockMovement, Object> taskCol = column("Задание", m -> m.taskId() != null ? m.taskId().toString() : "");
+        TableColumn<StockMovement, Object> taskCol = column(I18n.get("movement.col.task"), m -> m.taskId() != null ? m.taskId().toString() : "");
         taskCol.setPrefWidth(80);
         
         historyTable.getColumns().addAll(idCol, typeCol, fromLocCol, toLocCol, qtyCol, movedByCol, movedAtCol, taskCol);
         
-        Button closeBtn = new Button("Закрыть");
+        Button closeBtn = new Button(I18n.get("common.close"));
         closeBtn.getStyleClass().add("refresh-btn");
         closeBtn.setPrefWidth(150);
         closeBtn.setPrefHeight(35);
@@ -831,23 +943,18 @@ public class DesktopClientApplication extends Application {
                     }
                 }
                 
-                Label errorLabel = new Label("Ошибка загрузки истории:\n" + errorMsg);
+                Label errorLabel = new Label(I18n.format("movement.placeholder.error", errorMsg));
                 errorLabel.setStyle("-fx-text-fill: #ff6b6b; -fx-wrap-text: true;");
                 historyTable.setPlaceholder(errorLabel);
             } else if (movements == null || movements.isEmpty()) {
                 // No movements yet - show friendly message
-                Label emptyLabel = new Label("История перемещений пока пуста.\n\n" +
-                    "Записи появятся после:\n" +
-                    "• Приёмки паллеты (RECEIVE)\n" +
-                    "• Размещения на складе (PLACE)\n" +
-                    "• Перемещения между ячейками (MOVE)\n" +
-                    "• Отбора товара (PICK)");
+                Label emptyLabel = new Label(I18n.get("movement.placeholder.empty"));
                 emptyLabel.setStyle("-fx-text-fill: #888; -fx-text-alignment: center;");
                 historyTable.setPlaceholder(emptyLabel);
             } else {
                 // Success - populate table
                 historyTable.setItems(FXCollections.observableArrayList(movements));
-                historyTable.setPlaceholder(new Label("Нет перемещений"));
+                historyTable.setPlaceholder(new Label(I18n.get("placeholder.no_movements")));
             }
         }));
     }
@@ -856,43 +963,55 @@ public class DesktopClientApplication extends Application {
         activeModule = "tasks";
         shell.setLeft(buildNav());
 
-        Label header = new Label("Задания");
+        Label header = new Label(I18n.get("tasks.header"));
         header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
         TextField receiptFilter = new TextField();
-        receiptFilter.setPromptText("receiptId (опционально)");
-        Button refresh = new Button("Обновить");
+        receiptFilter.setPromptText(I18n.get("tasks.filter.receipt"));
+        Button refresh = new Button(I18n.get("btn.refresh"));
         refresh.getStyleClass().add("refresh-btn");
         
-        Button bulkOpsBtn = new Button("Массовые операции");
+        String role = apiClient.getCurrentUser() != null ? apiClient.getCurrentUser().role() : "OPERATOR";
+        boolean canBulk = "ADMIN".equals(role) || "SUPERVISOR".equals(role);
+        
+        Button bulkOpsBtn = new Button(I18n.get("tasks.btn.bulk"));
         bulkOpsBtn.getStyleClass().add("btn-primary");
         bulkOpsBtn.setDisable(true);
+        
+        if (!canBulk) {
+            bulkOpsBtn.setVisible(false);
+            bulkOpsBtn.setManaged(false);
+        }
 
         TableView<com.wmsdipl.desktop.model.Task> table = new TableView<>();
-        table.setPlaceholder(new Label("Нет данных"));
+        table.setPlaceholder(new Label(I18n.get("placeholder.no_data")));
         table.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         
         // Enable bulk ops button when tasks are selected
         table.getSelectionModel().selectedItemProperty().addListener((obs, o, n) -> {
-            bulkOpsBtn.setDisable(table.getSelectionModel().getSelectedItems().isEmpty());
+            if (canBulk) {
+                bulkOpsBtn.setDisable(table.getSelectionModel().getSelectedItems().isEmpty());
+            }
         });
         
-        bulkOpsBtn.setOnAction(e -> showBulkOperationsDialog(table));
+        if (canBulk) {
+            bulkOpsBtn.setOnAction(e -> showBulkOperationsDialog(table));
+        }
         
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskIdCol = column("ID", com.wmsdipl.desktop.model.Task::id);
+        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskIdCol = column(I18n.get("tasks.table.id"), com.wmsdipl.desktop.model.Task::id);
         taskIdCol.setPrefWidth(50);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskDocCol = column("Документ", t -> t.receiptDocNo() != null ? t.receiptDocNo() : "");
+        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskDocCol = column(I18n.get("tasks.table.doc"), t -> t.receiptDocNo() != null ? t.receiptDocNo() : "");
         taskDocCol.setPrefWidth(150);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskTypeCol = column("Тип", com.wmsdipl.desktop.model.Task::taskType);
+        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskTypeCol = column(I18n.get("tasks.table.type"), com.wmsdipl.desktop.model.Task::taskType);
         taskTypeCol.setPrefWidth(100);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskStatusCol = column("Статус", com.wmsdipl.desktop.model.Task::status);
+        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskStatusCol = column(I18n.get("tasks.table.status"), t -> translateStatus(t.status()));
         taskStatusCol.setPrefWidth(120);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskAssigneeCol = column("Исполнитель", com.wmsdipl.desktop.model.Task::assignee);
+        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskAssigneeCol = column(I18n.get("tasks.table.assignee"), com.wmsdipl.desktop.model.Task::assignee);
         taskAssigneeCol.setPrefWidth(120);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskPalletCol = column("Паллета", com.wmsdipl.desktop.model.Task::palletId);
+        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskPalletCol = column(I18n.get("tasks.table.pallet"), com.wmsdipl.desktop.model.Task::palletId);
         taskPalletCol.setPrefWidth(80);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskSourceCol = column("Откуда", com.wmsdipl.desktop.model.Task::sourceLocationId);
+        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskSourceCol = column(I18n.get("tasks.table.source"), com.wmsdipl.desktop.model.Task::sourceLocationId);
         taskSourceCol.setPrefWidth(80);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskTargetCol = column("Куда", com.wmsdipl.desktop.model.Task::targetLocationId);
+        TableColumn<com.wmsdipl.desktop.model.Task, Object> taskTargetCol = column(I18n.get("tasks.table.target"), com.wmsdipl.desktop.model.Task::targetLocationId);
         taskTargetCol.setPrefWidth(80);
         
         table.getColumns().addAll(taskIdCol, taskDocCol, taskTypeCol, taskStatusCol, taskAssigneeCol, taskPalletCol, taskSourceCol, taskTargetCol);
@@ -900,7 +1019,10 @@ public class DesktopClientApplication extends Application {
         refresh.setOnAction(e -> loadTasks(table, receiptFilter.getText()));
         loadTasks(table, null);
 
-        HBox controls = new HBox(10, receiptFilter, refresh, bulkOpsBtn);
+        HBox controls = new HBox(10, receiptFilter, refresh);
+        if (canBulk) {
+            controls.getChildren().add(bulkOpsBtn);
+        }
         controls.setAlignment(Pos.CENTER_LEFT);
         VBox layout = new VBox(12, header, controls, table);
         layout.setPadding(new Insets(24));
@@ -912,36 +1034,36 @@ public class DesktopClientApplication extends Application {
         activeModule = "users";
         shell.setLeft(buildNav());
 
-        Label header = new Label("Управление пользователями");
+        Label header = new Label(I18n.get("users.header"));
         header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
 
         TableView<User> userTable = new TableView<>();
-        userTable.setPlaceholder(new Label("Нет пользователей"));
+        userTable.setPlaceholder(new Label(I18n.get("placeholder.no_users")));
         userTable.getColumns().addAll(
-            column("ID", User::id),
-            column("Имя пользователя", User::username),
-            column("Полное имя", User::fullName),
-            column("Email", User::email),
-            column("Роль", User::role),
-            column("Активен", User::active)
+            column(I18n.get("users.table.id"), User::id),
+            column(I18n.get("users.table.username"), User::username),
+            column(I18n.get("users.table.fullname"), User::fullName),
+            column(I18n.get("users.table.email"), User::email),
+            column(I18n.get("users.table.role"), User::role),
+            column(I18n.get("users.table.active"), User::active)
         );
 
         // User management buttons
-        Button createUserBtn = new Button("+ Создать пользователя");
+        Button createUserBtn = new Button(I18n.get("users.btn.create"));
         createUserBtn.getStyleClass().add("btn-success");
         createUserBtn.setOnAction(e -> openUserCreationDialog(userTable));
 
-        Button editUserBtn = new Button("✏ Редактировать");
+        Button editUserBtn = new Button(I18n.get("btn.edit"));
         editUserBtn.getStyleClass().add("btn-primary");
         editUserBtn.setDisable(true);
         editUserBtn.setOnAction(e -> openUserEditDialog(userTable, userTable.getSelectionModel().getSelectedItem()));
 
-        Button changePasswordBtn = new Button("🔑 Сменить пароль");
+        Button changePasswordBtn = new Button(I18n.get("users.btn.change_pass"));
         changePasswordBtn.getStyleClass().add("btn-warning");
         changePasswordBtn.setDisable(true);
         changePasswordBtn.setOnAction(e -> openPasswordChangeDialog(userTable, userTable.getSelectionModel().getSelectedItem()));
 
-        Button deleteUserBtn = new Button("🗑 Удалить");
+        Button deleteUserBtn = new Button(I18n.get("btn.delete"));
         deleteUserBtn.getStyleClass().add("btn-danger");
         deleteUserBtn.setDisable(true);
         deleteUserBtn.setOnAction(e -> deleteUser(userTable, userTable.getSelectionModel().getSelectedItem()));
@@ -953,7 +1075,7 @@ public class DesktopClientApplication extends Application {
             deleteUserBtn.setDisable(!selected);
         });
 
-        Button refreshBtn = new Button("Обновить");
+        Button refreshBtn = new Button(I18n.get("btn.refresh"));
         refreshBtn.getStyleClass().add("refresh-btn");
         refreshBtn.setOnAction(e -> loadList(userTable, () -> apiClient.listUsers()));
 
@@ -971,8 +1093,8 @@ public class DesktopClientApplication extends Application {
 
     private void openUserCreationDialog(TableView<User> userTable) {
         Dialog<ButtonType> dialog = new Dialog<>();
-        dialog.setTitle("Создать пользователя");
-        dialog.setHeaderText("Введите данные нового пользователя");
+        dialog.setTitle(I18n.get("user.create.title"));
+        dialog.setHeaderText(I18n.get("user.create.header"));
 
         GridPane grid = new GridPane();
         grid.setHgap(10);
@@ -980,30 +1102,30 @@ public class DesktopClientApplication extends Application {
         grid.setPadding(new Insets(20, 150, 10, 10));
 
         TextField usernameField = new TextField();
-        usernameField.setPromptText("Имя пользователя");
+        usernameField.setPromptText(I18n.get("user.create.username_prompt"));
         PasswordField passwordField = new PasswordField();
-        passwordField.setPromptText("Пароль");
+        passwordField.setPromptText(I18n.get("user.create.password_prompt"));
         TextField fullNameField = new TextField();
-        fullNameField.setPromptText("Полное имя");
+        fullNameField.setPromptText(I18n.get("user.create.fullname_prompt"));
         TextField emailField = new TextField();
-        emailField.setPromptText("Email");
+        emailField.setPromptText(I18n.get("user.create.email_prompt"));
         
         ComboBox<String> roleCombo = new ComboBox<>();
         roleCombo.getItems().addAll("OPERATOR", "SUPERVISOR", "ADMIN");
         roleCombo.setValue("OPERATOR");
         
-        CheckBox activeCheck = new CheckBox("Активен");
+        CheckBox activeCheck = new CheckBox(I18n.get("user.create.active_label"));
         activeCheck.setSelected(true);
 
-        grid.add(new Label("Имя пользователя:"), 0, 0);
+        grid.add(new Label(I18n.get("user.create.username_label")), 0, 0);
         grid.add(usernameField, 1, 0);
-        grid.add(new Label("Пароль:"), 0, 1);
+        grid.add(new Label(I18n.get("user.create.password_label")), 0, 1);
         grid.add(passwordField, 1, 1);
-        grid.add(new Label("Полное имя:"), 0, 2);
+        grid.add(new Label(I18n.get("user.create.fullname_label")), 0, 2);
         grid.add(fullNameField, 1, 2);
-        grid.add(new Label("Email:"), 0, 3);
+        grid.add(new Label(I18n.get("user.create.email_label")), 0, 3);
         grid.add(emailField, 1, 3);
-        grid.add(new Label("Роль:"), 0, 4);
+        grid.add(new Label(I18n.get("user.create.role_label")), 0, 4);
         grid.add(roleCombo, 1, 4);
         grid.add(activeCheck, 1, 5);
 
@@ -1020,7 +1142,7 @@ public class DesktopClientApplication extends Application {
                 Boolean active = activeCheck.isSelected();
 
                 if (username == null || username.isBlank() || password == null || password.isBlank()) {
-                    showError("Имя пользователя и пароль обязательны");
+                    showError(I18n.get("user.create.error.required"));
                     return;
                 }
 
@@ -1032,9 +1154,9 @@ public class DesktopClientApplication extends Application {
                     }
                 }).whenComplete((v, error) -> Platform.runLater(() -> {
                     if (error != null) {
-                        showError("Ошибка создания пользователя: " + error.getMessage());
+                        showError(I18n.format("user.create.error.failed", error.getMessage()));
                     } else {
-                        showInfo("Пользователь успешно создан");
+                        showInfo(I18n.get("user.create.success"));
                         loadList(userTable, () -> apiClient.listUsers());
                     }
                 }));
@@ -1046,8 +1168,8 @@ public class DesktopClientApplication extends Application {
         if (user == null) return;
 
         Dialog<ButtonType> dialog = new Dialog<>();
-        dialog.setTitle("Редактировать пользователя");
-        dialog.setHeaderText("Редактирование: " + user.username());
+        dialog.setTitle(I18n.get("user.edit.title"));
+        dialog.setHeaderText(I18n.format("user.edit.header", user.username()));
 
         GridPane grid = new GridPane();
         grid.setHgap(10);
@@ -1055,22 +1177,22 @@ public class DesktopClientApplication extends Application {
         grid.setPadding(new Insets(20, 150, 10, 10));
 
         TextField fullNameField = new TextField(user.fullName() != null ? user.fullName() : "");
-        fullNameField.setPromptText("Полное имя");
+        fullNameField.setPromptText(I18n.get("user.edit.fullname_prompt"));
         TextField emailField = new TextField(user.email() != null ? user.email() : "");
-        emailField.setPromptText("Email");
+        emailField.setPromptText(I18n.get("user.edit.email_prompt"));
         
         ComboBox<String> roleCombo = new ComboBox<>();
         roleCombo.getItems().addAll("OPERATOR", "SUPERVISOR", "ADMIN");
         roleCombo.setValue(user.role() != null ? user.role() : "OPERATOR");
         
-        CheckBox activeCheck = new CheckBox("Активен");
+        CheckBox activeCheck = new CheckBox(I18n.get("user.edit.active_label"));
         activeCheck.setSelected(user.active() != null ? user.active() : true);
 
-        grid.add(new Label("Полное имя:"), 0, 0);
+        grid.add(new Label(I18n.get("user.edit.fullname_label")), 0, 0);
         grid.add(fullNameField, 1, 0);
-        grid.add(new Label("Email:"), 0, 1);
+        grid.add(new Label(I18n.get("user.edit.email_label")), 0, 1);
         grid.add(emailField, 1, 1);
-        grid.add(new Label("Роль:"), 0, 2);
+        grid.add(new Label(I18n.get("user.edit.role_label")), 0, 2);
         grid.add(roleCombo, 1, 2);
         grid.add(activeCheck, 1, 3);
 
@@ -1092,9 +1214,9 @@ public class DesktopClientApplication extends Application {
                     }
                 }).whenComplete((v, error) -> Platform.runLater(() -> {
                     if (error != null) {
-                        showError("Ошибка обновления пользователя: " + error.getMessage());
+                        showError(I18n.format("user.edit.error.failed", error.getMessage()));
                     } else {
-                        showInfo("Пользователь успешно обновлен");
+                        showInfo(I18n.get("user.edit.success"));
                         loadList(userTable, () -> apiClient.listUsers());
                     }
                 }));
@@ -1106,8 +1228,8 @@ public class DesktopClientApplication extends Application {
         if (user == null) return;
 
         Dialog<ButtonType> dialog = new Dialog<>();
-        dialog.setTitle("Сменить пароль");
-        dialog.setHeaderText("Смена пароля для: " + user.username());
+        dialog.setTitle(I18n.get("user.password.title"));
+        dialog.setHeaderText(I18n.format("user.password.header", user.username()));
 
         GridPane grid = new GridPane();
         grid.setHgap(10);
@@ -1115,9 +1237,9 @@ public class DesktopClientApplication extends Application {
         grid.setPadding(new Insets(20, 150, 10, 10));
 
         PasswordField newPasswordField = new PasswordField();
-        newPasswordField.setPromptText("Новый пароль");
+        newPasswordField.setPromptText(I18n.get("user.password.new_prompt"));
 
-        grid.add(new Label("Новый пароль:"), 0, 0);
+        grid.add(new Label(I18n.get("user.password.new_label")), 0, 0);
         grid.add(newPasswordField, 1, 0);
 
         dialog.getDialogPane().setContent(grid);
@@ -1128,7 +1250,7 @@ public class DesktopClientApplication extends Application {
                 String newPassword = newPasswordField.getText();
 
                 if (newPassword == null || newPassword.isBlank()) {
-                    showError("Пароль не может быть пустым");
+                    showError(I18n.get("user.password.error.empty"));
                     return;
                 }
 
@@ -1140,9 +1262,9 @@ public class DesktopClientApplication extends Application {
                     }
                 }).whenComplete((v, error) -> Platform.runLater(() -> {
                     if (error != null) {
-                        showError("Ошибка смены пароля: " + error.getMessage());
+                        showError(I18n.format("user.password.error.failed", error.getMessage()));
                     } else {
-                        showInfo("Пароль успешно изменен");
+                        showInfo(I18n.get("user.password.success"));
                     }
                 }));
             }
@@ -1152,7 +1274,7 @@ public class DesktopClientApplication extends Application {
     private void deleteUser(TableView<User> userTable, User user) {
         if (user == null) return;
 
-        if (!showConfirm("Удаление пользователя", "Удалить пользователя '" + user.username() + "'?")) {
+        if (!showConfirm(I18n.get("user.delete.title"), I18n.format("user.delete.confirm", user.username()))) {
             return;
         }
 
@@ -1164,9 +1286,9 @@ public class DesktopClientApplication extends Application {
             }
         }).whenComplete((v, error) -> Platform.runLater(() -> {
             if (error != null) {
-                showError("Ошибка удаления пользователя: " + error.getMessage());
+                showError(I18n.format("user.delete.error.failed", error.getMessage()));
             } else {
-                showInfo("Пользователь успешно удален");
+                showInfo(I18n.get("user.delete.success"));
                 loadList(userTable, () -> apiClient.listUsers());
             }
         }));
@@ -1178,7 +1300,7 @@ public class DesktopClientApplication extends Application {
             try {
                 receiptId = Long.parseLong(receiptFilter.trim());
             } catch (NumberFormatException ex) {
-                table.setPlaceholder(new Label("Неверный receiptId"));
+                table.setPlaceholder(new Label(I18n.get("placeholder.invalid_receipt")));
                 table.setItems(FXCollections.observableArrayList());
                 return;
             }
@@ -1191,29 +1313,31 @@ public class DesktopClientApplication extends Application {
         activeModule = "terminal";
         shell.setLeft(buildNav());
 
-        Label header = new Label("Терминал приёмки");
+        Label header = new Label(I18n.get("terminal.header"));
         header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
+
+        String role = apiClient.getCurrentUser() != null ? apiClient.getCurrentUser().role() : "OPERATOR";
 
         // Filter tabs
         TabPane filterTabs = new TabPane();
         filterTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
-        Tab myTasksTab = new Tab("Мои задачи");
-        Tab allTasksTab = new Tab("Все задачи");
+        Tab myTasksTab = new Tab(I18n.get("terminal.tab.my_tasks"));
+        Tab allTasksTab = new Tab(I18n.get("terminal.tab.all_tasks"));
 
         TableView<com.wmsdipl.desktop.model.Task> taskTable = new TableView<>();
-        taskTable.setPlaceholder(new Label("Нет заданий"));
+        taskTable.setPlaceholder(new Label(I18n.get("placeholder.no_tasks")));
         taskTable.setFixedCellSize(60);
         
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> idCol = column("ID", com.wmsdipl.desktop.model.Task::id);
+        TableColumn<com.wmsdipl.desktop.model.Task, Object> idCol = column(I18n.get("tasks.table.id"), com.wmsdipl.desktop.model.Task::id);
         idCol.setPrefWidth(50);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> typeCol = column("Тип", com.wmsdipl.desktop.model.Task::taskType);
+        TableColumn<com.wmsdipl.desktop.model.Task, Object> typeCol = column(I18n.get("tasks.table.type"), com.wmsdipl.desktop.model.Task::taskType);
         typeCol.setPrefWidth(100);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> statusCol = column("Статус", com.wmsdipl.desktop.model.Task::status);
+        TableColumn<com.wmsdipl.desktop.model.Task, Object> statusCol = column(I18n.get("tasks.table.status"), t -> translateStatus(t.status()));
         statusCol.setPrefWidth(120);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> receiptCol = column("Документ", t -> t.receiptDocNo() != null ? t.receiptDocNo() : "");
+        TableColumn<com.wmsdipl.desktop.model.Task, Object> receiptCol = column(I18n.get("tasks.table.doc"), t -> t.receiptDocNo() != null ? t.receiptDocNo() : "");
         receiptCol.setPrefWidth(180);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> qtyCol = column("Прогресс", t -> {
+        TableColumn<com.wmsdipl.desktop.model.Task, Object> qtyCol = column(I18n.get("pallets.table.qty"), t -> {
             BigDecimal done = t.qtyDone();
             BigDecimal assigned = t.qtyAssigned();
             if (done == null) done = BigDecimal.ZERO;
@@ -1221,7 +1345,7 @@ public class DesktopClientApplication extends Application {
             return done + " / " + assigned;
         });
         qtyCol.setPrefWidth(100);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> assigneeCol = column("Исполнитель", com.wmsdipl.desktop.model.Task::assignee);
+        TableColumn<com.wmsdipl.desktop.model.Task, Object> assigneeCol = column(I18n.get("tasks.table.assignee"), com.wmsdipl.desktop.model.Task::assignee);
         assigneeCol.setPrefWidth(120);
         
         taskTable.getColumns().addAll(idCol, typeCol, statusCol, receiptCol, qtyCol, assigneeCol);
@@ -1240,52 +1364,55 @@ public class DesktopClientApplication extends Application {
             return row;
         });
 
-        // My tasks table
-        TableView<com.wmsdipl.desktop.model.Task> allTasksTable = new TableView<>();
-        allTasksTable.setPlaceholder(new Label("Нет заданий"));
-        allTasksTable.setFixedCellSize(60);
-        
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> allIdCol = column("ID", com.wmsdipl.desktop.model.Task::id);
-        allIdCol.setPrefWidth(50);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> allTypeCol = column("Тип", com.wmsdipl.desktop.model.Task::taskType);
-        allTypeCol.setPrefWidth(100);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> allStatusCol = column("Статус", com.wmsdipl.desktop.model.Task::status);
-        allStatusCol.setPrefWidth(120);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> allReceiptCol = column("Документ", t -> t.receiptDocNo() != null ? t.receiptDocNo() : "");
-        allReceiptCol.setPrefWidth(180);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> allQtyCol = column("Прогресс", t -> {
-            BigDecimal done = t.qtyDone();
-            BigDecimal assigned = t.qtyAssigned();
-            if (done == null) done = BigDecimal.ZERO;
-            if (assigned == null) assigned = BigDecimal.ZERO;
-            return done + " / " + assigned;
-        });
-        allQtyCol.setPrefWidth(100);
-        TableColumn<com.wmsdipl.desktop.model.Task, Object> allAssigneeCol = column("Исполнитель", t -> t.assignee() != null ? t.assignee() : "Не назначен");
-        allAssigneeCol.setPrefWidth(120);
-        
-        allTasksTable.getColumns().addAll(allIdCol, allTypeCol, allStatusCol, allReceiptCol, allQtyCol, allAssigneeCol);
-        
-        // Double-click handler for all tasks
-        allTasksTable.setRowFactory(tv -> {
-            TableRow<com.wmsdipl.desktop.model.Task> row = new TableRow<>();
-            row.setOnMouseClicked(event -> {
-                if (event.getClickCount() == 2 && !row.isEmpty()) {
-                    com.wmsdipl.desktop.model.Task task = row.getItem();
-                    if ("RECEIVING".equals(task.taskType()) || "PLACEMENT".equals(task.taskType())) {
-                        openTaskExecutionDialog(task);
-                    }
-                }
-            });
-            return row;
-        });
-
         myTasksTab.setContent(taskTable);
-        allTasksTab.setContent(allTasksTable);
-        
-        filterTabs.getTabs().addAll(myTasksTab, allTasksTab);
+        filterTabs.getTabs().add(myTasksTab);
 
-        Button refreshBtn = new Button("Обновить");
+        TableView<com.wmsdipl.desktop.model.Task> allTasksTable = null;
+        if (allTasksTab != null) {
+            allTasksTable = new TableView<>();
+            allTasksTable.setPlaceholder(new Label(I18n.get("placeholder.no_tasks")));
+            allTasksTable.setFixedCellSize(60);
+            
+            TableColumn<com.wmsdipl.desktop.model.Task, Object> allIdCol = column(I18n.get("tasks.table.id"), com.wmsdipl.desktop.model.Task::id);
+            allIdCol.setPrefWidth(50);
+            TableColumn<com.wmsdipl.desktop.model.Task, Object> allTypeCol = column(I18n.get("tasks.table.type"), com.wmsdipl.desktop.model.Task::taskType);
+            allTypeCol.setPrefWidth(100);
+            TableColumn<com.wmsdipl.desktop.model.Task, Object> allStatusCol = column(I18n.get("tasks.table.status"), t -> translateStatus(t.status()));
+            allStatusCol.setPrefWidth(120);
+            TableColumn<com.wmsdipl.desktop.model.Task, Object> allReceiptCol = column(I18n.get("tasks.table.doc"), t -> t.receiptDocNo() != null ? t.receiptDocNo() : "");
+            allReceiptCol.setPrefWidth(180);
+            TableColumn<com.wmsdipl.desktop.model.Task, Object> allQtyCol = column(I18n.get("pallets.table.qty"), t -> {
+                BigDecimal done = t.qtyDone();
+                BigDecimal assigned = t.qtyAssigned();
+                if (done == null) done = BigDecimal.ZERO;
+                if (assigned == null) assigned = BigDecimal.ZERO;
+                return done + " / " + assigned;
+            });
+            allQtyCol.setPrefWidth(100);
+            TableColumn<com.wmsdipl.desktop.model.Task, Object> allAssigneeCol = column(I18n.get("tasks.table.assignee"), t -> t.assignee() != null ? t.assignee() : I18n.get("tasks.value.unassigned"));
+            allAssigneeCol.setPrefWidth(120);
+            
+            allTasksTable.getColumns().addAll(allIdCol, allTypeCol, allStatusCol, allReceiptCol, allQtyCol, allAssigneeCol);
+            
+            // Double-click handler for all tasks
+            allTasksTable.setRowFactory(tv -> {
+                TableRow<com.wmsdipl.desktop.model.Task> row = new TableRow<>();
+                row.setOnMouseClicked(event -> {
+                    if (event.getClickCount() == 2 && !row.isEmpty()) {
+                        com.wmsdipl.desktop.model.Task task = row.getItem();
+                        if ("RECEIVING".equals(task.taskType()) || "PLACEMENT".equals(task.taskType())) {
+                            openTaskExecutionDialog(task);
+                        }
+                    }
+                });
+                return row;
+            });
+            
+            allTasksTab.setContent(allTasksTable);
+            filterTabs.getTabs().add(allTasksTab);
+        }
+
+        Button refreshBtn = new Button(I18n.get("btn.refresh"));
         refreshBtn.getStyleClass().add("refresh-btn");
         refreshBtn.setPrefHeight(48);
 
@@ -1304,7 +1431,7 @@ public class DesktopClientApplication extends Application {
                 }
                 }).whenComplete((tasks, error) -> Platform.runLater(() -> {
                     if (error != null) {
-                        taskTable.setPlaceholder(new Label("Ошибка: " + error.getMessage()));
+                        taskTable.setPlaceholder(new Label(I18n.format("common.error", error.getMessage())));
                         taskTable.setItems(FXCollections.observableArrayList());
                     } else {
                         taskTable.setItems(FXCollections.observableArrayList(tasks));
@@ -1314,30 +1441,43 @@ public class DesktopClientApplication extends Application {
         };
         
         // Load all tasks
+        final TableView<com.wmsdipl.desktop.model.Task> finalAllTasksTable = allTasksTable;
         Runnable loadAllTasks = () -> {
+            if (finalAllTasksTable == null) return;
             CompletableFuture.supplyAsync(() -> {
                 try {
+                    String currentUser = apiClient.getCurrentUsername();
+                    String currentRole = apiClient.getCurrentUser().role();
+                    
                     return apiClient.getAllTasks().stream()
                         .filter(t -> "RECEIVING".equals(t.taskType()) || "PLACEMENT".equals(t.taskType()))
+                        .filter(t -> {
+                            if ("ADMIN".equalsIgnoreCase(currentRole) || "SUPERVISOR".equalsIgnoreCase(currentRole)) {
+                                return true;
+                            }
+                            // Operators see NEW tasks or their own
+                            return t.assignee() == null || currentUser.equals(t.assignee());
+                        })
                         .collect(Collectors.toList());
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
             }).whenComplete((tasks, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    allTasksTable.setPlaceholder(new Label("Ошибка: " + error.getMessage()));
-                    allTasksTable.setItems(FXCollections.observableArrayList());
+                    finalAllTasksTable.setPlaceholder(new Label(I18n.format("common.error", error.getMessage())));
+                    finalAllTasksTable.setItems(FXCollections.observableArrayList());
                 } else {
-                    allTasksTable.setItems(FXCollections.observableArrayList(tasks));
+                    finalAllTasksTable.setItems(FXCollections.observableArrayList(tasks));
                 }
             }));
         };
         
         // Switch tab listener
+        Tab finalAllTasksTab = allTasksTab;
         filterTabs.getSelectionModel().selectedItemProperty().addListener((obs, oldTab, newTab) -> {
             if (newTab == myTasksTab) {
                 loadMyTasks.run();
-            } else if (newTab == allTasksTab) {
+            } else if (newTab == finalAllTasksTab) {
                 loadAllTasks.run();
             }
         });
@@ -1345,7 +1485,7 @@ public class DesktopClientApplication extends Application {
         refreshBtn.setOnAction(e -> {
             if (filterTabs.getSelectionModel().getSelectedItem() == myTasksTab) {
                 loadMyTasks.run();
-            } else {
+            } else if (filterTabs.getSelectionModel().getSelectedItem() == finalAllTasksTab) {
                 loadAllTasks.run();
             }
         });
@@ -1363,32 +1503,32 @@ public class DesktopClientApplication extends Application {
         activeModule = "skus";
         shell.setLeft(buildNav());
         
-        Label header = new Label("Справочник номенклатур (SKU)");
+        Label header = new Label(I18n.get("skus.header"));
         header.setStyle("-fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: white;");
         
         TableView<Sku> skuTable = new TableView<>();
-        skuTable.setPlaceholder(new Label("Нет номенклатур"));
+        skuTable.setPlaceholder(new Label(I18n.get("common.no_data")));
         skuTable.setPrefHeight(400);
         skuTable.getColumns().addAll(
-            column("ID", Sku::id),
-            column("Код", Sku::code),
-            column("Название", Sku::name),
-            column("Ед.изм.", Sku::uom)
+            column(I18n.get("skus.table.id"), Sku::id),
+            column(I18n.get("skus.table.code"), Sku::code),
+            column(I18n.get("skus.table.name"), Sku::name),
+            column(I18n.get("skus.table.uom"), Sku::uom)
         );
         
-        Button refreshSku = new Button("Обновить");
+        Button refreshSku = new Button(I18n.get("btn.refresh"));
         refreshSku.getStyleClass().add("refresh-btn");
         refreshSku.setPrefHeight(48);
         refreshSku.setPrefWidth(150);
         refreshSku.setOnAction(e -> loadList(skuTable, () -> apiClient.listSkus()));
         
-        Button createSku = new Button("Создать SKU");
+        Button createSku = new Button(I18n.get("skus.btn.create"));
         createSku.getStyleClass().add("refresh-btn");
         createSku.setPrefHeight(48);
         createSku.setPrefWidth(150);
         createSku.setOnAction(e -> showCreateSkuDialog(skuTable));
         
-        Button deleteSku = new Button("Удалить");
+        Button deleteSku = new Button(I18n.get("btn.delete"));
         deleteSku.getStyleClass().add("refresh-btn");
         deleteSku.setPrefHeight(48);
         deleteSku.setPrefWidth(150);
@@ -1409,7 +1549,7 @@ public class DesktopClientApplication extends Application {
                     }
                 }).whenComplete((v, error) -> Platform.runLater(() -> {
                     if (error != null) {
-                        Alert alert = new Alert(AlertType.ERROR, "Ошибка удаления: " + error.getMessage());
+                        Alert alert = new Alert(AlertType.ERROR, I18n.format("common.error", error.getMessage()));
                         alert.showAndWait();
                     }
                     loadList(skuTable, () -> apiClient.listSkus());
@@ -1432,75 +1572,106 @@ public class DesktopClientApplication extends Application {
     private void showSettingsPane() {
         activeModule = "settings";
         shell.setLeft(buildNav());
-        Label header = new Label("Настройки");
+        Label header = new Label(I18n.get("settings.header"));
         header.setStyle("-fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: white;");
 
-        TextField coreApiField = new TextField(coreApiBase);
-        TextField importApiField = new TextField(importApiBase);
-        TextField importFolderField = new TextField();
-        Label statusLabel = new Label("Сохраните настройки");
-        statusLabel.setStyle("-fx-text-fill: white;");
+        // Language selector
+        Label langLabel = new Label(I18n.get("settings.language"));
+        langLabel.setStyle("-fx-text-fill: white;");
+        ComboBox<String> langCombo = new ComboBox<>();
+        langCombo.getItems().addAll(I18n.get("settings.lang.russian"), I18n.get("settings.lang.english"));
+        
+        String currentLang = I18n.getCurrentLang();
+        langCombo.setValue("en".equals(currentLang) ? I18n.get("settings.lang.english") : I18n.get("settings.lang.russian"));
+        
+        langCombo.setOnAction(e -> {
+            String selected = langCombo.getValue();
+            String code = "English".equals(selected) || (selected != null && selected.contains("English")) || (selected != null && selected.contains("en")) ? "en" : "ru";
+            // Check based on localized string
+            if (I18n.get("settings.lang.english").equals(selected)) code = "en";
+            else if (I18n.get("settings.lang.russian").equals(selected)) code = "ru";
 
-        // Load current import folder
-        CompletableFuture.runAsync(() -> {
-            try {
-                String currentFolder = new ImportServiceClient(importApiBase).getCurrentFolder();
-                Platform.runLater(() -> {
-                    if (currentFolder != null && !currentFolder.isBlank()) {
-                        importFolderField.setText(currentFolder);
-                    }
-                });
-            } catch (Exception e) {
-                Platform.runLater(() -> {
-                    statusLabel.setText("Не удалось загрузить текущую директорию: " + e.getMessage());
-                });
+            if (!code.equals(currentLang)) {
+                I18n.setLocale(code);
+                Alert alert = new Alert(AlertType.INFORMATION);
+                alert.setTitle(I18n.get("settings.header"));
+                alert.setHeaderText(I18n.get("settings.restart_required"));
+                alert.setContentText(I18n.get("settings.restart_message"));
+                alert.showAndWait();
             }
         });
 
-        Button saveApi = new Button("Сохранить API адреса");
-        saveApi.setOnAction(e -> {
-            coreApiBase = coreApiField.getText();
-            importApiBase = importApiField.getText();
-            apiClient = new ApiClient(coreApiBase);
-            statusLabel.setText("API базовые адреса сохранены");
-        });
-
-        Button saveFolder = new Button("Сохранить директорию импорта");
-        saveFolder.setOnAction(e -> updateImportFolder(importApiField.getText(), importFolderField.getText(), statusLabel));
-
-        // Putaway rules list
-        Label rulesHeader = new Label("Правила размещения");
-        rulesHeader.setStyle("-fx-text-fill: white; -fx-font-size: 16px; -fx-font-weight: bold;");
-        TableView<PutawayRule> rulesTable = new TableView<>();
-        rulesTable.setPlaceholder(new Label("Нет правил"));
-        rulesTable.setPrefHeight(200);
-        rulesTable.getColumns().addAll(
-            column("priority", PutawayRule::priority),
-            column("name", PutawayRule::name),
-            column("strategy", PutawayRule::strategyType),
-            column("zoneId", PutawayRule::zoneId),
-            column("velocity", PutawayRule::velocityClass),
-            column("active", PutawayRule::active)
-        );
-        Button refreshRules = new Button("Обновить правила");
-        refreshRules.getStyleClass().add("refresh-btn");
-        refreshRules.setOnAction(e -> loadList(rulesTable, () -> apiClient.listPutawayRules()));
-        loadList(rulesTable, () -> apiClient.listPutawayRules());
-
-        VBox layout = new VBox(10,
-            header,
-            new Label("CORE API"), coreApiField,
-            new Label("Import API"), importApiField,
-            new Label("Путь к папке импорта"), importFolderField,
-            new HBox(8, saveApi, saveFolder),
-            statusLabel,
-            rulesHeader,
-            refreshRules,
-            rulesTable
-        );
+        VBox layout = new VBox(10, header, langLabel, langCombo);
         layout.setPadding(new Insets(24));
         layout.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
         layout.setFillWidth(true);
+
+        String role = apiClient.getCurrentUser().role();
+        if ("ADMIN".equalsIgnoreCase(role)) {
+            TextField coreApiField = new TextField(coreApiBase);
+            TextField importApiField = new TextField(importApiBase);
+            TextField importFolderField = new TextField();
+            Label statusLabel = new Label(I18n.get("settings.status_default"));
+            statusLabel.setStyle("-fx-text-fill: white;");
+
+            // Load current import folder
+            CompletableFuture.runAsync(() -> {
+                try {
+                    String currentFolder = new ImportServiceClient(importApiBase).getCurrentFolder();
+                    Platform.runLater(() -> {
+                        if (currentFolder != null && !currentFolder.isBlank()) {
+                            importFolderField.setText(currentFolder);
+                        }
+                    });
+                } catch (Exception e) {
+                    Platform.runLater(() -> {
+                        statusLabel.setText(I18n.format("settings.current_folder_error", e.getMessage()));
+                    });
+                }
+            });
+
+            Button saveApi = new Button(I18n.get("settings.save_api"));
+            saveApi.setOnAction(e -> {
+                coreApiBase = coreApiField.getText();
+                importApiBase = importApiField.getText();
+                apiClient = new ApiClient(coreApiBase);
+                statusLabel.setText(I18n.get("settings.api_saved"));
+            });
+
+            Button saveFolder = new Button(I18n.get("settings.save_folder"));
+            saveFolder.setOnAction(e -> updateImportFolder(importApiField.getText(), importFolderField.getText(), statusLabel));
+
+            // Putaway rules list
+            Label rulesHeader = new Label(I18n.get("settings.rules_header"));
+            rulesHeader.setStyle("-fx-text-fill: white; -fx-font-size: 16px; -fx-font-weight: bold;");
+            TableView<PutawayRule> rulesTable = new TableView<>();
+            rulesTable.setPlaceholder(new Label(I18n.get("settings.no_rules")));
+            rulesTable.setPrefHeight(200);
+            rulesTable.getColumns().addAll(
+                column("priority", PutawayRule::priority),
+                column("name", PutawayRule::name),
+                column("strategy", PutawayRule::strategyType),
+                column("zoneId", PutawayRule::zoneId),
+                column("velocity", PutawayRule::velocityClass),
+                column("active", PutawayRule::active)
+            );
+            Button refreshRules = new Button(I18n.get("settings.refresh_rules"));
+            refreshRules.getStyleClass().add("refresh-btn");
+            refreshRules.setOnAction(e -> loadList(rulesTable, () -> apiClient.listPutawayRules()));
+            loadList(rulesTable, () -> apiClient.listPutawayRules());
+
+            layout.getChildren().addAll(
+                new Separator(),
+                new Label(I18n.get("settings.core_api")), coreApiField,
+                new Label(I18n.get("settings.import_api")), importApiField,
+                new Label(I18n.get("settings.import_folder")), importFolderField,
+                new HBox(8, saveApi, saveFolder),
+                statusLabel,
+                rulesHeader,
+                refreshRules,
+                rulesTable
+            );
+        }
 
         setContent(layout);
     }
@@ -1508,18 +1679,18 @@ public class DesktopClientApplication extends Application {
     private void showTasksDialog(Receipt receipt) {
         Stage dialog = new Stage();
         dialog.initModality(Modality.APPLICATION_MODAL);
-        dialog.setTitle("Задания прихода " + receipt.docNo());
+        dialog.setTitle(I18n.format("receipts.dialog.tasks_title", receipt.docNo()));
 
         TableView<com.wmsdipl.desktop.model.Task> table = new TableView<>();
-        table.setPlaceholder(new Label("Загрузка..."));
+        table.setPlaceholder(new Label(I18n.get("common.loading")));
         table.getColumns().addAll(
-            column("id", com.wmsdipl.desktop.model.Task::id),
-            column("taskType", com.wmsdipl.desktop.model.Task::taskType),
-            column("status", com.wmsdipl.desktop.model.Task::status),
-            column("assignee", com.wmsdipl.desktop.model.Task::assignee),
-            column("palletId", com.wmsdipl.desktop.model.Task::palletId),
-            column("sourceLoc", com.wmsdipl.desktop.model.Task::sourceLocationId),
-            column("targetLoc", com.wmsdipl.desktop.model.Task::targetLocationId)
+            column(I18n.get("tasks.table.id"), com.wmsdipl.desktop.model.Task::id),
+            column(I18n.get("tasks.table.type"), com.wmsdipl.desktop.model.Task::taskType),
+            column(I18n.get("tasks.table.status"), t -> translateStatus(t.status())),
+            column(I18n.get("tasks.table.assignee"), com.wmsdipl.desktop.model.Task::assignee),
+            column(I18n.get("tasks.table.pallet"), com.wmsdipl.desktop.model.Task::palletId),
+            column(I18n.get("tasks.table.source"), com.wmsdipl.desktop.model.Task::sourceLocationId),
+            column(I18n.get("tasks.table.target"), com.wmsdipl.desktop.model.Task::targetLocationId)
         );
 
         dialog.setScene(new Scene(new VBox(table), 780, 420));
@@ -1530,10 +1701,10 @@ public class DesktopClientApplication extends Application {
 
     private void updateImportFolder(String importBase, String folder, Label importStatus) {
         if (folder == null || folder.isBlank()) {
-            importStatus.setText("Укажите директорию импорта");
+            importStatus.setText(I18n.get("settings.import_folder_prompt"));
             return;
         }
-        importStatus.setText("Сохранение директории...");
+        importStatus.setText(I18n.get("settings.import_folder_saving"));
         CompletableFuture.runAsync(() -> {
             try {
                 new ImportServiceClient(importBase).updateFolder(folder);
@@ -1542,9 +1713,9 @@ public class DesktopClientApplication extends Application {
             }
         }).whenComplete((v, error) -> Platform.runLater(() -> {
             if (error != null) {
-                importStatus.setText("Ошибка директории: " + error.getMessage());
+                importStatus.setText(I18n.format("settings.folder_error", error.getMessage()));
             } else {
-                importStatus.setText("Директория установлена: " + folder);
+                importStatus.setText(I18n.format("settings.folder_saved", folder));
             }
         }));
     }
@@ -1560,7 +1731,7 @@ public class DesktopClientApplication extends Application {
             })
             .whenComplete((list, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    table.setPlaceholder(new Label("Ошибка: " + error.getMessage()));
+                    table.setPlaceholder(new Label(I18n.format("common.error", error.getMessage())));
                     table.setItems(FXCollections.observableArrayList());
                     return;
                 }
@@ -1577,7 +1748,7 @@ public class DesktopClientApplication extends Application {
             }
         }).whenComplete((v, error) -> Platform.runLater(() -> {
             if (error != null) {
-                new Alert(AlertType.ERROR, "Ошибка: " + error.getMessage()).showAndWait();
+                new Alert(AlertType.ERROR, I18n.format("common.error", error.getMessage())).showAndWait();
             }
             loadReceipts(table, "");
         }));
@@ -1610,41 +1781,67 @@ public class DesktopClientApplication extends Application {
         contentHolder.getChildren().setAll(node);
     }
 
+    private void showNotification(String message) {
+        javafx.stage.Popup popup = new javafx.stage.Popup();
+        Label label = new Label(message);
+        label.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-font-size: 14px; -fx-padding: 15px; -fx-background-radius: 8px; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.4), 10, 0, 0, 0);");
+        label.setMinWidth(200);
+        label.setAlignment(Pos.CENTER);
+        
+        popup.getContent().add(label);
+        popup.setAutoHide(true);
+        
+        Stage stage = (Stage) shell.getScene().getWindow();
+        // Position bottom right
+        popup.show(stage, 
+            stage.getX() + stage.getWidth() - 220, 
+            stage.getY() + stage.getHeight() - 80);
+            
+        // Auto-hide
+        new java.util.Timer().schedule(new java.util.TimerTask() {
+            @Override
+            public void run() {
+                Platform.runLater(popup::hide);
+            }
+        }, 3000);
+    }
+
     private boolean showLoginDialog() {
         Stage dialog = new Stage();
         dialog.initModality(Modality.APPLICATION_MODAL);
-        dialog.setTitle("Авторизация");
+        dialog.setTitle(I18n.get("login.title"));
 
         TextField userField = new TextField();
-        userField.setPromptText("Логин");
+        userField.setPromptText(I18n.get("login.username"));
         PasswordField passField = new PasswordField();
-        passField.setPromptText("Пароль");
-        Label info = new Label("Введите логин и пароль");
-        Button loginBtn = new Button("Войти");
+        passField.setPromptText(I18n.get("login.password"));
+        Label info = new Label(I18n.get("login.prompt"));
+        Button loginBtn = new Button(I18n.get("login.button"));
 
         final boolean[] success = {false};
         loginBtn.setOnAction(e -> {
             String username = userField.getText();
             String password = passField.getText();
             if (username.isBlank() || password.isBlank()) {
-                info.setText("Заполните логин/пароль");
+                info.setText(I18n.get("login.error.empty"));
                 return;
             }
             loginBtn.setDisable(true);
-            info.setText("Проверка...");
+            info.setText(I18n.get("login.checking"));
             CompletableFuture.supplyAsync(() -> {
                 try {
                     return apiClient.login(username, password);
                 } catch (Exception ex) {
                     throw new RuntimeException(ex);
                 }
-            }).whenComplete((ok, error) -> Platform.runLater(() -> {
+            }).whenComplete((user, error) -> Platform.runLater(() -> {
                 loginBtn.setDisable(false);
-                if (error != null || !Boolean.TRUE.equals(ok)) {
-                    info.setText("Неверный логин или пароль");
+                if (error != null || user == null) {
+                    info.setText(I18n.get("login.error.invalid"));
                     return;
                 }
                 success[0] = true;
+                I18n.loadForUser(username);
                 dialog.close();
             }));
         });
@@ -1666,7 +1863,7 @@ public class DesktopClientApplication extends Application {
         // Updatable title
         Runnable updateTitle = () -> {
             String docNo = currentTask[0].receiptDocNo() != null ? currentTask[0].receiptDocNo() : "";
-            dialog.setTitle("Задание #" + currentTask[0].id() + " - " + docNo + " [" + currentTask[0].status() + "]");
+            dialog.setTitle(I18n.format("task_exec.title", currentTask[0].id(), docNo, currentTask[0].status()));
         };
         updateTitle.run();
 
@@ -1674,12 +1871,12 @@ public class DesktopClientApplication extends Application {
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
         // Tab 1: Document (expected data)
-        Tab docTab = new Tab("Документ");
+        Tab docTab = new Tab(I18n.get("task_exec.tab.document"));
         VBox docContent = buildDocumentTab(currentTask[0]);
         docTab.setContent(docContent);
 
         // Tab 2: Fact (scan form)
-        Tab factTab = new Tab("Факт");
+        Tab factTab = new Tab(I18n.get("task_exec.tab.fact"));
         VBox factContent = buildFactTab(currentTask[0], dialog);
         factTab.setContent(factContent);
 
@@ -1687,22 +1884,22 @@ public class DesktopClientApplication extends Application {
         tabs.getSelectionModel().select(factTab); // Start on Fact tab
 
         // Action buttons
-        Button assignBtn = new Button("Назначить");
+        Button assignBtn = new Button(I18n.get("task_exec.btn.assign"));
         assignBtn.getStyleClass().add("refresh-btn");
         assignBtn.setPrefHeight(40);
         assignBtn.setPrefWidth(150);
         
-        Button startBtn = new Button("Начать");
+        Button startBtn = new Button(I18n.get("task_exec.btn.start"));
         startBtn.getStyleClass().add("refresh-btn");
         startBtn.setPrefHeight(40);
         startBtn.setPrefWidth(150);
         
-        Button completeBtn = new Button("Завершить");
+        Button completeBtn = new Button(I18n.get("task_exec.btn.complete"));
         completeBtn.getStyleClass().add("refresh-btn");
         completeBtn.setPrefHeight(40);
         completeBtn.setPrefWidth(150);
         
-        Button releaseBtn = new Button("Освободить");
+        Button releaseBtn = new Button(I18n.get("task_exec.btn.release"));
         releaseBtn.getStyleClass().add("refresh-btn");
         releaseBtn.setPrefHeight(40);
         releaseBtn.setPrefWidth(150);
@@ -1715,8 +1912,16 @@ public class DesktopClientApplication extends Application {
             String status = currentTask[0].status();
             String currentUser = apiClient.getCurrentUsername();
             String assignee = currentTask[0].assignee();
+            String userRole = apiClient.getCurrentUser().role();
             
-            assignBtn.setDisable(!"NEW".equals(status));
+            boolean isOperator = "OPERATOR".equalsIgnoreCase(userRole);
+            
+            if (isOperator) {
+                assignBtn.setDisable(!"NEW".equals(status));
+            } else {
+                assignBtn.setDisable(!"NEW".equals(status) && !"ASSIGNED".equals(status) && !"IN_PROGRESS".equals(status));
+            }
+
             startBtn.setDisable(!"ASSIGNED".equals(status) || !currentUser.equals(assignee));
             completeBtn.setDisable(!"IN_PROGRESS".equals(status) || !currentUser.equals(assignee));
             releaseBtn.setDisable(!("ASSIGNED".equals(status) || "IN_PROGRESS".equals(status)) || !currentUser.equals(assignee));
@@ -1725,35 +1930,20 @@ public class DesktopClientApplication extends Application {
         
         // Assign action
         assignBtn.setOnAction(e -> {
-            assignBtn.setDisable(true);
-            actionStatus.setText("Назначение...");
-            CompletableFuture.supplyAsync(() -> {
-                try {
-                    return apiClient.assignTask(currentTask[0].id(), apiClient.getCurrentUsername());
-                } catch (Exception ex) {
-                    throw new RuntimeException(ex);
+            String userRole = apiClient.getCurrentUser().role();
+            if ("OPERATOR".equalsIgnoreCase(userRole)) {
+                if ("NEW".equals(currentTask[0].status())) {
+                    assignToSelf(currentTask, assignBtn, actionStatus, updateButtons, updateTitle, docTab, factTab, dialog);
                 }
-            }).whenComplete((updatedTask, error) -> Platform.runLater(() -> {
-                if (error != null) {
-                    actionStatus.setText("Ошибка: " + error.getMessage());
-                    actionStatus.setStyle("-fx-text-fill: #F44336; -fx-font-size: 14px;");
-                    assignBtn.setDisable(false);
-                } else {
-                    currentTask[0] = updatedTask;
-                    actionStatus.setText("Задание назначено");
-                    actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
-                    updateButtons.run();
-                    updateTitle.run();
-                    docTab.setContent(buildDocumentTab(currentTask[0]));
-                    factTab.setContent(buildFactTab(currentTask[0], dialog));
-                }
-            }));
+            } else {
+                showAssignDialog(currentTask, assignBtn, actionStatus, updateButtons, updateTitle, docTab, factTab, dialog);
+            }
         });
         
         // Start action
         startBtn.setOnAction(e -> {
             startBtn.setDisable(true);
-            actionStatus.setText("Начало...");
+            actionStatus.setText(I18n.get("task_exec.status.starting"));
             CompletableFuture.supplyAsync(() -> {
                 try {
                     return apiClient.startTask(currentTask[0].id());
@@ -1762,12 +1952,12 @@ public class DesktopClientApplication extends Application {
                 }
             }).whenComplete((updatedTask, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    actionStatus.setText("Ошибка: " + error.getMessage());
+                    actionStatus.setText(I18n.format("common.error", error.getMessage()));
                     actionStatus.setStyle("-fx-text-fill: #F44336; -fx-font-size: 14px;");
                     startBtn.setDisable(false);
                 } else {
                     currentTask[0] = updatedTask;
-                    actionStatus.setText("Задание начато");
+                    actionStatus.setText(I18n.get("task_exec.status.started"));
                     actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
                     updateButtons.run();
                     updateTitle.run();
@@ -1780,7 +1970,7 @@ public class DesktopClientApplication extends Application {
         // Complete action
         completeBtn.setOnAction(e -> {
             completeBtn.setDisable(true);
-            actionStatus.setText("Проверка расхождений...");
+            actionStatus.setText(I18n.get("task_exec.status.checking"));
             
             // First, fetch fresh task data from server to get updated qtyDone
             CompletableFuture.supplyAsync(() -> {
@@ -1791,7 +1981,7 @@ public class DesktopClientApplication extends Application {
                 }
             }).whenComplete((freshTask, fetchError) -> Platform.runLater(() -> {
                 if (fetchError != null) {
-                    actionStatus.setText("Ошибка загрузки задачи: " + fetchError.getMessage());
+                    actionStatus.setText(I18n.format("task_exec.error.load", fetchError.getMessage()));
                     actionStatus.setStyle("-fx-text-fill: #F44336; -fx-font-size: 14px;");
                     completeBtn.setDisable(false);
                     return;
@@ -1800,14 +1990,16 @@ public class DesktopClientApplication extends Application {
                 // Update currentTask with fresh data
                 currentTask[0] = freshTask;
                 
-                // Check for UNDER_QTY on client side
-                boolean hasUnderQty = false;
+                // Check for discrepancies on client side
+                boolean hasDiscrepancy = false;
                 if (freshTask.qtyAssigned() != null && freshTask.qtyDone() != null) {
-                    hasUnderQty = freshTask.qtyDone().compareTo(freshTask.qtyAssigned()) < 0;
+                    hasDiscrepancy = freshTask.qtyDone().compareTo(freshTask.qtyAssigned()) != 0;
                 }
                 
+                final boolean clientDetectedDiscrepancy = hasDiscrepancy;
+                final boolean isPlacement = "PLACEMENT".equals(freshTask.taskType());
+
                 // Also check for existing scan discrepancies from backend
-                final boolean clientDetectedUnderQty = hasUnderQty;
                 CompletableFuture.supplyAsync(() -> {
                     try {
                         return apiClient.hasDiscrepancies(freshTask.id());
@@ -1816,17 +2008,25 @@ public class DesktopClientApplication extends Application {
                     }
                 }).whenComplete((hasScanDiscrepancies, error) -> Platform.runLater(() -> {
                     if (error != null) {
-                        actionStatus.setText("Ошибка проверки: " + error.getMessage());
+                        actionStatus.setText(I18n.format("task_exec.error.check", error.getMessage()));
                         actionStatus.setStyle("-fx-text-fill: #F44336; -fx-font-size: 14px;");
                         completeBtn.setDisable(false);
                         return;
                     }
                     
-                    // If has any discrepancies (UNDER_QTY or existing scan discrepancies), show confirmation dialog
-                    if (hasScanDiscrepancies || clientDetectedUnderQty) {
+                    // Logic for PLACEMENT: Hard stop if discrepancies exist
+                    if (isPlacement && (clientDetectedDiscrepancy || hasScanDiscrepancies)) {
+                        new Alert(AlertType.ERROR, I18n.get("error.placement_discrepancy")).showAndWait();
+                        actionStatus.setText(I18n.get("task_exec.status.cancelled"));
+                        completeBtn.setDisable(false);
+                        return;
+                    }
+
+                    // Logic for RECEIVING: Confirmation dialog for discrepancies
+                    if (!isPlacement && (hasScanDiscrepancies || clientDetectedDiscrepancy)) {
                         boolean confirmed = showDiscrepancyConfirmationDialog();
                         if (!confirmed) {
-                            actionStatus.setText("Завершение отменено");
+                            actionStatus.setText(I18n.get("task_exec.status.cancelled"));
                             actionStatus.setStyle("-fx-text-fill: #FFC107; -fx-font-size: 14px;");
                             completeBtn.setDisable(false);
                             return;
@@ -1834,7 +2034,7 @@ public class DesktopClientApplication extends Application {
                     }
                     
                     // Proceed with completion
-                    actionStatus.setText("Завершение...");
+                    actionStatus.setText(I18n.get("task_exec.status.completing"));
                     CompletableFuture.supplyAsync(() -> {
                         try {
                             return apiClient.completeTask(currentTask[0].id());
@@ -1843,12 +2043,12 @@ public class DesktopClientApplication extends Application {
                         }
                     }).whenComplete((updatedTask, error2) -> Platform.runLater(() -> {
                         if (error2 != null) {
-                            actionStatus.setText("Ошибка: " + error2.getMessage());
+                            actionStatus.setText(I18n.format("common.error", error2.getMessage()));
                             actionStatus.setStyle("-fx-text-fill: #F44336; -fx-font-size: 14px;");
                             completeBtn.setDisable(false);
                         } else {
                             currentTask[0] = updatedTask;
-                            actionStatus.setText("Задание завершено!");
+                            actionStatus.setText(I18n.get("task_exec.status.completed"));
                             actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
                             updateButtons.run();
                             updateTitle.run();
@@ -1864,7 +2064,7 @@ public class DesktopClientApplication extends Application {
         // Release action
         releaseBtn.setOnAction(e -> {
             releaseBtn.setDisable(true);
-            actionStatus.setText("Освобождение...");
+            actionStatus.setText(I18n.get("task_exec.status.releasing"));
             CompletableFuture.supplyAsync(() -> {
                 try {
                     return apiClient.releaseTask(currentTask[0].id());
@@ -1873,12 +2073,12 @@ public class DesktopClientApplication extends Application {
                 }
             }).whenComplete((updatedTask, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    actionStatus.setText("Ошибка: " + error.getMessage());
+                    actionStatus.setText(I18n.format("common.error", error.getMessage()));
                     actionStatus.setStyle("-fx-text-fill: #F44336; -fx-font-size: 14px;");
                     releaseBtn.setDisable(false);
                 } else {
                     currentTask[0] = updatedTask;
-                    actionStatus.setText("Задание освобождено");
+                    actionStatus.setText(I18n.get("task_exec.status.released"));
                     actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
                     updateButtons.run();
                     updateTitle.run();
@@ -1906,14 +2106,24 @@ public class DesktopClientApplication extends Application {
         content.setPadding(new Insets(16));
         content.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
 
-        Label header = new Label("Ожидаемые данные");
+        Label header = new Label(I18n.get("doc_tab.header"));
         header.setStyle("-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: white;");
 
-        Label receiptLabel = new Label("Приход: " + (task.receiptDocNo() != null ? task.receiptDocNo() : "N/A"));
-        Label taskTypeLabel = new Label("Тип задания: " + task.taskType());
-        Label statusLabel = new Label("Статус: " + task.status());
-        Label qtyLabel = new Label("Количество: " + task.qtyAssigned());
-        Label assigneeLabel = new Label("Исполнитель: " + (task.assignee() != null ? task.assignee() : "не назначен"));
+        Label receiptLabel = new Label(I18n.format("doc_tab.receipt", (task.receiptDocNo() != null ? task.receiptDocNo() : "N/A")));
+        Label taskTypeLabel = new Label(I18n.format("doc_tab.task_type", task.taskType()));
+        Label statusLabel = new Label(I18n.format("doc_tab.status", task.status()));
+        Label qtyLabel = new Label(I18n.format("doc_tab.qty", task.qtyAssigned()));
+        
+        Label skuCodeLabel = new Label(I18n.format("doc_tab.barcode", (task.skuCode() != null ? task.skuCode() : "N/A")));
+        skuCodeLabel.setStyle("-fx-text-fill: #2196F3; -fx-font-size: 14px; -fx-font-weight: bold;");
+
+        Label palletCodeLabel = null;
+        if ("PLACEMENT".equals(task.taskType())) {
+            palletCodeLabel = new Label(I18n.format("doc_tab.pallet", (task.palletCode() != null ? task.palletCode() : "N/A")));
+            palletCodeLabel.setStyle("-fx-text-fill: #2196F3; -fx-font-size: 14px; -fx-font-weight: bold;");
+        }
+
+        Label assigneeLabel = new Label(I18n.format("doc_tab.assignee", (task.assignee() != null ? task.assignee() : I18n.get("doc_tab.unassigned"))));
 
         receiptLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
         taskTypeLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
@@ -1921,7 +2131,11 @@ public class DesktopClientApplication extends Application {
         qtyLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
         assigneeLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
 
-        content.getChildren().addAll(header, receiptLabel, taskTypeLabel, statusLabel, qtyLabel, assigneeLabel);
+        content.getChildren().addAll(header, receiptLabel, taskTypeLabel, statusLabel, qtyLabel, skuCodeLabel);
+        if (palletCodeLabel != null) {
+            content.getChildren().add(palletCodeLabel);
+        }
+        content.getChildren().add(assigneeLabel);
         return content;
     }
 
@@ -1930,36 +2144,36 @@ public class DesktopClientApplication extends Application {
         content.setPadding(new Insets(16));
         content.setStyle("-fx-background-color: #1c1c1c;");
 
-        Label header = new Label("Сканирование");
+        Label header = new Label(I18n.get("fact_tab.header"));
         header.setStyle("-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: white;");
 
         // Show target location for PLACEMENT tasks
         Label targetLocationInfo = null;
         if ("PLACEMENT".equals(task.taskType()) && task.targetLocationCode() != null) {
-            targetLocationInfo = new Label("🎯 Целевая ячейка: " + task.targetLocationCode());
+            targetLocationInfo = new Label(I18n.format("fact_tab.target_location", task.targetLocationCode()));
             targetLocationInfo.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #4CAF50; -fx-padding: 8px; -fx-background-color: rgba(76,175,80,0.1); -fx-background-radius: 4px;");
         }
 
         // Scan fields (blue, 16px, with 📷 icon)
-        Label palletLabel = new Label("📷 Паллета:");
+        Label palletLabel = new Label(I18n.get("terminal.scan.pallet"));
         palletLabel.setStyle("-fx-text-fill: #2196F3; -fx-font-size: 14px;");
         TextField palletField = new TextField();
-        palletField.setPromptText("Отсканируйте код паллеты");
+        palletField.setPromptText(I18n.get("fact_tab.prompt.pallet"));
         palletField.getStyleClass().add("scan-field");
         palletField.setPrefHeight(48);
 
-        Label barcodeLabel = new Label("📷 Баркод:");
+        Label barcodeLabel = new Label(I18n.get("terminal.scan.barcode"));
         barcodeLabel.setStyle("-fx-text-fill: #2196F3; -fx-font-size: 14px;");
         TextField barcodeField = new TextField();
-        barcodeField.setPromptText("Отсканируйте баркод товара");
+        barcodeField.setPromptText(I18n.get("fact_tab.prompt.barcode"));
         barcodeField.getStyleClass().add("scan-field");
         barcodeField.setPrefHeight(48);
 
         // Input fields (gray, 14px, with ✏️ icon)
-        Label qtyLabel = new Label("✏️ Количество:");
+        Label qtyLabel = new Label(I18n.get("terminal.scan.qty"));
         qtyLabel.setStyle("-fx-text-fill: #9E9E9E; -fx-font-size: 14px;");
         TextField qtyField = new TextField();
-        qtyField.setPromptText("Введите количество");
+        qtyField.setPromptText(I18n.get("fact_tab.prompt.qty"));
         qtyField.getStyleClass().add("input-field");
         qtyField.setPrefHeight(40);
         
@@ -1973,21 +2187,21 @@ public class DesktopClientApplication extends Application {
         }));
 
         // Damage tracking section
-        Label damageHeaderLabel = new Label("🚨 Повреждения:");
+        Label damageHeaderLabel = new Label(I18n.get("fact_tab.damage.header"));
         damageHeaderLabel.setStyle("-fx-text-fill: #FF9800; -fx-font-size: 14px; -fx-font-weight: bold;");
 
-        CheckBox damageCheckBox = new CheckBox("Товар поврежден");
+        CheckBox damageCheckBox = new CheckBox(I18n.get("fact_tab.damage.checkbox"));
         damageCheckBox.setStyle("-fx-text-fill: white; -fx-font-size: 13px;");
 
         ComboBox<String> damageTypeCombo = new ComboBox<>();
         damageTypeCombo.getItems().addAll("PHYSICAL", "WATER", "EXPIRED", "OTHER");
-        damageTypeCombo.setPromptText("Тип повреждения");
+        damageTypeCombo.setPromptText(I18n.get("fact_tab.damage.type_prompt"));
         damageTypeCombo.setPrefHeight(40);
         damageTypeCombo.getStyleClass().add("input-field");
         damageTypeCombo.setDisable(true);
 
         TextArea damageDescriptionField = new TextArea();
-        damageDescriptionField.setPromptText("Описание повреждения");
+        damageDescriptionField.setPromptText(I18n.get("fact_tab.damage.desc_prompt"));
         damageDescriptionField.setPrefHeight(60);
         damageDescriptionField.setMaxHeight(60);
         damageDescriptionField.getStyleClass().add("input-field");
@@ -2004,16 +2218,16 @@ public class DesktopClientApplication extends Application {
         });
 
         // Lot tracking section
-        Label lotHeaderLabel = new Label("📦 Партия и срок годности:");
+        Label lotHeaderLabel = new Label(I18n.get("fact_tab.lot.header"));
         lotHeaderLabel.setStyle("-fx-text-fill: #9E9E9E; -fx-font-size: 14px; -fx-font-weight: bold;");
 
         TextField lotNumberField = new TextField();
-        lotNumberField.setPromptText("Номер партии (опционально)");
+        lotNumberField.setPromptText(I18n.get("fact_tab.lot.number_prompt"));
         lotNumberField.getStyleClass().add("input-field");
         lotNumberField.setPrefHeight(40);
 
         DatePicker expiryDatePicker = new DatePicker();
-        expiryDatePicker.setPromptText("Срок годности (опционально)");
+        expiryDatePicker.setPromptText(I18n.get("fact_tab.lot.expiry_prompt"));
         expiryDatePicker.setPrefHeight(40);
         expiryDatePicker.getStyleClass().add("input-field");
 
@@ -2023,24 +2237,24 @@ public class DesktopClientApplication extends Application {
         boolean isPlacementTask = "PLACEMENT".equals(task.taskType());
         
         if (isPlacementTask) {
-            locationLabel = new Label("📍 Ячейка:");
+            locationLabel = new Label(I18n.get("fact_tab.location_label"));
             locationLabel.setStyle("-fx-text-fill: #2196F3; -fx-font-size: 14px;");
             locationField = new TextField();
-            locationField.setPromptText("Отсканируйте код ячейки");
+            locationField.setPromptText(I18n.get("fact_tab.location_prompt"));
             locationField.getStyleClass().add("scan-field");
             locationField.setPrefHeight(48);
         }
 
-        Label commentLabel = new Label("✏️ Комментарий:");
+        Label commentLabel = new Label(I18n.get("fact_tab.comment_label"));
         commentLabel.setStyle("-fx-text-fill: #9E9E9E; -fx-font-size: 14px;");
         TextArea commentField = new TextArea();
-        commentField.setPromptText("Комментарий (опционально)");
+        commentField.setPromptText(I18n.get("fact_tab.comment_prompt"));
         commentField.getStyleClass().add("input-field");
         commentField.setPrefHeight(60);
         commentField.setMaxHeight(60);
 
         // Submit button
-        Button submitBtn = new Button("Отправить");
+        Button submitBtn = new Button(I18n.get("fact_tab.submit"));
         submitBtn.getStyleClass().add("refresh-btn");
         submitBtn.setPrefHeight(48);
         submitBtn.setPrefWidth(200);
@@ -2061,27 +2275,27 @@ public class DesktopClientApplication extends Application {
 
         // Scan history table
         TableView<Scan> scanTable = new TableView<>();
-        scanTable.setPlaceholder(new Label("Нет сканов"));
+        scanTable.setPlaceholder(new Label(I18n.get("fact_tab.no_scans")));
         scanTable.setPrefHeight(200);
         scanTable.getColumns().addAll(
-            column("Паллета", Scan::palletCode),
-            column("Баркод", Scan::barcode),
-            column("Кол-во", Scan::qty),
-            column("Расхождение", s -> {
+            column(I18n.get("fact_tab.col.pallet"), Scan::palletCode),
+            column(I18n.get("fact_tab.col.barcode"), Scan::barcode),
+            column(I18n.get("fact_tab.col.qty"), Scan::qty),
+            column(I18n.get("fact_tab.col.discrepancy"), s -> {
                 if (s.discrepancy() == null || !s.discrepancy()) {
-                    return "✓ ОК";
+                    return I18n.get("fact_tab.discrepancy.ok");
                 }
-                return "⚠ Есть расхождение";
+                return I18n.get("fact_tab.discrepancy.yes");
             }),
-            column("Брак", s -> {
+            column(I18n.get("fact_tab.col.damage"), s -> {
                 if (s.damageFlag() != null && s.damageFlag()) {
-                    return "🚨 " + (s.damageType() != null ? s.damageType() : "ДА");
+                    return "🚨 " + (s.damageType() != null ? s.damageType() : I18n.get("fact_tab.damage.yes"));
                 }
                 return "";
             }),
-            column("Партия", s -> s.lotNumber() != null ? s.lotNumber() : ""),
-            column("Срок", s -> s.expiryDate() != null ? s.expiryDate().toString() : ""),
-            column("Время", s -> s.scannedAt() != null ? s.scannedAt().toString() : "")
+            column(I18n.get("fact_tab.col.lot"), s -> s.lotNumber() != null ? s.lotNumber() : ""),
+            column(I18n.get("fact_tab.col.expiry"), s -> s.expiryDate() != null ? s.expiryDate().toString() : ""),
+            column(I18n.get("fact_tab.col.time"), s -> s.scannedAt() != null ? s.scannedAt().toString() : "")
         );
 
         // Enter key navigation
@@ -2114,17 +2328,17 @@ public class DesktopClientApplication extends Application {
             String locationCode = finalLocationField2 != null ? finalLocationField2.getText().trim() : null;
 
             if (palletCode.isEmpty()) {
-                showError(statusLabel, "Код паллеты обязателен", palletField);
+                showError(statusLabel, I18n.get("fact_tab.error.pallet_required"), palletField);
                 return;
             }
             if (qtyStr.isEmpty()) {
-                showError(statusLabel, "Количество обязательно", qtyField);
+                showError(statusLabel, I18n.get("fact_tab.error.qty_required"), qtyField);
                 return;
             }
             
             // Validate location for PLACEMENT tasks
             if (isPlacementTask && (locationCode == null || locationCode.isEmpty())) {
-                showError(statusLabel, "Код ячейки обязателен для размещения", finalLocationField2);
+                showError(statusLabel, I18n.get("fact_tab.error.location_required"), finalLocationField2);
                 return;
             }
 
@@ -2141,7 +2355,7 @@ public class DesktopClientApplication extends Application {
             String expiryDate = expiryDatePicker.getValue() != null ? expiryDatePicker.getValue().toString() : null;
 
             submitBtn.setDisable(true);
-            statusLabel.setText("Отправка...");
+            statusLabel.setText(I18n.get("fact_tab.status.sending"));
 
             CompletableFuture.supplyAsync(() -> {
                 try {
@@ -2153,9 +2367,9 @@ public class DesktopClientApplication extends Application {
             }).whenComplete((scan, error) -> Platform.runLater(() -> {
                 submitBtn.setDisable(!isStarted);
                 if (error != null) {
-                    showError(statusLabel, "Ошибка: " + error.getMessage(), palletField);
+                    showError(statusLabel, I18n.format("common.error", error.getMessage()), palletField);
                 } else {
-                    showSuccess(statusLabel, "Скан записан!", palletField);
+                    showSuccess(statusLabel, I18n.get("fact_tab.status.saved"), palletField);
                     // Clear fields
                     palletField.clear();
                     barcodeField.clear();
@@ -2187,8 +2401,6 @@ public class DesktopClientApplication extends Application {
                 barcodeLabel, barcodeField,
                 qtyLabel, qtyField,
                 locationLabel, locationField,
-                damageHeaderLabel, damageCheckBox, damageTypeCombo, damageDescriptionField,
-                lotHeaderLabel, lotNumberField, expiryDatePicker,
                 commentLabel, commentField,
                 submitBtn,
                 statusLabel
@@ -2207,9 +2419,9 @@ public class DesktopClientApplication extends Application {
         }
 
         if (targetLocationInfo != null) {
-            content.getChildren().addAll(header, targetLocationInfo, form, new Label("История сканов:"), scanTable);
+            content.getChildren().addAll(header, targetLocationInfo, form, new Label(I18n.get("fact_tab.scan_history")), scanTable);
         } else {
-            content.getChildren().addAll(header, form, new Label("История сканов:"), scanTable);
+            content.getChildren().addAll(header, form, new Label(I18n.get("fact_tab.scan_history")), scanTable);
         }
         VBox.setVgrow(scanTable, Priority.ALWAYS);
 
@@ -2218,7 +2430,15 @@ public class DesktopClientApplication extends Application {
             Platform.runLater(() -> palletField.requestFocus());
         }
 
-        return content;
+        // Wrap content in ScrollPane
+        javafx.scene.control.ScrollPane scrollPane = new javafx.scene.control.ScrollPane(content);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setHbarPolicy(javafx.scene.control.ScrollPane.ScrollBarPolicy.NEVER);
+        scrollPane.setStyle("-fx-background: #1c1c1c; -fx-background-color: #1c1c1c;");
+        
+        VBox root = new VBox(scrollPane);
+        VBox.setVgrow(scrollPane, Priority.ALWAYS);
+        return root;
     }
 
     private void loadTaskScans(com.wmsdipl.desktop.model.Task task, TableView<Scan> table) {
@@ -2230,7 +2450,7 @@ public class DesktopClientApplication extends Application {
             }
         }).whenComplete((scans, error) -> Platform.runLater(() -> {
             if (error != null) {
-                table.setPlaceholder(new Label("Ошибка: " + error.getMessage()));
+                table.setPlaceholder(new Label(I18n.format("common.error", error.getMessage())));
             } else {
                 table.setItems(FXCollections.observableArrayList(scans));
             }
@@ -2268,23 +2488,23 @@ public class DesktopClientApplication extends Application {
     private void showCreatePalletDialog() {
         Stage dialog = new Stage();
         dialog.initModality(Modality.APPLICATION_MODAL);
-        dialog.setTitle("Создать паллету");
+        dialog.setTitle(I18n.get("pallet.create.title"));
 
-        Label codeLabel = new Label("Код паллеты:");
+        Label codeLabel = new Label(I18n.get("pallet.create.code_label"));
         codeLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
         
         TextField codeField = new TextField();
-        codeField.setPromptText("Например: PLT-001");
+        codeField.setPromptText(I18n.get("pallet.create.code_prompt"));
         codeField.setPrefWidth(300);
         
         Label statusLabel = new Label("");
         statusLabel.setStyle("-fx-text-fill: white; -fx-font-size: 12px;");
         
-        Button createBtn = new Button("Создать");
+        Button createBtn = new Button(I18n.get("common.create"));
         createBtn.getStyleClass().add("refresh-btn");
         createBtn.setPrefWidth(150);
         
-        Button cancelBtn = new Button("Отмена");
+        Button cancelBtn = new Button(I18n.get("common.cancel"));
         cancelBtn.getStyleClass().add("refresh-btn");
         cancelBtn.setPrefWidth(150);
         cancelBtn.setOnAction(e -> dialog.close());
@@ -2295,13 +2515,13 @@ public class DesktopClientApplication extends Application {
         createBtn.setOnAction(e -> {
             String code = codeField.getText().trim();
             if (code.isEmpty()) {
-                statusLabel.setText("Введите код паллеты");
+                statusLabel.setText(I18n.get("pallet.create.error.code_required"));
                 statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
                 return;
             }
             
             createBtn.setDisable(true);
-            statusLabel.setText("Создание...");
+            statusLabel.setText(I18n.get("pallet.create.status.creating"));
             statusLabel.setStyle("-fx-text-fill: #FFC107; -fx-font-size: 12px;");
             
             CompletableFuture.supplyAsync(() -> {
@@ -2312,11 +2532,11 @@ public class DesktopClientApplication extends Application {
                 }
             }).whenComplete((pallet, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    statusLabel.setText("Ошибка: " + error.getCause().getMessage());
+                    statusLabel.setText(I18n.format("common.error", error.getCause().getMessage()));
                     statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
                     createBtn.setDisable(false);
                 } else {
-                    statusLabel.setText("Паллета создана: " + pallet.code());
+                    statusLabel.setText(I18n.format("pallet.create.status.created", pallet.code()));
                     statusLabel.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 12px;");
                     
                     // Auto-close after 1 second
@@ -2351,33 +2571,33 @@ public class DesktopClientApplication extends Application {
     private void showCreateSkuDialog(TableView<Sku> skuTable) {
         Stage dialog = new Stage();
         dialog.initModality(Modality.APPLICATION_MODAL);
-        dialog.setTitle("Создать номенклатуру");
+        dialog.setTitle(I18n.get("sku.create.title"));
 
-        Label codeLabel = new Label("Код SKU:");
+        Label codeLabel = new Label(I18n.get("sku.create.code_label"));
         codeLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
         TextField codeField = new TextField();
-        codeField.setPromptText("Например: SKU-001");
+        codeField.setPromptText(I18n.get("sku.create.code_prompt"));
         codeField.setPrefWidth(300);
 
-        Label nameLabel = new Label("Название:");
+        Label nameLabel = new Label(I18n.get("sku.create.name_label"));
         nameLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
         TextField nameField = new TextField();
-        nameField.setPromptText("Название товара");
+        nameField.setPromptText(I18n.get("sku.create.name_prompt"));
         nameField.setPrefWidth(300);
 
-        Label uomLabel = new Label("Единица измерения:");
+        Label uomLabel = new Label(I18n.get("sku.create.uom_label"));
         uomLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
-        TextField uomField = new TextField("ШТ");
+        TextField uomField = new TextField(I18n.get("sku.field.uom_default"));
         uomField.setPrefWidth(300);
 
         Label statusLabel = new Label("");
         statusLabel.setStyle("-fx-text-fill: white; -fx-font-size: 12px;");
 
-        Button createBtn = new Button("Создать");
+        Button createBtn = new Button(I18n.get("common.create"));
         createBtn.getStyleClass().add("refresh-btn");
         createBtn.setPrefWidth(150);
 
-        Button cancelBtn = new Button("Отмена");
+        Button cancelBtn = new Button(I18n.get("common.cancel"));
         cancelBtn.getStyleClass().add("refresh-btn");
         cancelBtn.setPrefWidth(150);
         cancelBtn.setOnAction(e -> dialog.close());
@@ -2391,23 +2611,23 @@ public class DesktopClientApplication extends Application {
             String uom = uomField.getText().trim();
 
             if (code.isEmpty()) {
-                statusLabel.setText("Введите код SKU");
+                statusLabel.setText(I18n.get("sku.create.error.code_required"));
                 statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
                 return;
             }
             if (name.isEmpty()) {
-                statusLabel.setText("Введите название");
+                statusLabel.setText(I18n.get("sku.create.error.name_required"));
                 statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
                 return;
             }
             if (uom.isEmpty()) {
-                statusLabel.setText("Введите единицу измерения");
+                statusLabel.setText(I18n.get("sku.create.error.uom_required"));
                 statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
                 return;
             }
 
             createBtn.setDisable(true);
-            statusLabel.setText("Создание...");
+            statusLabel.setText(I18n.get("sku.create.status.creating"));
             statusLabel.setStyle("-fx-text-fill: #FFC107; -fx-font-size: 12px;");
 
             CompletableFuture.supplyAsync(() -> {
@@ -2418,11 +2638,11 @@ public class DesktopClientApplication extends Application {
                 }
             }).whenComplete((sku, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    statusLabel.setText("Ошибка: " + error.getCause().getMessage());
+                    statusLabel.setText(I18n.format("common.error", error.getCause().getMessage()));
                     statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
                     createBtn.setDisable(false);
                 } else {
-                    statusLabel.setText("SKU создан: " + sku.code());
+                    statusLabel.setText(I18n.format("sku.create.status.created", sku.code()));
                     statusLabel.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 12px;");
 
                     // Auto-close after 1 second and refresh table
@@ -2461,40 +2681,18 @@ public class DesktopClientApplication extends Application {
 
     private boolean showDiscrepancyConfirmationDialog() {
         Alert alert = new Alert(AlertType.CONFIRMATION);
-        alert.setTitle("Обнаружены расхождения");
-        alert.setHeaderText("⚠ В задании есть расхождения между ожидаемым и фактическим количеством");
-        alert.setContentText(
-            "Вы можете:\n\n" +
-            "• Подтвердить завершение — расхождения будут одобрены и зафиксированы, " +
-            "задание будет завершено, приход автоматически примет фактическое количество\n\n" +
-            "• Отменить — вернуться к приёмке и допринять недостающее количество"
-        );
+        alert.setTitle(I18n.get("alert.discrepancy.title"));
+        alert.setHeaderText(I18n.get("alert.discrepancy.header"));
+        alert.setContentText(I18n.get("alert.discrepancy.content"));
         
         // Customize button text
-        alert.getButtonTypes().setAll(
-            new javafx.scene.control.ButtonType("Подтвердить завершение", javafx.scene.control.ButtonBar.ButtonData.OK_DONE),
-            new javafx.scene.control.ButtonType("Отменить и вернуться к приёмке", javafx.scene.control.ButtonBar.ButtonData.CANCEL_CLOSE)
-        );
+        ButtonType confirmBtn = new ButtonType(I18n.get("alert.discrepancy.btn.confirm"), javafx.scene.control.ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelBtn = new ButtonType(I18n.get("alert.discrepancy.btn.cancel"), javafx.scene.control.ButtonBar.ButtonData.CANCEL_CLOSE);
         
-        // Apply styles with lighter text color
-        alert.getDialogPane().getStylesheets().clear();
-        var cssUrl = getClass().getResource("/style.css");
-        if (cssUrl != null) {
-            alert.getDialogPane().getStylesheets().add(cssUrl.toExternalForm());
-        }
-        alert.getDialogPane().setStyle(
-            "-fx-background-color: #1c1c1c; " +
-            "-fx-text-fill: #E0E0E0;"
-        );
-        
-        // Apply lighter color to content text
-        alert.getDialogPane().lookup(".content.label").setStyle(
-            "-fx-text-fill: #E0E0E0; " +
-            "-fx-font-size: 14px;"
-        );
-        
-        java.util.Optional<javafx.scene.control.ButtonType> result = alert.showAndWait();
-        return result.isPresent() && result.get().getButtonData() == javafx.scene.control.ButtonBar.ButtonData.OK_DONE;
+        alert.getButtonTypes().setAll(confirmBtn, cancelBtn);
+
+        java.util.Optional<ButtonType> result = alert.showAndWait();
+        return result.isPresent() && result.get() == confirmBtn;
     }
 
     // ============================================================
@@ -2503,8 +2701,8 @@ public class DesktopClientApplication extends Application {
 
     private void openZoneCreationDialog(ListView<com.wmsdipl.desktop.model.Zone> zonesView) {
         Dialog<com.wmsdipl.desktop.model.Zone> dialog = new Dialog<>();
-        dialog.setTitle("Создание зоны");
-        dialog.setHeaderText("Введите данные новой зоны");
+        dialog.setTitle(I18n.get("zone.create.title"));
+        dialog.setHeaderText(I18n.get("zone.create.header"));
         
         DialogPane dialogPane = dialog.getDialogPane();
         dialogPane.getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -2515,22 +2713,22 @@ public class DesktopClientApplication extends Application {
         grid.setPadding(new Insets(20, 150, 10, 10));
         
         TextField codeField = new TextField();
-        codeField.setPromptText("Код зоны (например, ZONE-A)");
+        codeField.setPromptText(I18n.get("zone.create.code_prompt"));
         TextField nameField = new TextField();
-        nameField.setPromptText("Название");
+        nameField.setPromptText(I18n.get("zone.create.name_prompt"));
         TextField priorityField = new TextField("100");
-        priorityField.setPromptText("Приоритет (число)");
+        priorityField.setPromptText(I18n.get("zone.create.priority_prompt"));
         TextArea descField = new TextArea();
-        descField.setPromptText("Описание (опционально)");
+        descField.setPromptText(I18n.get("zone.create.desc_prompt"));
         descField.setPrefRowCount(3);
         
-        grid.add(new Label("Код:"), 0, 0);
+        grid.add(new Label(I18n.get("zone.create.code_label")), 0, 0);
         grid.add(codeField, 1, 0);
-        grid.add(new Label("Название:"), 0, 1);
+        grid.add(new Label(I18n.get("zone.create.name_label")), 0, 1);
         grid.add(nameField, 1, 1);
-        grid.add(new Label("Приоритет:"), 0, 2);
+        grid.add(new Label(I18n.get("zone.create.priority_label")), 0, 2);
         grid.add(priorityField, 1, 2);
-        grid.add(new Label("Описание:"), 0, 3);
+        grid.add(new Label(I18n.get("zone.create.desc_label")), 0, 3);
         grid.add(descField, 1, 3);
         
         dialogPane.setContent(grid);
@@ -2544,16 +2742,16 @@ public class DesktopClientApplication extends Application {
                     String desc = descField.getText().trim();
                     
                     if (code.isEmpty() || name.isEmpty()) {
-                        showError("Заполните обязательные поля: код, название");
+                        showError(I18n.get("zone.create.error.required"));
                         return null;
                     }
                     
                     com.wmsdipl.desktop.model.Zone created = apiClient.createZone(code, name, priority, desc.isEmpty() ? null : desc);
-                    showInfo("Зона успешно создана: " + created.code());
+                    showInfo(I18n.format("zone.create.success", created.code()));
                     loadTopology(zonesView, null);
                     return created;
                 } catch (Exception ex) {
-                    showError("Ошибка создания зоны: " + ex.getMessage());
+                    showError(I18n.format("zone.create.error.failed", ex.getMessage()));
                     return null;
                 }
             }
@@ -2567,8 +2765,8 @@ public class DesktopClientApplication extends Application {
         if (zone == null) return;
         
         Dialog<com.wmsdipl.desktop.model.Zone> dialog = new Dialog<>();
-        dialog.setTitle("Редактирование зоны");
-        dialog.setHeaderText("Редактировать зону: " + zone.code());
+        dialog.setTitle(I18n.get("zone.edit.title"));
+        dialog.setHeaderText(I18n.format("zone.edit.header", zone.code()));
         
         DialogPane dialogPane = dialog.getDialogPane();
         dialogPane.getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -2583,16 +2781,16 @@ public class DesktopClientApplication extends Application {
         TextField priorityField = new TextField(zone.priorityRank() != null ? zone.priorityRank().toString() : "100");
         TextArea descField = new TextArea(zone.description() != null ? zone.description() : "");
         descField.setPrefRowCount(3);
-        CheckBox activeCheck = new CheckBox("Активна");
+        CheckBox activeCheck = new CheckBox(I18n.get("zone.edit.active_label"));
         activeCheck.setSelected(zone.active() != null ? zone.active() : true);
         
-        grid.add(new Label("Код:"), 0, 0);
+        grid.add(new Label(I18n.get("zone.edit.code_label")), 0, 0);
         grid.add(codeField, 1, 0);
-        grid.add(new Label("Название:"), 0, 1);
+        grid.add(new Label(I18n.get("zone.edit.name_label")), 0, 1);
         grid.add(nameField, 1, 1);
-        grid.add(new Label("Приоритет:"), 0, 2);
+        grid.add(new Label(I18n.get("zone.edit.priority_label")), 0, 2);
         grid.add(priorityField, 1, 2);
-        grid.add(new Label("Описание:"), 0, 3);
+        grid.add(new Label(I18n.get("zone.edit.desc_label")), 0, 3);
         grid.add(descField, 1, 3);
         grid.add(activeCheck, 1, 4);
         
@@ -2608,16 +2806,16 @@ public class DesktopClientApplication extends Application {
                     Boolean active = activeCheck.isSelected();
                     
                     if (code.isEmpty() || name.isEmpty()) {
-                        showError("Заполните обязательные поля");
+                        showError(I18n.get("zone.edit.error.required"));
                         return null;
                     }
                     
                     com.wmsdipl.desktop.model.Zone updated = apiClient.updateZone(zone.id(), code, name, priority, desc.isEmpty() ? null : desc, active);
-                    showInfo("Зона успешно обновлена");
+                    showInfo(I18n.get("zone.edit.success"));
                     loadTopology(zonesView, null);
                     return updated;
                 } catch (Exception ex) {
-                    showError("Ошибка обновления зоны: " + ex.getMessage());
+                    showError(I18n.format("zone.edit.error.failed", ex.getMessage()));
                     return null;
                 }
             }
@@ -2630,7 +2828,7 @@ public class DesktopClientApplication extends Application {
     private void deleteZone(ListView<com.wmsdipl.desktop.model.Zone> zonesView, com.wmsdipl.desktop.model.Zone zone) {
         if (zone == null) return;
         
-        if (!showConfirm("Удалить зону '" + zone.code() + "'?", "Это действие нельзя отменить. Зона должна быть пустой (без ячеек).")) {
+        if (!showConfirm(I18n.format("zone.delete.title", zone.code()), I18n.get("zone.delete.message"))) {
             return;
         }
         
@@ -2638,11 +2836,11 @@ public class DesktopClientApplication extends Application {
             try {
                 apiClient.deleteZone(zone.id());
             } catch (Exception ex) {
-                Platform.runLater(() -> showError("Ошибка удаления зоны: " + ex.getMessage()));
+                Platform.runLater(() -> showError(I18n.format("zone.delete.error", ex.getMessage())));
                 return;
             }
             Platform.runLater(() -> {
-                showInfo("Зона успешно удалена");
+                showInfo(I18n.get("zone.delete.success"));
                 loadTopology(zonesView, null);
             });
         });
@@ -2654,8 +2852,8 @@ public class DesktopClientApplication extends Application {
 
     private void openLocationCreationDialog(TableView<Location> locTable, ListView<com.wmsdipl.desktop.model.Zone> zonesView) {
         Dialog<Location> dialog = new Dialog<>();
-        dialog.setTitle("Создание ячейки");
-        dialog.setHeaderText("Введите данные новой ячейки");
+        dialog.setTitle(I18n.get("location.create.title"));
+        dialog.setHeaderText(I18n.get("location.create.header"));
         
         DialogPane dialogPane = dialog.getDialogPane();
         dialogPane.getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -2666,7 +2864,7 @@ public class DesktopClientApplication extends Application {
         grid.setPadding(new Insets(20, 150, 10, 10));
         
         ComboBox<com.wmsdipl.desktop.model.Zone> zoneCombo = new ComboBox<>(zonesView.getItems());
-        zoneCombo.setPromptText("Выберите зону");
+        zoneCombo.setPromptText(I18n.get("location.create.zone_prompt"));
         zoneCombo.setCellFactory(lv -> new ListCell<>() {
             @Override
             protected void updateItem(com.wmsdipl.desktop.model.Zone item, boolean empty) {
@@ -2684,19 +2882,19 @@ public class DesktopClientApplication extends Application {
         
         ComboBox<String> typeCombo = new ComboBox<>();
         typeCombo.getItems().addAll("RECEIVING", "STORAGE", "SHIPPING", "CROSS_DOCK", "DAMAGED", "QUARANTINE");
-        typeCombo.setPromptText("Выберите тип");
+        typeCombo.setPromptText(I18n.get("location.create.type_prompt"));
         typeCombo.setValue("STORAGE"); // Default value
         
         TextField codeField = new TextField();
-        codeField.setPromptText("Код ячейки (например, A-01-01)");
+        codeField.setPromptText(I18n.get("location.create.code_prompt"));
         TextField aisleField = new TextField();
-        aisleField.setPromptText("Проход (опционально)");
+        aisleField.setPromptText(I18n.get("location.create.aisle_prompt"));
         TextField bayField = new TextField();
-        bayField.setPromptText("Стеллаж (опционально)");
+        bayField.setPromptText(I18n.get("location.create.bay_prompt"));
         TextField levelField = new TextField();
-        levelField.setPromptText("Уровень (опционально)");
+        levelField.setPromptText(I18n.get("location.create.level_prompt"));
         TextField maxPalletsField = new TextField("1");
-        maxPalletsField.setPromptText("Вместительность (паллет)");
+        maxPalletsField.setPromptText(I18n.get("location.create.capacity_prompt"));
         maxPalletsField.setTextFormatter(new TextFormatter<>(change -> {
             String newText = change.getControlNewText();
             if (newText.isEmpty() || newText.matches("\\d+")) {
@@ -2705,19 +2903,19 @@ public class DesktopClientApplication extends Application {
             return null;
         }));
         
-        grid.add(new Label("Зона:"), 0, 0);
+        grid.add(new Label(I18n.get("location.create.zone_label")), 0, 0);
         grid.add(zoneCombo, 1, 0);
-        grid.add(new Label("Код:"), 0, 1);
+        grid.add(new Label(I18n.get("location.create.code_label")), 0, 1);
         grid.add(codeField, 1, 1);
-        grid.add(new Label("Тип:"), 0, 2);
+        grid.add(new Label(I18n.get("location.create.type_label")), 0, 2);
         grid.add(typeCombo, 1, 2);
-        grid.add(new Label("Вместительность:"), 0, 3);
+        grid.add(new Label(I18n.get("location.create.capacity_label")), 0, 3);
         grid.add(maxPalletsField, 1, 3);
-        grid.add(new Label("Проход:"), 0, 4);
+        grid.add(new Label(I18n.get("location.create.aisle_label")), 0, 4);
         grid.add(aisleField, 1, 4);
-        grid.add(new Label("Стеллаж:"), 0, 5);
+        grid.add(new Label(I18n.get("location.create.bay_label")), 0, 5);
         grid.add(bayField, 1, 5);
-        grid.add(new Label("Уровень:"), 0, 6);
+        grid.add(new Label(I18n.get("location.create.level_label")), 0, 6);
         grid.add(levelField, 1, 6);
         
         dialogPane.setContent(grid);
@@ -2734,12 +2932,12 @@ public class DesktopClientApplication extends Application {
                     Integer maxPallets = maxPalletsField.getText().trim().isEmpty() ? 1 : Integer.parseInt(maxPalletsField.getText().trim());
                     
                     if (zone == null || code.isEmpty()) {
-                        showError("Заполните обязательные поля: зона и код");
+                        showError(I18n.get("location.create.error.required"));
                         return null;
                     }
                     
                     if (maxPallets <= 0) {
-                        showError("Вместительность должна быть больше 0");
+                        showError(I18n.get("location.create.error.capacity"));
                         return null;
                     }
                     
@@ -2752,11 +2950,11 @@ public class DesktopClientApplication extends Application {
                         level.isEmpty() ? null : level,
                         maxPallets
                     );
-                    showInfo("Ячейка успешно создана: " + created.code());
+                    showInfo(I18n.format("location.create.success", created.code()));
                     loadTopology(zonesView, locTable);
                     return created;
                 } catch (Exception ex) {
-                    showError("Ошибка создания ячейки: " + ex.getMessage());
+                    showError(I18n.format("location.create.error.failed", ex.getMessage()));
                     return null;
                 }
             }
@@ -2770,8 +2968,8 @@ public class DesktopClientApplication extends Application {
         if (location == null) return;
         
         Dialog<Location> dialog = new Dialog<>();
-        dialog.setTitle("Редактирование ячейки");
-        dialog.setHeaderText("Редактировать ячейку: " + location.code());
+        dialog.setTitle(I18n.get("location.edit.title"));
+        dialog.setHeaderText(I18n.format("location.edit.header", location.code()));
         
         DialogPane dialogPane = dialog.getDialogPane();
         dialogPane.getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -2811,7 +3009,7 @@ public class DesktopClientApplication extends Application {
         TextField bayField = new TextField(location.bay() != null ? location.bay() : "");
         TextField levelField = new TextField(location.level() != null ? location.level() : "");
         TextField maxPalletsField = new TextField(location.maxPallets() != null ? location.maxPallets().toString() : "1");
-        maxPalletsField.setPromptText("Вместительность (паллет)");
+        maxPalletsField.setPromptText(I18n.get("location.edit.capacity_prompt"));
         maxPalletsField.setTextFormatter(new TextFormatter<>(change -> {
             String newText = change.getControlNewText();
             if (newText.isEmpty() || newText.matches("\\d+")) {
@@ -2819,22 +3017,22 @@ public class DesktopClientApplication extends Application {
             }
             return null;
         }));
-        CheckBox activeCheck = new CheckBox("Активна");
+        CheckBox activeCheck = new CheckBox(I18n.get("location.edit.active_label"));
         activeCheck.setSelected(location.active() != null ? location.active() : true);
         
-        grid.add(new Label("Зона:"), 0, 0);
+        grid.add(new Label(I18n.get("location.edit.zone_label")), 0, 0);
         grid.add(zoneCombo, 1, 0);
-        grid.add(new Label("Код:"), 0, 1);
+        grid.add(new Label(I18n.get("location.edit.code_label")), 0, 1);
         grid.add(codeField, 1, 1);
-        grid.add(new Label("Тип:"), 0, 2);
+        grid.add(new Label(I18n.get("location.edit.type_label")), 0, 2);
         grid.add(typeCombo, 1, 2);
-        grid.add(new Label("Вместительность:"), 0, 3);
+        grid.add(new Label(I18n.get("location.edit.capacity_label")), 0, 3);
         grid.add(maxPalletsField, 1, 3);
-        grid.add(new Label("Проход:"), 0, 4);
+        grid.add(new Label(I18n.get("location.edit.aisle_label")), 0, 4);
         grid.add(aisleField, 1, 4);
-        grid.add(new Label("Стеллаж:"), 0, 5);
+        grid.add(new Label(I18n.get("location.edit.bay_label")), 0, 5);
         grid.add(bayField, 1, 5);
-        grid.add(new Label("Уровень:"), 0, 6);
+        grid.add(new Label(I18n.get("location.edit.level_label")), 0, 6);
         grid.add(levelField, 1, 6);
         grid.add(activeCheck, 1, 7);
         
@@ -2853,12 +3051,12 @@ public class DesktopClientApplication extends Application {
                     Boolean active = activeCheck.isSelected();
                     
                     if (zone == null || code.isEmpty()) {
-                        showError("Заполните обязательные поля");
+                        showError(I18n.get("location.edit.error.required"));
                         return null;
                     }
                     
                     if (maxPallets <= 0) {
-                        showError("Вместительность должна быть больше 0");
+                        showError(I18n.get("location.edit.error.capacity"));
                         return null;
                     }
                     
@@ -2874,11 +3072,11 @@ public class DesktopClientApplication extends Application {
                         null, // Don't update status here
                         active
                     );
-                    showInfo("Ячейка успешно обновлена");
+                    showInfo(I18n.get("location.edit.success"));
                     loadTopology(zonesView, locTable);
                     return updated;
                 } catch (Exception ex) {
-                    showError("Ошибка обновления ячейки: " + ex.getMessage());
+                    showError(I18n.format("location.edit.error.failed", ex.getMessage()));
                     return null;
                 }
             }
@@ -2892,11 +3090,11 @@ public class DesktopClientApplication extends Application {
         if (location == null) return;
         
         boolean isBlocked = "BLOCKED".equals(location.status());
-        String action = isBlocked ? "разблокировать" : "заблокировать";
+        String action = isBlocked ? I18n.get("location.action.unblock") : I18n.get("location.action.block");
         
         if (!showConfirm(
-            (isBlocked ? "Разблокировать" : "Заблокировать") + " ячейку '" + location.code() + "'?",
-            "Вы действительно хотите " + action + " эту ячейку?")) {
+            I18n.format(isBlocked ? "location.confirm.unblock" : "location.confirm.block", location.code()),
+            I18n.get(isBlocked ? "location.confirm.unblock_msg" : "location.confirm.block_msg"))) {
             return;
         }
         
@@ -2908,11 +3106,11 @@ public class DesktopClientApplication extends Application {
                     apiClient.blockLocation(location.id());
                 }
             } catch (Exception ex) {
-                Platform.runLater(() -> showError("Ошибка: " + ex.getMessage()));
+                Platform.runLater(() -> showError(I18n.format("location.error.operation", ex.getMessage())));
                 return;
             }
             Platform.runLater(() -> {
-                showInfo("Ячейка успешно " + (isBlocked ? "разблокирована" : "заблокирована"));
+                showInfo(I18n.get(isBlocked ? "location.success.unblocked" : "location.success.blocked"));
                 loadTopology(null, locTable);
             });
         });
@@ -2921,7 +3119,7 @@ public class DesktopClientApplication extends Application {
     private void deleteLocation(TableView<Location> locTable, Location location) {
         if (location == null) return;
         
-        if (!showConfirm("Удалить ячейку '" + location.code() + "'?", "Это действие нельзя отменить. Ячейка не должна быть занята.")) {
+        if (!showConfirm(I18n.format("location.confirm.delete", location.code()), I18n.get("location.confirm.delete_msg"))) {
             return;
         }
         
@@ -2929,11 +3127,11 @@ public class DesktopClientApplication extends Application {
             try {
                 apiClient.deleteLocation(location.id());
             } catch (Exception ex) {
-                Platform.runLater(() -> showError("Ошибка удаления ячейки: " + ex.getMessage()));
+                Platform.runLater(() -> showError(I18n.format("location.error.delete", ex.getMessage())));
                 return;
             }
             Platform.runLater(() -> {
-                showInfo("Ячейка успешно удалена");
+                showInfo(I18n.get("location.success.deleted"));
                 loadTopology(null, locTable);
             });
         });
@@ -2942,7 +3140,7 @@ public class DesktopClientApplication extends Application {
     // Simple alert helpers for topology management
     private void showInfo(String message) {
         Alert alert = new Alert(AlertType.INFORMATION);
-        alert.setTitle("Информация");
+        alert.setTitle(I18n.get("common.alert.info"));
         alert.setHeaderText(null);
         alert.setContentText(message);
         alert.showAndWait();
@@ -2950,7 +3148,7 @@ public class DesktopClientApplication extends Application {
 
     private void showError(String message) {
         Alert alert = new Alert(AlertType.ERROR);
-        alert.setTitle("Ошибка");
+        alert.setTitle(I18n.get("common.alert.error"));
         alert.setHeaderText(null);
         alert.setContentText(message);
         alert.showAndWait();
@@ -2958,7 +3156,7 @@ public class DesktopClientApplication extends Application {
 
     private boolean showConfirm(String title, String message) {
         Alert alert = new Alert(AlertType.CONFIRMATION);
-        alert.setTitle("Подтверждение");
+        alert.setTitle(I18n.get("common.alert.confirm"));
         alert.setHeaderText(title);
         alert.setContentText(message);
         
@@ -2967,7 +3165,7 @@ public class DesktopClientApplication extends Application {
     }
     
     private void handleLogout() {
-        if (!showConfirm("Выход", "Вы действительно хотите выйти из системы?")) {
+        if (!showConfirm(I18n.get("logout.title"), I18n.get("logout.message"))) {
             return;
         }
         
@@ -2991,20 +3189,20 @@ public class DesktopClientApplication extends Application {
         activeModule = "analytics";
         shell.setLeft(buildNav());
 
-        Label header = new Label("Аналитика приёмки");
+        Label header = new Label(I18n.get("analytics.header"));
         header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
 
         // Period selection
         ComboBox<String> periodCombo = new ComboBox<>();
-        periodCombo.getItems().addAll("Сегодня", "Эта неделя", "Этот месяц");
-        periodCombo.setValue("Сегодня");
+        periodCombo.getItems().addAll(I18n.get("analytics.range.today"), I18n.get("analytics.range.week"), I18n.get("analytics.range.month"));
+        periodCombo.setValue(I18n.get("analytics.range.today"));
         periodCombo.setPrefHeight(40);
 
-        Button refreshBtn = new Button("Обновить");
+        Button refreshBtn = new Button(I18n.get("analytics.btn.refresh"));
         refreshBtn.getStyleClass().add("refresh-btn");
         refreshBtn.setPrefHeight(40);
 
-        HBox controls = new HBox(10, new Label("Период:"), periodCombo, refreshBtn);
+        HBox controls = new HBox(10, new Label(I18n.get("analytics.lbl.period")), periodCombo, refreshBtn);
         controls.setAlignment(Pos.CENTER_LEFT);
         controls.setStyle("-fx-text-fill: white;");
 
@@ -3013,7 +3211,7 @@ public class DesktopClientApplication extends Application {
         analyticsBox.setPadding(new Insets(16));
         analyticsBox.setStyle("-fx-background-color: #2c2c2c; -fx-background-radius: 8px;");
 
-        Label loadingLabel = new Label("Загрузка данных...");
+        Label loadingLabel = new Label(I18n.get("analytics.lbl.loading"));
         loadingLabel.setStyle("-fx-text-fill: white; -fx-font-size: 16px;");
         analyticsBox.getChildren().add(loadingLabel);
 
@@ -3022,12 +3220,15 @@ public class DesktopClientApplication extends Application {
             
             CompletableFuture.supplyAsync(() -> {
                 try {
-                    return switch (period) {
-                        case "Сегодня" -> apiClient.getTodayAnalytics();
-                        case "Эта неделя" -> apiClient.getWeekAnalytics();
-                        case "Этот месяц" -> apiClient.getMonthAnalytics();
-                        default -> apiClient.getTodayAnalytics();
-                    };
+                    if (period.equals(I18n.get("analytics.range.today"))) {
+                        return apiClient.getTodayAnalytics();
+                    } else if (period.equals(I18n.get("analytics.range.week"))) {
+                        return apiClient.getWeekAnalytics();
+                    } else if (period.equals(I18n.get("analytics.range.month"))) {
+                        return apiClient.getMonthAnalytics();
+                    } else {
+                        return apiClient.getTodayAnalytics();
+                    }
                 } catch (Exception ex) {
                     throw new RuntimeException(ex);
                 }
@@ -3035,7 +3236,7 @@ public class DesktopClientApplication extends Application {
                 analyticsBox.getChildren().clear();
                 
                 if (error != null) {
-                    Label errorLabel = new Label("Ошибка: " + error.getMessage());
+                    Label errorLabel = new Label(I18n.format("common.error", error.getMessage()));
                     errorLabel.setStyle("-fx-text-fill: #FF5252; -fx-font-size: 14px;");
                     analyticsBox.getChildren().add(errorLabel);
                     return;
@@ -3050,7 +3251,7 @@ public class DesktopClientApplication extends Application {
                 metricsBox.setStyle("-fx-text-fill: white;");
 
                 // Receipts by status
-                Label receiptsHeader = new Label("📦 Приходы по статусам");
+                Label receiptsHeader = new Label(I18n.get("analytics.lbl.receipts_by_status"));
                 receiptsHeader.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #2196F3;");
                 
                 @SuppressWarnings("unchecked")
@@ -3064,7 +3265,7 @@ public class DesktopClientApplication extends Application {
                 }
 
                 // Discrepancies by type
-                Label discrepanciesHeader = new Label("⚠ Расхождения по типам");
+                Label discrepanciesHeader = new Label(I18n.get("analytics.lbl.discrepancies"));
                 discrepanciesHeader.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #FF9800;");
                 
                 @SuppressWarnings("unchecked")
@@ -3078,7 +3279,7 @@ public class DesktopClientApplication extends Application {
                 }
 
                 // Pallets by status
-                Label palletsHeader = new Label("📊 Паллеты по статусам");
+                Label palletsHeader = new Label(I18n.get("analytics.lbl.pallets_by_status"));
                 palletsHeader.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #4CAF50;");
                 
                 @SuppressWarnings("unchecked")
@@ -3092,28 +3293,28 @@ public class DesktopClientApplication extends Application {
                 }
 
                 // Key metrics
-                Label metricsHeader = new Label("📈 Ключевые показатели");
+                Label metricsHeader = new Label(I18n.get("analytics.lbl.key_metrics"));
                 metricsHeader.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #9C27B0;");
                 
                 Object discrepancyRateObj = dataMap.get("discrepancyRate");
                 Double discrepancyRate = discrepancyRateObj instanceof Number 
                     ? ((Number) discrepancyRateObj).doubleValue() 
                     : 0.0;
-                Label discrepancyLabel = new Label(String.format("  Процент расхождений: %.2f%%", discrepancyRate));
+                Label discrepancyLabel = new Label(String.format("  " + I18n.get("analytics.lbl.discrepancy_rate") + ": %.2f%%", discrepancyRate));
                 discrepancyLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
                 
                 Object damagedRateObj = dataMap.get("damagedPalletsRate");
                 Double damagedRate = damagedRateObj instanceof Number 
                     ? ((Number) damagedRateObj).doubleValue() 
                     : 0.0;
-                Label damagedLabel = new Label(String.format("  Процент брака: %.2f%%", damagedRate));
+                Label damagedLabel = new Label(String.format("  " + I18n.get("analytics.lbl.damage_rate") + ": %.2f%%", damagedRate));
                 damagedLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
                 
                 Object avgTimeObj = dataMap.get("avgReceivingTimeHours");
                 Double avgTime = avgTimeObj instanceof Number 
                     ? ((Number) avgTimeObj).doubleValue() 
                     : 0.0;
-                Label avgTimeLabel = new Label(String.format("  Среднее время приёмки: %.2f часов", avgTime));
+                Label avgTimeLabel = new Label(String.format("  " + I18n.get("analytics.lbl.avg_time") + ": %.2f " + I18n.get("analytics.lbl.hours"), avgTime));
                 avgTimeLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
 
                 metricsBox.getChildren().addAll(
@@ -3144,46 +3345,155 @@ public class DesktopClientApplication extends Application {
         setContent(layout);
     }
 
+    private ComboBox<String> createSearchableUserComboBox() {
+        ComboBox<String> comboBox = new ComboBox<>();
+        comboBox.setEditable(true);
+        comboBox.setPromptText(I18n.get("common.user_prompt"));
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                List<User> users = apiClient.listUsers();
+                List<String> names = users.stream().map(User::username).sorted().collect(Collectors.toList());
+                Platform.runLater(() -> {
+                    comboBox.getItems().addAll(names);
+                    new AutoCompleteComboBoxListener<>(comboBox);
+                });
+            } catch (Exception e) {
+                // Ignore errors (maybe no permission to list users)
+            }
+        });
+        
+        return comboBox;
+    }
+
+    private void showAssignDialog(com.wmsdipl.desktop.model.Task[] currentTaskWrapper, Button assignBtn, Label actionStatus, 
+                                  Runnable updateButtons, Runnable updateTitle, Tab docTab, Tab factTab, Stage parentDialog) {
+        Stage dialog = new Stage();
+        dialog.setTitle(I18n.get("assign.title"));
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.initOwner(parentDialog);
+
+        VBox content = new VBox(12);
+        content.setPadding(new Insets(16));
+        content.setStyle("-fx-background-color: #1c1c1c;");
+
+        Label label = new Label(I18n.get("assign.label"));
+        label.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+
+        ComboBox<String> userCombo = createSearchableUserComboBox();
+        userCombo.setPrefWidth(250);
+
+        Button confirmBtn = new Button(I18n.get("assign.button"));
+        confirmBtn.getStyleClass().add("btn-success");
+        confirmBtn.setOnAction(e -> {
+            String assignee = userCombo.getEditor().getText();
+            if (assignee == null || assignee.isBlank()) {
+                showError(I18n.get("assign.error.empty"));
+                return;
+            }
+            
+            assignBtn.setDisable(true);
+            actionStatus.setText(I18n.get("assign.status.assigning"));
+            dialog.close();
+            
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.assignTask(currentTaskWrapper[0].id(), assignee);
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((updatedTask, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    actionStatus.setText(I18n.format("assign.status.error", error.getMessage()));
+                    actionStatus.setStyle("-fx-text-fill: #F44336; -fx-font-size: 14px;");
+                    assignBtn.setDisable(false);
+                } else {
+                    currentTaskWrapper[0] = updatedTask;
+                    actionStatus.setText(I18n.format("assign.status.success", updatedTask.assignee()));
+                    actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
+                    updateButtons.run();
+                    updateTitle.run();
+                    docTab.setContent(buildDocumentTab(updatedTask));
+                    factTab.setContent(buildFactTab(updatedTask, parentDialog));
+                }
+            }));
+        });
+
+        content.getChildren().addAll(label, userCombo, confirmBtn);
+        Scene scene = new Scene(content, 300, 200);
+        applyStyles(scene);
+        dialog.setScene(scene);
+        dialog.show();
+    }
+
+    private void assignToSelf(com.wmsdipl.desktop.model.Task[] currentTaskWrapper, Button assignBtn, Label actionStatus,
+                              Runnable updateButtons, Runnable updateTitle, Tab docTab, Tab factTab, Stage dialog) {
+        assignBtn.setDisable(true);
+        actionStatus.setText(I18n.get("assign.status.assigning"));
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                return apiClient.assignTask(currentTaskWrapper[0].id(), apiClient.getCurrentUsername());
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        }).whenComplete((updatedTask, error) -> Platform.runLater(() -> {
+            if (error != null) {
+                actionStatus.setText(I18n.format("assign.status.error", error.getMessage()));
+                actionStatus.setStyle("-fx-text-fill: #F44336; -fx-font-size: 14px;");
+                assignBtn.setDisable(false);
+            } else {
+                currentTaskWrapper[0] = updatedTask;
+                actionStatus.setText(I18n.get("assign.status.success_self"));
+                actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
+                updateButtons.run();
+                updateTitle.run();
+                docTab.setContent(buildDocumentTab(updatedTask));
+                factTab.setContent(buildFactTab(updatedTask, dialog));
+            }
+        }));
+    }
+
     private void showBulkOperationsDialog(TableView<com.wmsdipl.desktop.model.Task> taskTable) {
         Stage dialog = new Stage();
-        dialog.setTitle("Массовые операции");
+        dialog.setTitle(I18n.get("bulk.title"));
         dialog.initModality(Modality.APPLICATION_MODAL);
 
         VBox content = new VBox(16);
         content.setPadding(new Insets(20));
         content.setStyle("-fx-background-color: #1c1c1c;");
 
-        Label header = new Label("Массовые операции с задачами");
+        Label header = new Label(I18n.get("bulk.header"));
         header.setStyle("-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: white;");
 
         // Selected tasks info
         var selectedTasks = taskTable.getSelectionModel().getSelectedItems();
-        Label infoLabel = new Label("Выбрано задач: " + selectedTasks.size());
+        Label infoLabel = new Label(I18n.format("bulk.selected_count", selectedTasks.size()));
         infoLabel.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
 
         TabPane tabs = new TabPane();
         tabs.setStyle("-fx-background-color: #2c2c2c;");
 
         // Tab 1: Bulk Assign
-        Tab assignTab = new Tab("Назначить исполнителя");
+        Tab assignTab = new Tab(I18n.get("bulk.tab.assign"));
         assignTab.setClosable(false);
         VBox assignBox = new VBox(12);
         assignBox.setPadding(new Insets(16));
         assignBox.setStyle("-fx-background-color: #2c2c2c;");
 
-        Label assignLabel = new Label("Исполнитель:");
+        Label assignLabel = new Label(I18n.get("bulk.assign.label"));
         assignLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
-        TextField assignField = new TextField();
-        assignField.setPromptText("Введите имя пользователя (admin, supervisor)");
-        assignField.setPrefHeight(40);
+        
+        ComboBox<String> assignCombo = createSearchableUserComboBox();
+        assignCombo.setPrefWidth(300);
+        assignCombo.setPrefHeight(40);
 
-        Button assignBtn = new Button("Назначить");
+        Button assignBtn = new Button(I18n.get("bulk.assign.button"));
         assignBtn.getStyleClass().add("btn-success");
         assignBtn.setPrefHeight(40);
         assignBtn.setOnAction(e -> {
-            String assignee = assignField.getText().trim();
+            String assignee = assignCombo.getEditor().getText().trim();
             if (assignee.isEmpty()) {
-                showError("Введите имя исполнителя");
+                showError(I18n.get("bulk.assign.error.empty"));
                 return;
             }
             List<Long> taskIds = selectedTasks.stream().map(com.wmsdipl.desktop.model.Task::id).toList();
@@ -3199,36 +3509,36 @@ public class DesktopClientApplication extends Application {
                 } else {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> map = (Map<String, Object>) result;
-                    showInfo("Задачи назначены: " + map.get("successCount"));
+                    showInfo(I18n.format("bulk.assign.success", map.get("successCount")));
                     dialog.close();
                     loadTasks(taskTable, null);
                 }
             }));
         });
 
-        assignBox.getChildren().addAll(assignLabel, assignField, assignBtn);
+        assignBox.getChildren().addAll(assignLabel, assignCombo, assignBtn);
         assignTab.setContent(assignBox);
 
         // Tab 2: Bulk Priority
-        Tab priorityTab = new Tab("Установить приоритет");
+        Tab priorityTab = new Tab(I18n.get("bulk.tab.priority"));
         priorityTab.setClosable(false);
         VBox priorityBox = new VBox(12);
         priorityBox.setPadding(new Insets(16));
         priorityBox.setStyle("-fx-background-color: #2c2c2c;");
 
-        Label priorityLabel = new Label("Приоритет:");
+        Label priorityLabel = new Label(I18n.get("bulk.priority.label"));
         priorityLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
         TextField priorityField = new TextField();
-        priorityField.setPromptText("Введите приоритет (число)");
+        priorityField.setPromptText(I18n.get("bulk.priority.prompt"));
         priorityField.setPrefHeight(40);
 
-        Button priorityBtn = new Button("Установить");
+        Button priorityBtn = new Button(I18n.get("bulk.priority.button"));
         priorityBtn.getStyleClass().add("btn-primary");
         priorityBtn.setPrefHeight(40);
         priorityBtn.setOnAction(e -> {
             String priorityStr = priorityField.getText().trim();
             if (priorityStr.isEmpty()) {
-                showError("Введите приоритет");
+                showError(I18n.get("bulk.priority.error.empty"));
                 return;
             }
             Integer priority = Integer.parseInt(priorityStr);
@@ -3245,7 +3555,7 @@ public class DesktopClientApplication extends Application {
                 } else {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> map = (Map<String, Object>) result;
-                    showInfo("Приоритет установлен: " + map.get("successCount"));
+                    showInfo(I18n.format("bulk.priority.success", map.get("successCount")));
                     dialog.close();
                     loadTasks(taskTable, null);
                 }
@@ -3255,29 +3565,167 @@ public class DesktopClientApplication extends Application {
         priorityBox.getChildren().addAll(priorityLabel, priorityField, priorityBtn);
         priorityTab.setContent(priorityBox);
 
-        // Tab 3: Create Pallets
-        Tab palletsTab = new Tab("Создать паллеты");
-        palletsTab.setClosable(false);
-        VBox palletsBox = new VBox(12);
-        palletsBox.setPadding(new Insets(16));
-        palletsBox.setStyle("-fx-background-color: #2c2c2c;");
+        // Tab 3: Cancel Tasks
+        Tab cancelTab = new Tab(I18n.get("bulk.tab.cancel"));
+        cancelTab.setClosable(false);
+        VBox cancelBox = new VBox(12);
+        cancelBox.setPadding(new Insets(16));
+        cancelBox.setStyle("-fx-background-color: #2c2c2c;");
 
-        Label prefixLabel = new Label("Префикс:");
+        Label cancelWarning = new Label(I18n.format("bulk.cancel.warning", selectedTasks.size()));
+        cancelWarning.setStyle("-fx-text-fill: #FF9800; -fx-font-size: 14px; -fx-font-weight: bold;");
+
+        Button cancelTasksBtn = new Button(I18n.get("bulk.cancel.button"));
+        cancelTasksBtn.getStyleClass().add("btn-danger");
+        cancelTasksBtn.setPrefHeight(40);
+        cancelTasksBtn.setOnAction(e -> {
+            if (!showConfirm(I18n.get("bulk.cancel.confirm_title"), I18n.get("bulk.cancel.confirm_message"))) {
+                return;
+            }
+            List<Long> taskIds = selectedTasks.stream().map(com.wmsdipl.desktop.model.Task::id).toList();
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.bulkCancelTasks(taskIds);
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((result, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    showError(error.getMessage());
+                } else {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> map = (Map<String, Object>) result;
+                    showInfo(I18n.format("bulk.cancel.success", map.get("successCount")));
+                    dialog.close();
+                    loadTasks(taskTable, null);
+                }
+            }));
+        });
+
+        cancelBox.getChildren().addAll(cancelWarning, cancelTasksBtn);
+        cancelTab.setContent(cancelBox);
+
+        tabs.getTabs().addAll(assignTab, priorityTab, cancelTab);
+
+        Button closeBtn = new Button(I18n.get("bulk.close_button"));
+        closeBtn.setPrefHeight(40);
+        closeBtn.setOnAction(e -> dialog.close());
+
+        content.getChildren().addAll(header, infoLabel, tabs, closeBtn);
+
+        Scene scene = new Scene(content, 500, 600);
+        applyStyles(scene);
+        dialog.setScene(scene);
+        dialog.showAndWait();
+    }
+
+    private static class AutoCompleteComboBoxListener<T> implements javafx.event.EventHandler<javafx.scene.input.KeyEvent> {
+
+        private ComboBox<T> comboBox;
+        private javafx.collections.ObservableList<T> data;
+        private boolean moveCaretToPos = false;
+        private int caretPos;
+
+        public AutoCompleteComboBoxListener(final ComboBox<T> comboBox) {
+            this.comboBox = comboBox;
+            this.data = comboBox.getItems();
+
+            this.comboBox.setEditable(true);
+            this.comboBox.setOnKeyPressed(new javafx.event.EventHandler<javafx.scene.input.KeyEvent>() {
+
+                @Override
+                public void handle(javafx.scene.input.KeyEvent t) {
+                    comboBox.hide();
+                }
+            });
+            this.comboBox.setOnKeyReleased(AutoCompleteComboBoxListener.this);
+        }
+
+        @Override
+        public void handle(javafx.scene.input.KeyEvent event) {
+            if (event.getCode() == javafx.scene.input.KeyCode.UP) {
+                caretPos = -1;
+                moveCaret(comboBox.getEditor().getText().length());
+                return;
+            } else if (event.getCode() == javafx.scene.input.KeyCode.DOWN) {
+                if (!comboBox.isShowing()) {
+                    comboBox.show();
+                }
+                caretPos = -1;
+                moveCaret(comboBox.getEditor().getText().length());
+                return;
+            } else if (event.getCode() == javafx.scene.input.KeyCode.BACK_SPACE) {
+                moveCaretToPos = true;
+                caretPos = comboBox.getEditor().getCaretPosition();
+            } else if (event.getCode() == javafx.scene.input.KeyCode.DELETE) {
+                moveCaretToPos = true;
+                caretPos = comboBox.getEditor().getCaretPosition();
+            }
+
+            if (event.getCode() == javafx.scene.input.KeyCode.RIGHT || event.getCode() == javafx.scene.input.KeyCode.LEFT
+                    || event.isControlDown() || event.getCode() == javafx.scene.input.KeyCode.HOME
+                    || event.getCode() == javafx.scene.input.KeyCode.END || event.getCode() == javafx.scene.input.KeyCode.TAB) {
+                return;
+            }
+
+            javafx.collections.ObservableList<T> list = FXCollections.observableArrayList();
+            for (int i = 0; i < data.size(); i++) {
+                if (data.get(i).toString().toLowerCase().contains(
+                        AutoCompleteComboBoxListener.this.comboBox.getEditor().getText().toLowerCase())) {
+                    list.add(data.get(i));
+                }
+            }
+            String t = comboBox.getEditor().getText();
+
+            comboBox.setItems(list);
+            comboBox.getEditor().setText(t);
+            if (!moveCaretToPos) {
+                caretPos = -1;
+            }
+            moveCaret(t.length());
+            if (!list.isEmpty()) {
+                comboBox.show();
+            }
+        }
+
+        private void moveCaret(int textLength) {
+            if (caretPos == -1) {
+                comboBox.getEditor().positionCaret(textLength);
+            } else {
+                comboBox.getEditor().positionCaret(caretPos);
+            }
+            moveCaretToPos = false;
+        }
+    }
+
+    private void showBulkCreatePalletsDialog() {
+        Stage dialog = new Stage();
+        dialog.setTitle(I18n.get("pallet.bulk.title"));
+        dialog.initModality(Modality.APPLICATION_MODAL);
+
+        VBox content = new VBox(12);
+        content.setPadding(new Insets(16));
+        content.setStyle("-fx-background-color: #2c2c2c;");
+
+        Label header = new Label(I18n.get("pallet.bulk.header"));
+        header.setStyle("-fx-text-fill: white; -fx-font-size: 16px; -fx-font-weight: bold;");
+
+        Label prefixLabel = new Label(I18n.get("pallet.bulk.prefix_label"));
         prefixLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
         TextField prefixField = new TextField("PLT");
         prefixField.setPrefHeight(40);
 
-        Label startLabel = new Label("Начальный номер:");
+        Label startLabel = new Label(I18n.get("pallet.bulk.start_label"));
         startLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
         TextField startField = new TextField("100");
         startField.setPrefHeight(40);
 
-        Label countLabel = new Label("Количество:");
+        Label countLabel = new Label(I18n.get("pallet.bulk.count_label"));
         countLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
         TextField countField = new TextField("50");
         countField.setPrefHeight(40);
 
-        Button createBtn = new Button("Создать");
+        Button createBtn = new Button(I18n.get("pallet.bulk.create_button"));
         createBtn.getStyleClass().add("btn-success");
         createBtn.setPrefHeight(40);
         createBtn.setOnAction(e -> {
@@ -3297,64 +3745,14 @@ public class DesktopClientApplication extends Application {
                 } else {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> map = (Map<String, Object>) result;
-                    showInfo("Паллеты созданы: " + map.get("createdCount"));
+                    showInfo(I18n.format("pallet.bulk.success", map.get("createdCount")));
                     dialog.close();
                 }
             }));
         });
 
-        palletsBox.getChildren().addAll(prefixLabel, prefixField, startLabel, startField, countLabel, countField, createBtn);
-        palletsTab.setContent(palletsBox);
-
-        // Tab 4: Cancel Tasks
-        Tab cancelTab = new Tab("Отменить задачи");
-        cancelTab.setClosable(false);
-        VBox cancelBox = new VBox(12);
-        cancelBox.setPadding(new Insets(16));
-        cancelBox.setStyle("-fx-background-color: #2c2c2c;");
-
-        Label cancelWarning = new Label("⚠ Вы собираетесь отменить " + selectedTasks.size() + " задач(и)");
-        cancelWarning.setStyle("-fx-text-fill: #FF9800; -fx-font-size: 14px; -fx-font-weight: bold;");
-
-        Button cancelTasksBtn = new Button("Отменить задачи");
-        cancelTasksBtn.getStyleClass().add("btn-danger");
-        cancelTasksBtn.setPrefHeight(40);
-        cancelTasksBtn.setOnAction(e -> {
-            if (!showConfirm("Подтверждение", "Вы уверены, что хотите отменить выбранные задачи?")) {
-                return;
-            }
-            List<Long> taskIds = selectedTasks.stream().map(com.wmsdipl.desktop.model.Task::id).toList();
-            CompletableFuture.supplyAsync(() -> {
-                try {
-                    return apiClient.bulkCancelTasks(taskIds);
-                } catch (Exception ex) {
-                    throw new RuntimeException(ex);
-                }
-            }).whenComplete((result, error) -> Platform.runLater(() -> {
-                if (error != null) {
-                    showError(error.getMessage());
-                } else {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> map = (Map<String, Object>) result;
-                    showInfo("Задачи отменены: " + map.get("successCount"));
-                    dialog.close();
-                    loadTasks(taskTable, null);
-                }
-            }));
-        });
-
-        cancelBox.getChildren().addAll(cancelWarning, cancelTasksBtn);
-        cancelTab.setContent(cancelBox);
-
-        tabs.getTabs().addAll(assignTab, priorityTab, palletsTab, cancelTab);
-
-        Button closeBtn = new Button("Закрыть");
-        closeBtn.setPrefHeight(40);
-        closeBtn.setOnAction(e -> dialog.close());
-
-        content.getChildren().addAll(header, infoLabel, tabs, closeBtn);
-
-        Scene scene = new Scene(content, 500, 600);
+        content.getChildren().addAll(header, prefixLabel, prefixField, startLabel, startField, countLabel, countField, createBtn);
+        Scene scene = new Scene(content, 400, 450);
         applyStyles(scene);
         dialog.setScene(scene);
         dialog.showAndWait();

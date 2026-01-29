@@ -6,12 +6,16 @@ import com.wmsdipl.core.domain.LocationType;
 import com.wmsdipl.core.domain.Pallet;
 import com.wmsdipl.core.domain.PalletStatus;
 import com.wmsdipl.core.domain.PutawayRule;
+import com.wmsdipl.core.domain.TaskStatus;
 import com.wmsdipl.core.repository.LocationRepository;
+import com.wmsdipl.core.repository.PalletRepository;
+import com.wmsdipl.core.repository.TaskRepository;
 import com.wmsdipl.core.service.PutawayRuleService;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Service responsible for selecting the optimal storage location for a pallet
@@ -23,14 +27,22 @@ public class LocationSelectionService {
     private final PutawayRuleService ruleService;
     private final StrategyRegistry strategyRegistry;
     private final LocationRepository locationRepository;
+    private final PalletRepository palletRepository;
+    private final TaskRepository taskRepository;
+
+    private static final Set<TaskStatus> PENDING_STATUSES = Set.of(TaskStatus.NEW, TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS);
 
     public LocationSelectionService(
             PutawayRuleService ruleService, 
             StrategyRegistry strategyRegistry,
-            LocationRepository locationRepository) {
+            LocationRepository locationRepository,
+            PalletRepository palletRepository,
+            TaskRepository taskRepository) {
         this.ruleService = ruleService;
         this.strategyRegistry = strategyRegistry;
         this.locationRepository = locationRepository;
+        this.palletRepository = palletRepository;
+        this.taskRepository = taskRepository;
     }
 
     /**
@@ -44,16 +56,16 @@ public class LocationSelectionService {
     public Optional<Location> determineLocation(Pallet pallet, PutawayContext context) {
         // Special handling for damaged pallets -> DAMAGED locations
         if (pallet.getStatus() == PalletStatus.DAMAGED) {
-            return locationRepository
-                .findFirstByLocationTypeAndStatusAndActiveTrueOrderByIdAsc(
-                    LocationType.DAMAGED, LocationStatus.AVAILABLE);
+            return findFirstFit(
+                locationRepository.findByLocationTypeAndStatusAndActiveTrue(LocationType.DAMAGED, LocationStatus.AVAILABLE)
+            );
         }
         
         // Special handling for quarantine pallets -> QUARANTINE locations
         if (pallet.getStatus() == PalletStatus.QUARANTINE) {
-            return locationRepository
-                .findFirstByLocationTypeAndStatusAndActiveTrueOrderByIdAsc(
-                    LocationType.QUARANTINE, LocationStatus.AVAILABLE);
+            return findFirstFit(
+                locationRepository.findByLocationTypeAndStatusAndActiveTrue(LocationType.QUARANTINE, LocationStatus.AVAILABLE)
+            );
         }
         
         // Normal flow: use putaway rules and strategies
@@ -76,6 +88,17 @@ public class LocationSelectionService {
         }
 
         return Optional.empty();
+    }
+
+    private Optional<Location> findFirstFit(List<Location> candidates) {
+        return candidates.stream()
+            .filter(loc -> {
+                if (loc.getMaxPallets() == null) return true;
+                long currentPallets = palletRepository.countByLocation(loc);
+                long pendingArrivals = taskRepository.countByTargetLocationIdAndStatusIn(loc.getId(), PENDING_STATUSES);
+                return (currentPallets + pendingArrivals) < loc.getMaxPallets();
+            })
+            .findFirst();
     }
 
     /**

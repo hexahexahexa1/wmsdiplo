@@ -6,6 +6,8 @@ import com.wmsdipl.core.domain.ReceiptLine;
 import com.wmsdipl.core.domain.Scan;
 import com.wmsdipl.core.domain.Task;
 import com.wmsdipl.core.domain.TaskStatus;
+import com.wmsdipl.core.domain.TaskType;
+import org.springframework.web.server.ResponseStatusException;
 import com.wmsdipl.core.repository.DiscrepancyRepository;
 import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.TaskRepository;
@@ -218,5 +220,33 @@ class TaskLifecycleServiceTest {
 
         // Then
         verify(taskRepository, never()).save(any(Task.class));
+    }
+
+    @Test
+    void shouldThrowException_WhenCompletingPlacementTaskManually() {
+        // Given
+        when(taskRepository.findById(1L)).thenReturn(Optional.of(testTask));
+        when(testTask.getTaskType()).thenReturn(TaskType.PLACEMENT);
+
+        // When & Then
+        assertThrows(ResponseStatusException.class, () -> taskLifecycleService.complete(1L));
+        verify(taskRepository, never()).save(any(Task.class));
+    }
+
+    @Test
+    void shouldCompleteReceivingTaskManually() {
+        // Given
+        when(taskRepository.findById(1L)).thenReturn(Optional.of(testTask));
+        when(testTask.getTaskType()).thenReturn(TaskType.RECEIVING);
+        when(testTask.getQtyDone()).thenReturn(BigDecimal.TEN);
+        when(taskRepository.save(any(Task.class))).thenReturn(testTask);
+
+        // When
+        Task result = taskLifecycleService.complete(1L);
+
+        // Then
+        assertNotNull(result);
+        verify(testTask, times(1)).setStatus(TaskStatus.COMPLETED);
+        verify(taskRepository, times(1)).save(testTask);
     }
 }

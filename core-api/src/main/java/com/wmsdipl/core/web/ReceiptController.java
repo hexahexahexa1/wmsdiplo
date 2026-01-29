@@ -18,6 +18,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -28,6 +29,7 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 @RestController
 @RequestMapping("/api/receipts")
 @Tag(name = "Receipts", description = "Receipt management and workflow operations")
+@PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR', 'PC_OPERATOR')")
 public class ReceiptController {
 
     private final ReceiptService receiptService;
@@ -81,9 +83,9 @@ public class ReceiptController {
 
     @PostMapping("/{id}/start-receiving")
     @Operation(summary = "Start receiving", description = "Begins receiving workflow - transitions to RECEIVING status")
-    public ResponseEntity<Void> startReceiving(@PathVariable Long id) {
-        receivingWorkflowService.startReceiving(id);
-        return ResponseEntity.accepted().build();
+    public ResponseEntity<java.util.Map<String, Integer>> startReceiving(@PathVariable Long id) {
+        int count = receivingWorkflowService.startReceiving(id);
+        return ResponseEntity.accepted().body(java.util.Map.of("count", count));
     }
 
     @PostMapping("/{id}/complete-receiving")
@@ -109,9 +111,9 @@ public class ReceiptController {
 
     @PostMapping("/{id}/start-placement")
     @Operation(summary = "Start placement", description = "Begins placement workflow - automatically generates placement tasks and transitions to PLACING status")
-    public ResponseEntity<Void> startPlacement(@PathVariable Long id) {
-        placementWorkflowService.startPlacement(id);
-        return ResponseEntity.accepted().build();
+    public ResponseEntity<java.util.Map<String, Integer>> startPlacement(@PathVariable Long id) {
+        int count = placementWorkflowService.startPlacement(id);
+        return ResponseEntity.accepted().body(java.util.Map.of("count", count));
     }
 
     @PostMapping("/{id}/complete-placement")

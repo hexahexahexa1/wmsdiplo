@@ -19,6 +19,8 @@ public record TaskDto(
     Long skuId,
     BigDecimal qtyAssigned,
     BigDecimal qtyDone,
+    String skuCode,
+    String palletCode,
     Integer priority,
     LocalDateTime createdAt,
     LocalDateTime startedAt,

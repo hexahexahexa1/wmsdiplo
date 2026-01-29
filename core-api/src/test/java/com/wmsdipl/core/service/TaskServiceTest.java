@@ -9,6 +9,7 @@ import com.wmsdipl.core.domain.TaskType;
 import com.wmsdipl.core.repository.DiscrepancyRepository;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.TaskRepository;
+import com.wmsdipl.core.service.workflow.ReceivingWorkflowService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,7 +38,13 @@ class TaskServiceTest {
     private DiscrepancyRepository discrepancyRepository;
 
     @Mock
+    private com.wmsdipl.core.repository.ScanRepository scanRepository;
+
+    @Mock
     private TaskLifecycleService taskLifecycleService;
+
+    @Mock
+    private ReceivingWorkflowService receivingWorkflowService;
 
     @InjectMocks
     private TaskService taskService;
@@ -47,9 +54,13 @@ class TaskServiceTest {
     private Discrepancy testDiscrepancy;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         testReceipt = new Receipt();
         testReceipt.setDocNo("DOC001");
+        
+        java.lang.reflect.Field idField = Receipt.class.getDeclaredField("id");
+        idField.setAccessible(true);
+        idField.set(testReceipt, 1L);
 
         testTask = new Task();
         testTask.setReceipt(testReceipt);
@@ -178,6 +189,7 @@ class TaskServiceTest {
         assertEquals(TaskStatus.COMPLETED, result.getStatus());
         assertNotNull(result.getClosedAt());
         verify(taskLifecycleService, times(1)).complete(1L);
+        verify(receivingWorkflowService, times(1)).checkAndCompleteReceipt(1L);
     }
 
     @Test

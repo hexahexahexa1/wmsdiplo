@@ -37,6 +37,7 @@ public class LocationController {
 
     @GetMapping
     @Operation(summary = "List all locations", description = "Retrieves all warehouse storage locations")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR', 'PC_OPERATOR')")
     public List<LocationDto> getAll() {
         return locationService.getAll().stream()
                 .map(locationMapper::toDto)
@@ -45,6 +46,7 @@ public class LocationController {
 
     @GetMapping("/{id}")
     @Operation(summary = "Get location by ID", description = "Retrieves a single location by its unique identifier")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR', 'PC_OPERATOR')")
     public ResponseEntity<LocationDto> getById(@PathVariable Long id) {
         return locationService.getById(id)
                 .map(locationMapper::toDto)
@@ -53,6 +55,7 @@ public class LocationController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Create location", description = "Creates a new warehouse storage location")
     public ResponseEntity<LocationDto> create(@Valid @RequestBody CreateLocationRequest request) {
         Zone zone = zoneRepository.findById(request.zoneId())
@@ -66,6 +69,7 @@ public class LocationController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Update location", description = "Updates an existing location's details")
     public ResponseEntity<LocationDto> update(@PathVariable Long id, @Valid @RequestBody UpdateLocationRequest request) {
         Location location = locationService.getById(id)
@@ -92,6 +96,7 @@ public class LocationController {
     }
 
     @PostMapping("/{id}/block")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
     @Operation(summary = "Block location", description = "Blocks a location to prevent new placements (ADMIN/SUPERVISOR only)")
     public ResponseEntity<LocationDto> blockLocation(@PathVariable Long id) {
         Location blocked = locationService.blockLocation(id);
@@ -99,6 +104,7 @@ public class LocationController {
     }
 
     @PostMapping("/{id}/unblock")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
     @Operation(summary = "Unblock location", description = "Unblocks a location to make it available (ADMIN/SUPERVISOR only)")
     public ResponseEntity<LocationDto> unblockLocation(@PathVariable Long id) {
         Location unblocked = locationService.unblockLocation(id);

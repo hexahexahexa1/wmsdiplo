@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -21,6 +22,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/bulk")
 @Tag(name = "Bulk Operations", description = "Bulk operations for tasks and pallets")
+@PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
 public class BulkOperationsController {
 
     private final BulkOperationsService bulkOperationsService;

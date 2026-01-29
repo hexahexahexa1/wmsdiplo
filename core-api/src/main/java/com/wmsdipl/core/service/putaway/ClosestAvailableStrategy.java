@@ -4,23 +4,32 @@ import com.wmsdipl.core.domain.Location;
 import com.wmsdipl.core.domain.LocationStatus;
 import com.wmsdipl.core.domain.Pallet;
 import com.wmsdipl.core.domain.Zone;
+import com.wmsdipl.core.domain.TaskStatus;
 import com.wmsdipl.core.repository.LocationRepository;
 import com.wmsdipl.core.repository.PalletRepository;
+import com.wmsdipl.core.repository.TaskRepository;
 import org.springframework.stereotype.Component;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Component
 public class ClosestAvailableStrategy implements PutawayStrategy {
 
     private final LocationRepository locationRepository;
     private final PalletRepository palletRepository;
+    private final TaskRepository taskRepository;
 
-    public ClosestAvailableStrategy(LocationRepository locationRepository, PalletRepository palletRepository) {
+    private static final Set<TaskStatus> PENDING_STATUSES = Set.of(TaskStatus.NEW, TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS);
+
+    public ClosestAvailableStrategy(LocationRepository locationRepository, 
+                                   PalletRepository palletRepository,
+                                   TaskRepository taskRepository) {
         this.locationRepository = locationRepository;
         this.palletRepository = palletRepository;
+        this.taskRepository = taskRepository;
     }
 
     @Override
@@ -54,7 +63,14 @@ public class ClosestAvailableStrategy implements PutawayStrategy {
 
     private Optional<Location> findFirstFit(List<Location> candidates) {
         return candidates.stream()
-            .filter(loc -> loc.getMaxPallets() == null || palletRepository.countByLocation(loc) < loc.getMaxPallets())
+            .filter(loc -> {
+                if (loc.getMaxPallets() == null) return true;
+                
+                long currentPallets = palletRepository.countByLocation(loc);
+                long pendingArrivals = taskRepository.countByTargetLocationIdAndStatusIn(loc.getId(), PENDING_STATUSES);
+                
+                return (currentPallets + pendingArrivals) < loc.getMaxPallets();
+            })
             .findFirst();
     }
 

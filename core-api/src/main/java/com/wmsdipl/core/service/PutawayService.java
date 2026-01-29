@@ -92,8 +92,18 @@ public class PutawayService {
         Location location = locationRepository.findById(locationId)
                 .orElseThrow(() -> new IllegalArgumentException("Location not found: " + locationId));
 
-        if (location.getStatus() != LocationStatus.AVAILABLE) {
-            throw new IllegalStateException("Location is not available for putaway");
+        if (location.getStatus() != LocationStatus.AVAILABLE && location.getStatus() != LocationStatus.OCCUPIED) {
+            throw new IllegalStateException("Location is not available for putaway (Status: " + location.getStatus() + ")");
+        }
+
+        // Check capacity
+        if (location.getMaxPallets() != null) {
+            long currentPallets = palletRepository.countByLocation(location);
+            // If the pallet is already there, don't count it as extra
+            boolean alreadyThere = pallet.getLocation() != null && pallet.getLocation().getId().equals(location.getId());
+            if (!alreadyThere && currentPallets >= location.getMaxPallets()) {
+                throw new IllegalStateException("Ячейка " + location.getCode() + " переполнена (макс. паллет: " + location.getMaxPallets() + ")");
+            }
         }
 
         pallet.setLocation(location);
@@ -131,7 +141,10 @@ public class PutawayService {
         for (Pallet pallet : allPallets) {
             Optional<Location> targetOpt = determineLocationForPallet(pallet);
             if (targetOpt.isEmpty()) {
-                continue; // No suitable location found, skip this pallet
+                // Should not silently skip - fail fast to alert user about capacity issues
+                throw new IllegalStateException(
+                    "Не удалось найти место для размещения паллеты " + pallet.getCode() + 
+                    " (Статус: " + pallet.getStatus() + "). Проверьте свободное место или правила размещения.");
             }
             Location target = targetOpt.get();
 

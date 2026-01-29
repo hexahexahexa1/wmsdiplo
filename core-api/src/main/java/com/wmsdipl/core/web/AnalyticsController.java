@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -18,6 +19,7 @@ import java.time.LocalDateTime;
 @RestController
 @RequestMapping("/api/analytics")
 @Tag(name = "Analytics", description = "Analytics and performance metrics for receiving operations")
+@PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR', 'PC_OPERATOR')")
 public class AnalyticsController {
 
     private final AnalyticsService analyticsService;

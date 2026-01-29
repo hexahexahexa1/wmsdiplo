@@ -158,13 +158,14 @@ class ReceiptControllerTest {
     }
 
     @Test
-    void shouldStartReceiving_WhenValidId() throws Exception {
+    void shouldStartReceiving_AndReturnCount() throws Exception {
         // Given
-        doNothing().when(receivingWorkflowService).startReceiving(1L);
+        when(receivingWorkflowService.startReceiving(1L)).thenReturn(5);
 
         // When & Then
         mockMvc.perform(post("/api/receipts/1/start-receiving"))
-                .andExpect(status().isAccepted());
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.count").value(5));
 
         verify(receivingWorkflowService).startReceiving(1L);
     }
@@ -195,18 +196,7 @@ class ReceiptControllerTest {
         verify(receivingWorkflowService).completeReceiving(1L);
     }
 
-    @Test
-    void shouldResolvePending_WhenValidId() throws Exception {
-        // Given
-        Receipt receipt = mock(Receipt.class);
-        when(receivingWorkflowService.resolveAndContinue(1L)).thenReturn(receipt);
 
-        // When & Then
-        mockMvc.perform(post("/api/receipts/1/resolve-pending"))
-                .andExpect(status().isAccepted());
-
-        verify(receivingWorkflowService).resolveAndContinue(1L);
-    }
 
     @Test
     void shouldCancelReceipt_WhenValidId() throws Exception {
@@ -222,13 +212,14 @@ class ReceiptControllerTest {
     }
 
     @Test
-    void shouldStartPlacement_WhenValidId() throws Exception {
+    void shouldStartPlacement_AndReturnCount() throws Exception {
         // Given
-        doNothing().when(placementWorkflowService).startPlacement(1L);
+        when(placementWorkflowService.startPlacement(1L)).thenReturn(3);
 
         // When & Then
         mockMvc.perform(post("/api/receipts/1/start-placement"))
-                .andExpect(status().isAccepted());
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.count").value(3));
 
         verify(placementWorkflowService).startPlacement(1L);
     }

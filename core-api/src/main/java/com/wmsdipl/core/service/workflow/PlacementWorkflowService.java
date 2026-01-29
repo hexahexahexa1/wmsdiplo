@@ -114,6 +114,17 @@ public class PlacementWorkflowService {
             .orElseThrow(() -> new ResponseStatusException(NOT_FOUND,
                 "Target location not found: " + task.getTargetLocationId()));
 
+        // === 3.5 CHECK CAPACITY ===
+        long currentPallets = palletRepository.countByLocation(targetLocation);
+        
+        // If the pallet is already in this location, it shouldn't block itself
+        boolean alreadyThere = pallet.getLocation() != null && pallet.getLocation().getId().equals(targetLocation.getId());
+        
+        if (!alreadyThere && currentPallets >= targetLocation.getMaxPallets()) {
+            throw new ResponseStatusException(BAD_REQUEST,
+                "Ячейка " + targetLocation.getCode() + " переполнена (макс. паллет: " + targetLocation.getMaxPallets() + ")");
+        }
+
         // === 4. MOVE PALLET TO TARGET LOCATION ===
         pallet.setLocation(targetLocation);
         pallet.setStatus(PalletStatus.PLACED);
@@ -141,18 +152,12 @@ public class PlacementWorkflowService {
 
         // === 7. UPDATE TASK QUANTITY (FOR TRACKING) ===
         BigDecimal qtyDecimal = request.qty() != null ? new BigDecimal(request.qty()) : BigDecimal.ZERO;
-        task.setQtyDone(qtyDecimal);
+        BigDecimal currentDone = task.getQtyDone() != null ? task.getQtyDone() : BigDecimal.ZERO;
+        task.setQtyDone(currentDone.add(qtyDecimal));
 
-        // === 8. AUTO-COMPLETE TASK ===
-        if (task.getStatus() != TaskStatus.COMPLETED) {
-            task.setStatus(TaskStatus.COMPLETED);
-            task.setClosedAt(java.time.LocalDateTime.now());
-        }
-
+        // Auto-start if needed
+        taskLifecycleService.autoStartIfNeeded(task);
         taskRepository.save(task);
-
-        // === 9. AUTO-COMPLETE RECEIPT IF ALL PLACEMENT TASKS DONE ===
-        autoCompleteReceiptIfAllTasksCompleted(task.getReceipt().getId());
 
         return savedScan;
     }
@@ -166,9 +171,9 @@ public class PlacementWorkflowService {
                 "Only placement tasks can use this endpoint");
         }
 
-        if (task.getStatus() != TaskStatus.IN_PROGRESS) {
+        if (task.getStatus() != TaskStatus.IN_PROGRESS && task.getStatus() != TaskStatus.ASSIGNED) {
             throw new ResponseStatusException(BAD_REQUEST,
-                "Task must be in IN_PROGRESS status to record placement");
+                "Task must be in ASSIGNED or IN_PROGRESS status to record placement");
         }
 
         // Validate palletCode is required
@@ -201,9 +206,11 @@ public class PlacementWorkflowService {
      * Starts the placement process: ACCEPTED → PLACING
      * Automatically generates placement tasks for all received pallets.
      * Only transitions to PLACING if tasks were successfully created.
+     * 
+     * @return Number of placement tasks created
      */
     @Transactional
-    public void startPlacement(Long receiptId) {
+    public int startPlacement(Long receiptId) {
         Receipt receipt = receiptRepository.findById(receiptId)
             .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Receipt not found"));
 
@@ -223,6 +230,8 @@ public class PlacementWorkflowService {
         // Auto-transition to PLACING status since tasks were created
         receipt.setStatus(ReceiptStatus.PLACING);
         receiptRepository.save(receipt);
+        
+        return createdTasks.size();
     }
 
     /**
@@ -267,7 +276,7 @@ public class PlacementWorkflowService {
      * @param receiptId The receipt ID to check
      */
     @Transactional
-    private void autoCompleteReceiptIfAllTasksCompleted(Long receiptId) {
+    public void autoCompleteReceiptIfAllTasksCompleted(Long receiptId) {
         Receipt receipt = receiptRepository.findById(receiptId)
             .orElse(null);
         
