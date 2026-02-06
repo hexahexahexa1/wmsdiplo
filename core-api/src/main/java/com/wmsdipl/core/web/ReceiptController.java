@@ -14,6 +14,10 @@ import com.wmsdipl.core.service.ReceiptService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -56,6 +60,18 @@ public class ReceiptController {
         return receiptService.list();
     }
 
+    @GetMapping(params = {"page", "size"})
+    @Operation(summary = "List receipts with filters and pagination", description = "Returns paginated receipts with optional status/supplier/date filters")
+    public Page<ReceiptDto> listFiltered(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String supplier,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) java.time.LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) java.time.LocalDate toDate,
+            @PageableDefault(size = 50, sort = "createdAt") Pageable pageable
+    ) {
+        return receiptService.listFiltered(status, supplier, fromDate, toDate, pageable);
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "Get receipt by ID", description = "Returns a single receipt by its ID")
     public ReceiptDto get(@PathVariable Long id) {
@@ -96,9 +112,9 @@ public class ReceiptController {
     }
 
     @PostMapping("/{id}/accept")
-    @Operation(summary = "Accept receipt", description = "Accepts the receipt after receiving is complete")
+    @Operation(summary = "Accept receipt", description = "Legacy manual acceptance endpoint. Uses explicit receipt acceptance semantics.")
     public ResponseEntity<Void> accept(@PathVariable Long id) {
-        receivingWorkflowService.completeReceiving(id);
+        receiptService.accept(id);
         return ResponseEntity.accepted().build();
     }
 
@@ -167,4 +183,3 @@ public class ReceiptController {
                 .body(csv);
     }
 }
-

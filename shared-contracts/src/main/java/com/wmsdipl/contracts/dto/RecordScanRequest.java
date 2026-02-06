@@ -6,6 +6,8 @@ import jakarta.validation.constraints.NotNull;
 import java.time.LocalDate;
 
 public record RecordScanRequest(
+    String requestId,
+
     @NotBlank(message = "Pallet code is required")
     String palletCode,
 
@@ -19,11 +21,10 @@ public record RecordScanRequest(
     String deviceId,
     String comment,
     
-    // NEW FIELDS for receiving improvements
-    Boolean damageFlag,          // Flag for damaged goods
-    String damageType,            // PHYSICAL_DAMAGE, WATER_DAMAGE, EXPIRED, TEMPERATURE_ABUSE, CONTAMINATION, OTHER
-    String damageDescription,     // Free text description of damage
-    String lotNumber,             // Lot/batch number
-    LocalDate expiryDate          // Expiry date
+    Boolean damageFlag,
+    DamageType damageType,
+    String damageDescription,
+    String lotNumber,
+    LocalDate expiryDate
 ) {
 }

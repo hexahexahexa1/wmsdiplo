@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Receipt>
+    <Header>
+        <DocNo>RCV-TEST-001</DocNo>
+        <DocDate>2026-01-12</DocDate>
+        <Supplier>ООО "Тестовый Поставщик"</Supplier>
+        <MessageId>MSG-TEST-001</MessageId>
+        <ExternalKey>EXT-TEST-001</ExternalKey>
+        <CrossDock>false</CrossDock>
+    </Header>
+    <Lines>
+        <Line>
+            <LineNo>1</LineNo>
+            <SKU>
+                <Code>SKU-LAPTOP-001</Code>
+                <Name>Ноутбук Dell Latitude 5520</Name>
+                <UOM>ШТ</UOM>
+            </SKU>
+            <Packaging>
+                <Code>BOX-MEDIUM</Code>
+                <Name>Коробка средняя</Name>
+                <Type>BOX</Type>
+            </Packaging>
+            <QtyExpected>10</QtyExpected>
+            <SSCCExpected>00312345678901234567</SSCCExpected>
+            <LotNumber>LOT-2026-Q1-001</LotNumber>
+            <ExpiryDate>2027-12-31</ExpiryDate>
+        </Line>
+        <Line>
+            <LineNo>2</LineNo>
+            <SKU>
+                <Code>SKU-MOUSE-001</Code>
+                <Name>Мышь Logitech M185</Name>
+                <UOM>ШТ</UOM>
+            </SKU>
+            <Packaging>
+                <Code>BOX-SMALL</Code>
+                <Name>Коробка малая</Name>
+                <Type>BOX</Type>
+            </Packaging>
+            <QtyExpected>50</QtyExpected>
+            <SSCCExpected>00312345678901234568</SSCCExpected>
+            <LotNumber>LOT-2026-Q1-002</LotNumber>
+            <ExpiryDate>2028-06-30</ExpiryDate>
+        </Line>
+        <Line>
+            <LineNo>3</LineNo>
+            <SKU>
+                <Code>SKU-KEYBOARD-001</Code>
+                <Name>Клавиатура Logitech K120</Name>
+                <UOM>ШТ</UOM>
+            </SKU>
+            <Packaging>
+                <Code>BOX-SMALL</Code>
+                <Name>Коробка малая</Name>
+                <Type>BOX</Type>
+            </Packaging>
+            <QtyExpected>25</QtyExpected>
+            <LotNumber>LOT-2026-Q1-003</LotNumber>
+        </Line>
+    </Lines>
+</Receipt>

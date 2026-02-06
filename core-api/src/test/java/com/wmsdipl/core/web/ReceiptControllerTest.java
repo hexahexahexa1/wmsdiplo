@@ -186,14 +186,13 @@ class ReceiptControllerTest {
     @Test
     void shouldAcceptReceipt_WhenValidId() throws Exception {
         // Given
-        Receipt receipt = mock(Receipt.class);
-        when(receivingWorkflowService.completeReceiving(1L)).thenReturn(receipt);
+        doNothing().when(receiptService).accept(1L);
 
         // When & Then
         mockMvc.perform(post("/api/receipts/1/accept"))
                 .andExpect(status().isAccepted());
 
-        verify(receivingWorkflowService).completeReceiving(1L);
+        verify(receiptService).accept(1L);
     }
 
 

@@ -13,6 +13,7 @@ public record ReceivingAnalyticsDto(
     
     // Receiving Performance Metrics
     Double avgReceivingTimeHours,           // Average time from start to completion
+    Double avgPlacingTimeHours,             // Average placement task time from start to completion
     Map<String, Integer> receiptsByStatus,  // Count by status: {DRAFT: 5, CONFIRMED: 10, ...}
     
     // Discrepancy Analytics

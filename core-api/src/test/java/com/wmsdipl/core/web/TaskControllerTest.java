@@ -18,6 +18,9 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
@@ -71,7 +74,7 @@ class TaskControllerTest {
         TaskDto dto = createMockTaskDto(1L);
 
         when(taskService.findAll()).thenReturn(List.of(task));
-        when(taskMapper.toDto(task)).thenReturn(dto);
+        when(taskMapper.toDtoList(List.of(task))).thenReturn(List.of(dto));
 
         // When & Then
         mockMvc.perform(get("/api/tasks"))
@@ -87,7 +90,7 @@ class TaskControllerTest {
         TaskDto dto = createMockTaskDto(1L);
 
         when(taskService.findByReceipt(100L)).thenReturn(List.of(task));
-        when(taskMapper.toDto(task)).thenReturn(dto);
+        when(taskMapper.toDtoList(List.of(task))).thenReturn(List.of(dto));
 
         // When & Then
         mockMvc.perform(get("/api/tasks").param("receiptId", "100"))
@@ -95,6 +98,22 @@ class TaskControllerTest {
                 .andExpect(jsonPath("$[0].id").value(1));
 
         verify(taskService).findByReceipt(100L);
+    }
+
+    @Test
+    void shouldListTasksWithPagination_WhenPageRequested() throws Exception {
+        Task task = createMockTask(1L, TaskType.RECEIVING);
+        TaskDto dto = createMockTaskDto(1L);
+
+        when(taskService.findFiltered(isNull(), isNull(), isNull(), isNull(), any()))
+            .thenReturn(new PageImpl<>(List.of(task), PageRequest.of(0, 10), 1));
+        when(taskMapper.toDto(task)).thenReturn(dto);
+
+        mockMvc.perform(get("/api/tasks").param("page", "0").param("size", "10"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content[0].id").value(1));
+
+        verify(taskService).findFiltered(isNull(), isNull(), isNull(), isNull(), any());
     }
 
     @Test
@@ -114,6 +133,7 @@ class TaskControllerTest {
     }
 
     @Test
+    @WithMockUser(username = "supervisor1", roles = {"SUPERVISOR"})
     void shouldAssignTask_WhenValidRequest() throws Exception {
         // Given
         Task assigned = createMockTask(1L, TaskType.RECEIVING);
@@ -215,6 +235,7 @@ class TaskControllerTest {
         ScanDto scanDto = new ScanDto(
                 1L,                 // id
                 1L,                 // taskId
+                null,               // requestId
                 "PALLET-001",       // palletCode
                 "SSCC-001",         // sscc
                 "BARCODE-001",      // barcode
@@ -226,7 +247,10 @@ class TaskControllerTest {
                 null,               // damageDescription
                 null,               // lotNumber
                 null,               // expiryDate
-                LocalDateTime.now() // scannedAt
+                LocalDateTime.now(), // scannedAt
+                false,              // duplicate
+                false,              // idempotentReplay
+                List.of()           // warnings
         );
 
         when(taskService.get(1L)).thenReturn(task);
@@ -248,6 +272,7 @@ class TaskControllerTest {
         ScanDto scanDto = new ScanDto(
                 1L,                 // id
                 1L,                 // taskId
+                null,               // requestId
                 "PALLET-001",       // palletCode
                 "SSCC-001",         // sscc
                 "BARCODE-001",      // barcode
@@ -259,7 +284,10 @@ class TaskControllerTest {
                 null,               // damageDescription
                 null,               // lotNumber
                 null,               // expiryDate
-                LocalDateTime.now() // scannedAt
+                LocalDateTime.now(), // scannedAt
+                false,              // duplicate
+                false,              // idempotentReplay
+                List.of()           // warnings
         );
 
         when(taskService.get(1L)).thenReturn(task);
@@ -294,6 +322,7 @@ class TaskControllerTest {
         ScanDto scanDto = new ScanDto(
                 1L,                 // id
                 1L,                 // taskId
+                null,               // requestId
                 "PALLET-001",       // palletCode
                 "SSCC-001",         // sscc
                 "BARCODE-001",      // barcode
@@ -305,7 +334,10 @@ class TaskControllerTest {
                 null,               // damageDescription
                 null,               // lotNumber
                 null,               // expiryDate
-                LocalDateTime.now() // scannedAt
+                LocalDateTime.now(), // scannedAt
+                false,              // duplicate
+                false,              // idempotentReplay
+                List.of()           // warnings
         );
 
         when(taskService.get(1L)).thenReturn(task);
@@ -446,6 +478,8 @@ class TaskControllerTest {
                 null,                   // skuId
                 BigDecimal.ZERO,        // qtyAssigned
                 BigDecimal.ZERO,        // qtyDone
+                null,                   // skuCode
+                null,                   // palletCode
                 null,                   // priority
                 LocalDateTime.now(),    // createdAt
                 null,                   // startedAt

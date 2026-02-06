@@ -44,17 +44,34 @@ import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
+import javafx.scene.shape.Rectangle;
+import javafx.scene.text.Font;
+import javafx.scene.text.Text;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.animation.FadeTransition;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.animation.TranslateTransition;
+import javafx.scene.chart.PieChart;
 import javafx.util.Duration;
+import javafx.stage.FileChooser;
 
+import java.io.File;
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Comparator;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -62,6 +79,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public class DesktopClientApplication extends Application {
+    private static final String AUTO_SIZE_TABLE_KEY = "auto.size.columns.enabled";
 
     private String coreApiBase = System.getenv().getOrDefault("WMS_CORE_API_BASE", "http://localhost:8080");
     private String importApiBase = System.getenv().getOrDefault("WMS_IMPORT_BASE", "http://localhost:8090");
@@ -69,7 +87,17 @@ public class DesktopClientApplication extends Application {
 
     private BorderPane shell;
     private VBox contentHolder;
+    private Label topUserNameLabel;
+    private Label topUserAvatarLabel;
+    private Label topSyncStateLabel;
+    private Label topSyncTimeLabel;
+    private Label topShiftValueLabel;
+    private LocalDateTime shiftStartAt;
+    private LocalDateTime lastSyncAt;
+    private boolean syncOnline = true;
+    private Timeline topStatusTimeline;
     private final DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private final DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("HH:mm:ss");
     private String activeModule = "receipts";
 
     public static void main(String[] args) {
@@ -85,12 +113,18 @@ public class DesktopClientApplication extends Application {
 
         shell = new BorderPane();
         shell.setPrefSize(1100, 720);
-        shell.setStyle("-fx-background-color: #1c1c1c;");
+        shell.setId("root-pane");
+        shell.setPadding(new Insets(12));
 
         contentHolder = new VBox();
+        contentHolder.getStyleClass().add("content-root");
         contentHolder.setPadding(new Insets(18));
         contentHolder.setSpacing(12);
-        shell.setCenter(contentHolder);
+
+        VBox workspaceShell = new VBox(12, buildWorkspaceTopBar(), contentHolder);
+        workspaceShell.getStyleClass().add("workspace-shell");
+        VBox.setVgrow(contentHolder, Priority.ALWAYS);
+        shell.setCenter(workspaceShell);
 
         // Determine start page based on role
         String role = apiClient.getCurrentUser().role();
@@ -106,10 +140,111 @@ public class DesktopClientApplication extends Application {
             
             Scene scene = new Scene(shell);
             applyStyles(scene);
+            refreshWorkspaceUserChip();
+            startTopStatusTimer();
             stage.setScene(scene);
             stage.setTitle("WMSDIPL - " + apiClient.getCurrentUser().username() + " [" + role + "]");
             stage.show();
         });
+    }
+
+    private HBox buildWorkspaceTopBar() {
+        Label syncTitleLabel = new Label("SYNC");
+        syncTitleLabel.getStyleClass().add("top-chip-title");
+        topSyncStateLabel = new Label("ONLINE");
+        topSyncStateLabel.getStyleClass().addAll("top-chip-value", "sync-online");
+        topSyncTimeLabel = new Label("--:--:--");
+        topSyncTimeLabel.getStyleClass().add("top-chip-meta");
+        HBox syncChip = new HBox(6, syncTitleLabel, topSyncStateLabel, topSyncTimeLabel);
+        syncChip.getStyleClass().add("status-chip");
+        syncChip.setAlignment(Pos.CENTER_LEFT);
+
+        Label shiftTitleLabel = new Label("SHIFT");
+        shiftTitleLabel.getStyleClass().add("top-chip-title");
+        topShiftValueLabel = new Label("00:00:00");
+        topShiftValueLabel.getStyleClass().add("top-chip-value");
+        HBox shiftChip = new HBox(6, shiftTitleLabel, topShiftValueLabel);
+        shiftChip.getStyleClass().add("status-chip");
+        shiftChip.setAlignment(Pos.CENTER_LEFT);
+
+        topUserAvatarLabel = new Label("U");
+        topUserAvatarLabel.getStyleClass().add("user-avatar");
+        topUserNameLabel = new Label("-");
+        topUserNameLabel.getStyleClass().add("user-name");
+
+        HBox userChip = new HBox(8, topUserAvatarLabel, topUserNameLabel);
+        userChip.getStyleClass().add("user-chip");
+        userChip.setAlignment(Pos.CENTER_LEFT);
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        HBox topBar = new HBox(10, spacer, syncChip, shiftChip, userChip);
+        topBar.getStyleClass().add("workspace-topbar");
+        topBar.setAlignment(Pos.CENTER_RIGHT);
+        refreshTopIndicators();
+        return topBar;
+    }
+
+    private void refreshWorkspaceUserChip() {
+        if (topUserNameLabel == null || topUserAvatarLabel == null || apiClient.getCurrentUser() == null) {
+            return;
+        }
+        String username = apiClient.getCurrentUser().username();
+        topUserNameLabel.setText(username);
+        String initials = username == null || username.isBlank()
+            ? "U"
+            : username.trim().substring(0, Math.min(2, username.trim().length())).toUpperCase();
+        topUserAvatarLabel.setText(initials);
+        if (shiftStartAt == null) {
+            shiftStartAt = LocalDateTime.now();
+        }
+        refreshTopIndicators();
+    }
+
+    private void startTopStatusTimer() {
+        if (topStatusTimeline != null) {
+            topStatusTimeline.stop();
+        }
+        topStatusTimeline = new Timeline(new KeyFrame(Duration.seconds(1), e -> refreshTopIndicators()));
+        topStatusTimeline.setCycleCount(Timeline.INDEFINITE);
+        topStatusTimeline.play();
+        refreshTopIndicators();
+    }
+
+    private void refreshTopIndicators() {
+        if (topShiftValueLabel != null) {
+            if (shiftStartAt == null) {
+                topShiftValueLabel.setText("--:--:--");
+            } else {
+                long totalSeconds = Math.max(0, java.time.Duration.between(shiftStartAt, LocalDateTime.now()).getSeconds());
+                long hours = totalSeconds / 3600;
+                long minutes = (totalSeconds % 3600) / 60;
+                long seconds = totalSeconds % 60;
+                topShiftValueLabel.setText(String.format("%02d:%02d:%02d", hours, minutes, seconds));
+            }
+        }
+
+        if (topSyncStateLabel != null) {
+            topSyncStateLabel.getStyleClass().removeAll("sync-online", "sync-offline");
+            topSyncStateLabel.getStyleClass().add(syncOnline ? "sync-online" : "sync-offline");
+            topSyncStateLabel.setText(syncOnline ? "ONLINE" : "OFFLINE");
+        }
+
+        if (topSyncTimeLabel != null) {
+            topSyncTimeLabel.setText(lastSyncAt == null ? "--:--:--" : lastSyncAt.format(timeFmt));
+        }
+    }
+
+    private void markSyncSuccess() {
+        syncOnline = true;
+        lastSyncAt = LocalDateTime.now();
+        refreshTopIndicators();
+    }
+
+    private void markSyncFailure() {
+        syncOnline = false;
+        refreshTopIndicators();
     }
 
     private VBox buildNav() {
@@ -122,38 +257,38 @@ public class DesktopClientApplication extends Application {
 
         VBox nav = new VBox(14, logo);
         nav.setPadding(new Insets(24, 24, 24, 24));
-        nav.setPrefWidth(210);
+        nav.setPrefWidth(220);
         nav.setAlignment(Pos.TOP_CENTER);
-        nav.setStyle("-fx-background-color: #0e0e10;");
+        nav.getStyleClass().add("nav-panel");
 
         if (!"OPERATOR".equalsIgnoreCase(role)) {
-            nav.getChildren().add(navButton(I18n.get("nav.receipts"), activeModule.equals("receipts"), this::showReceiptsPane));
-            nav.getChildren().add(navButton(I18n.get("nav.topology"), activeModule.equals("topology"), this::showTopologyPane));
-            nav.getChildren().add(navButton(I18n.get("nav.pallets"), activeModule.equals("pallets"), this::showPalletsPane));
-            nav.getChildren().add(navButton(I18n.get("nav.stock"), activeModule.equals("stock"), this::showStockPane));
+            nav.getChildren().add(navButton(I18n.get("nav.receipts"), "▣", activeModule.equals("receipts"), this::showReceiptsPane));
+            nav.getChildren().add(navButton(I18n.get("nav.topology"), "⌗", activeModule.equals("topology"), this::showTopologyPane));
+            nav.getChildren().add(navButton(I18n.get("nav.pallets"), "◫", activeModule.equals("pallets"), this::showPalletsPane));
+            nav.getChildren().add(navButton(I18n.get("nav.stock"), "◪", activeModule.equals("stock"), this::showStockPane));
         }
 
         if (!"OPERATOR".equalsIgnoreCase(role) && !"PC_OPERATOR".equalsIgnoreCase(role)) {
-            nav.getChildren().add(navButton(I18n.get("nav.tasks"), activeModule.equals("tasks"), this::showTasksPane));
+            nav.getChildren().add(navButton(I18n.get("nav.tasks"), "✓", activeModule.equals("tasks"), this::showTasksPane));
         }
 
-        if (!"OPERATOR".equalsIgnoreCase(role)) {
-            nav.getChildren().add(navButton(I18n.get("nav.analytics"), activeModule.equals("analytics"), this::showAnalyticsPane));
+        if ("ADMIN".equalsIgnoreCase(role) || "SUPERVISOR".equalsIgnoreCase(role)) {
+            nav.getChildren().add(navButton(I18n.get("nav.analytics"), "◔", activeModule.equals("analytics"), this::showAnalyticsPane));
         }
 
         if (!"OPERATOR".equalsIgnoreCase(role) && !"PC_OPERATOR".equalsIgnoreCase(role)) {
-            nav.getChildren().add(navButton(I18n.get("nav.skus"), activeModule.equals("skus"), this::showSkusPane));
+            nav.getChildren().add(navButton(I18n.get("nav.skus"), "◇", activeModule.equals("skus"), this::showSkusPane));
         }
 
         if (!"PC_OPERATOR".equalsIgnoreCase(role)) {
-            nav.getChildren().add(navButton(I18n.get("nav.terminal"), activeModule.equals("terminal"), this::showTerminalPane));
+            nav.getChildren().add(navButton(I18n.get("nav.terminal"), "⌨", activeModule.equals("terminal"), this::showTerminalPane));
         }
 
         if ("ADMIN".equalsIgnoreCase(role)) {
-            nav.getChildren().add(navButton(I18n.get("nav.users"), activeModule.equals("users"), this::showUsersPane));
+            nav.getChildren().add(navButton(I18n.get("nav.users"), "◎", activeModule.equals("users"), this::showUsersPane));
         }
         
-        nav.getChildren().add(navButton(I18n.get("nav.settings"), activeModule.equals("settings"), this::showSettingsPane));
+        nav.getChildren().add(navButton(I18n.get("nav.settings"), "⚙", activeModule.equals("settings"), this::showSettingsPane));
         
         // Spacer to push logout button to bottom
         VBox spacer = new VBox();
@@ -162,7 +297,7 @@ public class DesktopClientApplication extends Application {
         
         Button logoutBtn = new Button(I18n.get("nav.logout"));
         logoutBtn.getStyleClass().add("nav-button");
-        logoutBtn.setStyle("-fx-background-color: #8B0000; -fx-text-fill: white;");
+        logoutBtn.getStyleClass().add("logout-button");
         logoutBtn.setMaxWidth(Double.MAX_VALUE);
         logoutBtn.setOnAction(e -> handleLogout());
         nav.getChildren().add(logoutBtn);
@@ -178,6 +313,15 @@ public class DesktopClientApplication extends Application {
         }
         btn.setMaxWidth(Double.MAX_VALUE);
         btn.setOnAction(e -> action.run());
+        return btn;
+    }
+
+    private Button navButton(String text, String icon, boolean selected, Runnable action) {
+        Button btn = navButton(text, selected, action);
+        Label iconLabel = new Label(icon);
+        iconLabel.getStyleClass().add("nav-icon");
+        btn.setGraphic(iconLabel);
+        btn.setGraphicTextGap(10);
         return btn;
     }
 
@@ -246,7 +390,7 @@ public class DesktopClientApplication extends Application {
                 }
             }).whenComplete((v, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    new Alert(AlertType.ERROR, I18n.format("common.error", error.getMessage())).showAndWait();
+                    showError(I18n.format("common.error", error.getMessage()));
                 }
                 loadReceipts(table, "");
             }));
@@ -265,7 +409,7 @@ public class DesktopClientApplication extends Application {
                 }
             }).whenComplete((v, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    new Alert(AlertType.ERROR, I18n.format("common.error", error.getMessage())).showAndWait();
+                    showError(I18n.format("common.error", error.getMessage()));
                 }
                 loadReceipts(table, "");
             }));
@@ -291,9 +435,10 @@ public class DesktopClientApplication extends Application {
 
     private TableView<Receipt> buildReceiptTable() {
         TableView<Receipt> table = new TableView<>();
+        enableAutoColumnSizing(table);
         table.setId("receiptTable");
         table.setPlaceholder(new Label(I18n.get("common.no_data")));
-        table.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         table.setFixedCellSize(72);
 
         table.setRowFactory(tv -> {
@@ -346,6 +491,7 @@ public class DesktopClientApplication extends Application {
         dialog.setTitle(I18n.format("receipts.dialog.lines_title", receipt.docNo()));
 
         TableView<com.wmsdipl.desktop.model.ReceiptLine> lineTable = new TableView<>();
+        enableAutoColumnSizing(lineTable);
         lineTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         lineTable.setPlaceholder(new Label(I18n.get("common.loading")));
 
@@ -366,7 +512,9 @@ public class DesktopClientApplication extends Application {
 
         VBox box = new VBox(lineTable);
         box.setPadding(new Insets(12));
-        dialog.setScene(new Scene(box, 640, 420));
+        Scene scene = new Scene(box, 640, 420);
+        applyStyles(scene);
+        dialog.setScene(scene);
         dialog.show();
 
         CompletableFuture
@@ -379,7 +527,7 @@ public class DesktopClientApplication extends Application {
             })
             .whenComplete((lines, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    Alert alert = new Alert(AlertType.ERROR, I18n.format("common.error", error.getMessage()));
+                    Alert alert = createAlert(AlertType.ERROR, I18n.format("common.error", error.getMessage()));
                     alert.initOwner(dialog);
                     alert.showAndWait();
                     lineTable.setPlaceholder(new Label(I18n.get("common.alert.error")));
@@ -401,10 +549,12 @@ public class DesktopClientApplication extends Application {
             })
             .whenComplete((receipts, error) -> Platform.runLater(() -> {
                 if (error != null) {
+                    markSyncFailure();
                     table.setPlaceholder(new Label(I18n.format("common.error", error.getMessage())));
                     table.setItems(FXCollections.observableArrayList());
                     return;
                 }
+                markSyncSuccess();
                 List<Receipt> filtered = receipts;
                 if (filter != null && !filter.isBlank()) {
                     String lower = filter.toLowerCase();
@@ -434,7 +584,7 @@ public class DesktopClientApplication extends Application {
         boolean canBlock = isAdmin || isSupervisor;
 
         Label header = new Label(I18n.get("topology.header"));
-        header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
+        header.getStyleClass().add("section-header");
 
         ListView<com.wmsdipl.desktop.model.Zone> zonesView = new ListView<>();
         zonesView.setPrefWidth(240);
@@ -468,6 +618,7 @@ public class DesktopClientApplication extends Application {
         }
 
         TableView<Location> locTable = new TableView<>();
+        enableAutoColumnSizing(locTable);
         locTable.setPlaceholder(new Label(I18n.get("placeholder.no_cells")));
         
         TableColumn<Location, String> locCode = new TableColumn<>(I18n.get("topology.table.code"));
@@ -544,12 +695,16 @@ public class DesktopClientApplication extends Application {
             }
         });
 
-        VBox left = new VBox(10, new Label(I18n.get("topology.zones")), zonesView, zoneBtns);
+        Label zonesLabel = new Label(I18n.get("topology.zones"));
+        zonesLabel.getStyleClass().add("sub-header");
+        VBox left = new VBox(10, zonesLabel, zonesView, zoneBtns);
         left.setPadding(new Insets(12));
-        left.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
-        VBox right = new VBox(10, new Label(I18n.get("topology.locations")), locTable, locBtns);
+        left.getStyleClass().add("panel-surface");
+        Label locationsLabel = new Label(I18n.get("topology.locations"));
+        locationsLabel.getStyleClass().add("sub-header");
+        VBox right = new VBox(10, locationsLabel, locTable, locBtns);
         right.setPadding(new Insets(12));
-        right.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
+        right.getStyleClass().add("panel-surface");
 
         HBox body = new HBox(12, left, right);
         HBox.setHgrow(right, Priority.ALWAYS);
@@ -610,7 +765,7 @@ public class DesktopClientApplication extends Application {
         shell.setLeft(buildNav());
 
         Label header = new Label(I18n.get("pallets.header"));
-        header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
+        header.getStyleClass().add("section-header");
         
         Button refresh = new Button(I18n.get("btn.refresh"));
         refresh.getStyleClass().add("refresh-btn");
@@ -626,6 +781,7 @@ public class DesktopClientApplication extends Application {
         HBox toolbar = new HBox(12, refresh, createBtn, bulkCreateBtn);
 
         TableView<Pallet> table = new TableView<>();
+        enableAutoColumnSizing(table);
         table.setPlaceholder(new Label(I18n.get("placeholder.no_data")));
         
         TableColumn<Pallet, Object> codeCol = column(I18n.get("pallets.table.code"), p -> p.code());
@@ -642,7 +798,7 @@ public class DesktopClientApplication extends Application {
 
         VBox layout = new VBox(12, header, toolbar, table);
         layout.setPadding(new Insets(24));
-        layout.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
+        layout.getStyleClass().add("page-root");
         setContent(layout);
     }
 
@@ -651,7 +807,7 @@ public class DesktopClientApplication extends Application {
         shell.setLeft(buildNav());
 
         Label header = new Label(I18n.get("stock.header"));
-        header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
+        header.getStyleClass().add("section-header");
         
         // Filter fields
         TextField skuCodeFilter = new TextField();
@@ -692,6 +848,7 @@ public class DesktopClientApplication extends Application {
         
         // Stock table
         TableView<StockItem> stockTable = new TableView<>();
+        enableAutoColumnSizing(stockTable);
         stockTable.setPlaceholder(new Label(I18n.get("placeholder.no_data")));
         stockTable.setPrefHeight(500);
         stockTable.setFixedCellSize(50);
@@ -745,7 +902,7 @@ public class DesktopClientApplication extends Application {
         
         // Pagination controls
         Label pageLabel = new Label(I18n.format("stock.pagination.page", 1, 1));
-        pageLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        pageLabel.getStyleClass().add("muted-label");
         
         Button prevBtn = new Button(I18n.get("stock.btn.prev"));
         prevBtn.getStyleClass().add("refresh-btn");
@@ -757,7 +914,7 @@ public class DesktopClientApplication extends Application {
         nextBtn.setPrefHeight(36);
         
         Label totalLabel = new Label(I18n.format("stock.pagination.total", 0));
-        totalLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        totalLabel.getStyleClass().add("muted-label");
         
         HBox paginationBox = new HBox(12, prevBtn, pageLabel, nextBtn, totalLabel);
         paginationBox.setAlignment(Pos.CENTER_LEFT);
@@ -856,7 +1013,7 @@ public class DesktopClientApplication extends Application {
         
         VBox layout = new VBox(12, header, filtersRow, buttonsRow, stockTable, paginationBox);
         layout.setPadding(new Insets(24));
-        layout.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
+        layout.getStyleClass().add("page-root");
         VBox.setVgrow(stockTable, Priority.ALWAYS);
         
         setContent(layout);
@@ -871,6 +1028,7 @@ public class DesktopClientApplication extends Application {
         dialog.setTitle(I18n.format("movement.dialog.title", stockItem.palletCode()));
         
         TableView<StockMovement> historyTable = new TableView<>();
+        enableAutoColumnSizing(historyTable);
         historyTable.setPlaceholder(new Label(I18n.get("common.loading")));
         historyTable.setPrefHeight(400);
         
@@ -917,7 +1075,7 @@ public class DesktopClientApplication extends Application {
         
         VBox content = new VBox(10, historyTable, buttonBox);
         content.setPadding(new Insets(12));
-        content.setStyle("-fx-background-color: #1c1c1c;");
+        content.getStyleClass().add("dialog-surface");
         
         Scene scene = new Scene(content, 900, 500);
         applyStyles(scene);
@@ -964,7 +1122,7 @@ public class DesktopClientApplication extends Application {
         shell.setLeft(buildNav());
 
         Label header = new Label(I18n.get("tasks.header"));
-        header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
+        header.getStyleClass().add("section-header");
         TextField receiptFilter = new TextField();
         receiptFilter.setPromptText(I18n.get("tasks.filter.receipt"));
         Button refresh = new Button(I18n.get("btn.refresh"));
@@ -983,6 +1141,7 @@ public class DesktopClientApplication extends Application {
         }
 
         TableView<com.wmsdipl.desktop.model.Task> table = new TableView<>();
+        enableAutoColumnSizing(table);
         table.setPlaceholder(new Label(I18n.get("placeholder.no_data")));
         table.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         
@@ -1026,7 +1185,7 @@ public class DesktopClientApplication extends Application {
         controls.setAlignment(Pos.CENTER_LEFT);
         VBox layout = new VBox(12, header, controls, table);
         layout.setPadding(new Insets(24));
-        layout.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
+        layout.getStyleClass().add("page-root");
         setContent(layout);
     }
 
@@ -1035,9 +1194,10 @@ public class DesktopClientApplication extends Application {
         shell.setLeft(buildNav());
 
         Label header = new Label(I18n.get("users.header"));
-        header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
+        header.getStyleClass().add("section-header");
 
         TableView<User> userTable = new TableView<>();
+        enableAutoColumnSizing(userTable);
         userTable.setPlaceholder(new Label(I18n.get("placeholder.no_users")));
         userTable.getColumns().addAll(
             column(I18n.get("users.table.id"), User::id),
@@ -1084,7 +1244,7 @@ public class DesktopClientApplication extends Application {
 
         VBox layout = new VBox(10, header, userBtns, userTable);
         layout.setPadding(new Insets(24));
-        layout.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
+        layout.getStyleClass().add("page-root");
 
         setContent(layout);
 
@@ -1093,6 +1253,7 @@ public class DesktopClientApplication extends Application {
 
     private void openUserCreationDialog(TableView<User> userTable) {
         Dialog<ButtonType> dialog = new Dialog<>();
+        styleDialog(dialog);
         dialog.setTitle(I18n.get("user.create.title"));
         dialog.setHeaderText(I18n.get("user.create.header"));
 
@@ -1168,6 +1329,7 @@ public class DesktopClientApplication extends Application {
         if (user == null) return;
 
         Dialog<ButtonType> dialog = new Dialog<>();
+        styleDialog(dialog);
         dialog.setTitle(I18n.get("user.edit.title"));
         dialog.setHeaderText(I18n.format("user.edit.header", user.username()));
 
@@ -1228,6 +1390,7 @@ public class DesktopClientApplication extends Application {
         if (user == null) return;
 
         Dialog<ButtonType> dialog = new Dialog<>();
+        styleDialog(dialog);
         dialog.setTitle(I18n.get("user.password.title"));
         dialog.setHeaderText(I18n.format("user.password.header", user.username()));
 
@@ -1314,18 +1477,20 @@ public class DesktopClientApplication extends Application {
         shell.setLeft(buildNav());
 
         Label header = new Label(I18n.get("terminal.header"));
-        header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
+        header.getStyleClass().add("section-header");
 
         String role = apiClient.getCurrentUser() != null ? apiClient.getCurrentUser().role() : "OPERATOR";
 
         // Filter tabs
         TabPane filterTabs = new TabPane();
+        filterTabs.getStyleClass().add("terminal-task-tabs");
         filterTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
         Tab myTasksTab = new Tab(I18n.get("terminal.tab.my_tasks"));
         Tab allTasksTab = new Tab(I18n.get("terminal.tab.all_tasks"));
 
         TableView<com.wmsdipl.desktop.model.Task> taskTable = new TableView<>();
+        enableAutoColumnSizing(taskTable);
         taskTable.setPlaceholder(new Label(I18n.get("placeholder.no_tasks")));
         taskTable.setFixedCellSize(60);
         
@@ -1370,6 +1535,7 @@ public class DesktopClientApplication extends Application {
         TableView<com.wmsdipl.desktop.model.Task> allTasksTable = null;
         if (allTasksTab != null) {
             allTasksTable = new TableView<>();
+            enableAutoColumnSizing(allTasksTable);
             allTasksTable.setPlaceholder(new Label(I18n.get("placeholder.no_tasks")));
             allTasksTable.setFixedCellSize(60);
             
@@ -1422,8 +1588,7 @@ public class DesktopClientApplication extends Application {
             if (currentUser != null) {
                 CompletableFuture.supplyAsync(() -> {
                 try {
-                    return apiClient.getAllTasks().stream()
-                        .filter(t -> currentUser.equals(t.assignee()))
+                    return apiClient.listTasksFiltered(currentUser, null, null, null, 0, 200, "priority,desc").stream()
                         .filter(t -> "RECEIVING".equals(t.taskType()) || "PLACEMENT".equals(t.taskType()))
                         .collect(Collectors.toList());
                 } catch (Exception e) {
@@ -1448,17 +1613,23 @@ public class DesktopClientApplication extends Application {
                 try {
                     String currentUser = apiClient.getCurrentUsername();
                     String currentRole = apiClient.getCurrentUser().role();
-                    
-                    return apiClient.getAllTasks().stream()
+                    List<com.wmsdipl.desktop.model.Task> tasks;
+                    if ("ADMIN".equalsIgnoreCase(currentRole) || "SUPERVISOR".equalsIgnoreCase(currentRole)) {
+                        tasks = apiClient.listTasksFiltered(null, null, null, null, 0, 200, "priority,desc");
+                    } else {
+                        List<com.wmsdipl.desktop.model.Task> newTasks =
+                            apiClient.listTasksFiltered(null, "NEW", null, null, 0, 200, "priority,desc");
+                        List<com.wmsdipl.desktop.model.Task> myTasks =
+                            apiClient.listTasksFiltered(currentUser, null, null, null, 0, 200, "priority,desc");
+                        tasks = java.util.stream.Stream.concat(newTasks.stream(), myTasks.stream())
+                            .collect(Collectors.toMap(com.wmsdipl.desktop.model.Task::id, t -> t, (a, b) -> a))
+                            .values()
+                            .stream()
+                            .toList();
+                    }
+                    return tasks.stream()
                         .filter(t -> "RECEIVING".equals(t.taskType()) || "PLACEMENT".equals(t.taskType()))
-                        .filter(t -> {
-                            if ("ADMIN".equalsIgnoreCase(currentRole) || "SUPERVISOR".equalsIgnoreCase(currentRole)) {
-                                return true;
-                            }
-                            // Operators see NEW tasks or their own
-                            return t.assignee() == null || currentUser.equals(t.assignee());
-                        })
-                        .collect(Collectors.toList());
+                        .toList();
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
@@ -1492,7 +1663,7 @@ public class DesktopClientApplication extends Application {
 
         VBox layout = new VBox(12, header, refreshBtn, filterTabs);
         layout.setPadding(new Insets(24));
-        layout.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
+        layout.getStyleClass().add("page-root");
         VBox.setVgrow(filterTabs, Priority.ALWAYS);
 
         setContent(layout);
@@ -1504,9 +1675,10 @@ public class DesktopClientApplication extends Application {
         shell.setLeft(buildNav());
         
         Label header = new Label(I18n.get("skus.header"));
-        header.setStyle("-fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: white;");
+        header.getStyleClass().add("section-header");
         
         TableView<Sku> skuTable = new TableView<>();
+        enableAutoColumnSizing(skuTable);
         skuTable.setPlaceholder(new Label(I18n.get("common.no_data")));
         skuTable.setPrefHeight(400);
         skuTable.getColumns().addAll(
@@ -1549,8 +1721,7 @@ public class DesktopClientApplication extends Application {
                     }
                 }).whenComplete((v, error) -> Platform.runLater(() -> {
                     if (error != null) {
-                        Alert alert = new Alert(AlertType.ERROR, I18n.format("common.error", error.getMessage()));
-                        alert.showAndWait();
+                        showError(I18n.format("common.error", error.getMessage()));
                     }
                     loadList(skuTable, () -> apiClient.listSkus());
                 }));
@@ -1562,7 +1733,7 @@ public class DesktopClientApplication extends Application {
         
         VBox layout = new VBox(15, header, buttons, skuTable);
         layout.setPadding(new Insets(24));
-        layout.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
+        layout.getStyleClass().add("page-root");
         layout.setFillWidth(true);
         
         setContent(layout);
@@ -1573,11 +1744,11 @@ public class DesktopClientApplication extends Application {
         activeModule = "settings";
         shell.setLeft(buildNav());
         Label header = new Label(I18n.get("settings.header"));
-        header.setStyle("-fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: white;");
+        header.getStyleClass().add("section-header");
 
         // Language selector
         Label langLabel = new Label(I18n.get("settings.language"));
-        langLabel.setStyle("-fx-text-fill: white;");
+        langLabel.getStyleClass().add("muted-label");
         ComboBox<String> langCombo = new ComboBox<>();
         langCombo.getItems().addAll(I18n.get("settings.lang.russian"), I18n.get("settings.lang.english"));
         
@@ -1593,7 +1764,7 @@ public class DesktopClientApplication extends Application {
 
             if (!code.equals(currentLang)) {
                 I18n.setLocale(code);
-                Alert alert = new Alert(AlertType.INFORMATION);
+                Alert alert = createAlert(AlertType.INFORMATION);
                 alert.setTitle(I18n.get("settings.header"));
                 alert.setHeaderText(I18n.get("settings.restart_required"));
                 alert.setContentText(I18n.get("settings.restart_message"));
@@ -1603,7 +1774,7 @@ public class DesktopClientApplication extends Application {
 
         VBox layout = new VBox(10, header, langLabel, langCombo);
         layout.setPadding(new Insets(24));
-        layout.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
+        layout.getStyleClass().add("page-root");
         layout.setFillWidth(true);
 
         String role = apiClient.getCurrentUser().role();
@@ -1612,7 +1783,7 @@ public class DesktopClientApplication extends Application {
             TextField importApiField = new TextField(importApiBase);
             TextField importFolderField = new TextField();
             Label statusLabel = new Label(I18n.get("settings.status_default"));
-            statusLabel.setStyle("-fx-text-fill: white;");
+            statusLabel.getStyleClass().add("muted-label");
 
             // Load current import folder
             CompletableFuture.runAsync(() -> {
@@ -1643,8 +1814,9 @@ public class DesktopClientApplication extends Application {
 
             // Putaway rules list
             Label rulesHeader = new Label(I18n.get("settings.rules_header"));
-            rulesHeader.setStyle("-fx-text-fill: white; -fx-font-size: 16px; -fx-font-weight: bold;");
+            rulesHeader.getStyleClass().add("sub-header");
             TableView<PutawayRule> rulesTable = new TableView<>();
+            enableAutoColumnSizing(rulesTable);
             rulesTable.setPlaceholder(new Label(I18n.get("settings.no_rules")));
             rulesTable.setPrefHeight(200);
             rulesTable.getColumns().addAll(
@@ -1682,6 +1854,7 @@ public class DesktopClientApplication extends Application {
         dialog.setTitle(I18n.format("receipts.dialog.tasks_title", receipt.docNo()));
 
         TableView<com.wmsdipl.desktop.model.Task> table = new TableView<>();
+        enableAutoColumnSizing(table);
         table.setPlaceholder(new Label(I18n.get("common.loading")));
         table.getColumns().addAll(
             column(I18n.get("tasks.table.id"), com.wmsdipl.desktop.model.Task::id),
@@ -1693,7 +1866,9 @@ public class DesktopClientApplication extends Application {
             column(I18n.get("tasks.table.target"), com.wmsdipl.desktop.model.Task::targetLocationId)
         );
 
-        dialog.setScene(new Scene(new VBox(table), 780, 420));
+        Scene scene = new Scene(new VBox(table), 780, 420);
+        applyStyles(scene);
+        dialog.setScene(scene);
         dialog.show();
 
         loadList(table, () -> apiClient.listTasks(receipt.id()));
@@ -1731,10 +1906,12 @@ public class DesktopClientApplication extends Application {
             })
             .whenComplete((list, error) -> Platform.runLater(() -> {
                 if (error != null) {
+                    markSyncFailure();
                     table.setPlaceholder(new Label(I18n.format("common.error", error.getMessage())));
                     table.setItems(FXCollections.observableArrayList());
                     return;
                 }
+                markSyncSuccess();
                 table.setItems(FXCollections.observableArrayList(list));
             }));
     }
@@ -1748,7 +1925,10 @@ public class DesktopClientApplication extends Application {
             }
         }).whenComplete((v, error) -> Platform.runLater(() -> {
             if (error != null) {
-                new Alert(AlertType.ERROR, I18n.format("common.error", error.getMessage())).showAndWait();
+                markSyncFailure();
+                showError(I18n.format("common.error", error.getMessage()));
+            } else {
+                markSyncSuccess();
             }
             loadReceipts(table, "");
         }));
@@ -1777,6 +1957,70 @@ public class DesktopClientApplication extends Application {
         T get() throws Exception;
     }
 
+    private <T> void enableAutoColumnSizing(TableView<T> table) {
+        if (Boolean.TRUE.equals(table.getProperties().get(AUTO_SIZE_TABLE_KEY))) {
+            return;
+        }
+        table.getProperties().put(AUTO_SIZE_TABLE_KEY, true);
+        applyRoundedClip(table, 12);
+        table.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
+        table.widthProperty().addListener((obs, oldV, newV) -> Platform.runLater(() -> autoSizeColumns(table)));
+        table.itemsProperty().addListener((obs, oldItems, newItems) -> Platform.runLater(() -> autoSizeColumns(table)));
+        Platform.runLater(() -> autoSizeColumns(table));
+    }
+
+    private <T> void autoSizeColumns(TableView<T> table) {
+        if (table == null || table.getVisibleLeafColumns().isEmpty()) {
+            return;
+        }
+        table.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
+
+        var visibleColumns = new ArrayList<TableColumn<T, ?>>(table.getVisibleLeafColumns());
+        Font font = Font.font("Manrope", 13);
+        double minWidth = 90;
+        double padding = 34;
+        double totalWidth = 0;
+        Map<TableColumn<T, ?>, Double> columnWidths = new LinkedHashMap<>();
+        int rows = table.getItems() == null ? 0 : table.getItems().size();
+
+        for (TableColumn<T, ?> column : visibleColumns) {
+            double width = measureTextWidth(column.getText(), font);
+            for (int row = 0; row < rows; row++) {
+                Object cellValue = column.getCellData(row);
+                width = Math.max(width, measureTextWidth(cellValue == null ? "" : cellValue.toString(), font));
+            }
+            double resolvedWidth = Math.max(minWidth, width + padding);
+            columnWidths.put(column, resolvedWidth);
+            totalWidth += resolvedWidth;
+        }
+
+        if (totalWidth <= 0) {
+            return;
+        }
+
+        double availableWidth = Math.max(0, table.getWidth() - 20);
+        double scaleFactor = availableWidth > totalWidth ? availableWidth / totalWidth : 1.0;
+
+        for (Map.Entry<TableColumn<T, ?>, Double> entry : columnWidths.entrySet()) {
+            entry.getKey().setPrefWidth(entry.getValue() * scaleFactor);
+        }
+    }
+
+    private double measureTextWidth(String value, Font font) {
+        Text text = new Text(value == null ? "" : value);
+        text.setFont(font);
+        return Math.ceil(text.getLayoutBounds().getWidth());
+    }
+
+    private void applyRoundedClip(Region region, double radius) {
+        Rectangle clip = new Rectangle();
+        clip.setArcWidth(radius * 2);
+        clip.setArcHeight(radius * 2);
+        clip.widthProperty().bind(region.widthProperty());
+        clip.heightProperty().bind(region.heightProperty());
+        region.setClip(clip);
+    }
+
     private void setContent(VBox node) {
         contentHolder.getChildren().setAll(node);
     }
@@ -1784,7 +2028,8 @@ public class DesktopClientApplication extends Application {
     private void showNotification(String message) {
         javafx.stage.Popup popup = new javafx.stage.Popup();
         Label label = new Label(message);
-        label.setStyle("-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-font-size: 14px; -fx-padding: 15px; -fx-background-radius: 8px; -fx-effect: dropshadow(three-pass-box, rgba(0,0,0,0.4), 10, 0, 0, 0);");
+        applyStyles(label);
+        label.getStyleClass().add("notification-popup");
         label.setMinWidth(200);
         label.setAlignment(Pos.CENTER);
         
@@ -1816,6 +2061,7 @@ public class DesktopClientApplication extends Application {
         PasswordField passField = new PasswordField();
         passField.setPromptText(I18n.get("login.password"));
         Label info = new Label(I18n.get("login.prompt"));
+        info.getStyleClass().add("form-label");
         Button loginBtn = new Button(I18n.get("login.button"));
 
         final boolean[] success = {false};
@@ -1842,6 +2088,8 @@ public class DesktopClientApplication extends Application {
                 }
                 success[0] = true;
                 I18n.loadForUser(username);
+                shiftStartAt = LocalDateTime.now();
+                markSyncSuccess();
                 dialog.close();
             }));
         });
@@ -1849,7 +2097,9 @@ public class DesktopClientApplication extends Application {
         VBox box = new VBox(8, info, userField, passField, loginBtn);
         box.setPadding(new Insets(12));
         box.setAlignment(Pos.CENTER_LEFT);
-        dialog.setScene(new Scene(box, 300, 160));
+        Scene scene = new Scene(box, 300, 160);
+        applyStyles(scene);
+        dialog.setScene(scene);
         dialog.showAndWait();
         return success[0];
     }
@@ -1868,6 +2118,7 @@ public class DesktopClientApplication extends Application {
         updateTitle.run();
 
         TabPane tabs = new TabPane();
+        tabs.getStyleClass().add("task-exec-tabs");
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 
         // Tab 1: Document (expected data)
@@ -1905,7 +2156,7 @@ public class DesktopClientApplication extends Application {
         releaseBtn.setPrefWidth(150);
         
         Label actionStatus = new Label("");
-        actionStatus.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        actionStatus.getStyleClass().add("form-label");
         
         // Update button states based on task status
         Runnable updateButtons = () -> {
@@ -2016,7 +2267,7 @@ public class DesktopClientApplication extends Application {
                     
                     // Logic for PLACEMENT: Hard stop if discrepancies exist
                     if (isPlacement && (clientDetectedDiscrepancy || hasScanDiscrepancies)) {
-                        new Alert(AlertType.ERROR, I18n.get("error.placement_discrepancy")).showAndWait();
+                        createAlert(AlertType.ERROR, I18n.get("error.placement_discrepancy")).showAndWait();
                         actionStatus.setText(I18n.get("task_exec.status.cancelled"));
                         completeBtn.setDisable(false);
                         return;
@@ -2090,7 +2341,7 @@ public class DesktopClientApplication extends Application {
         HBox actionButtons = new HBox(10, assignBtn, startBtn, completeBtn, releaseBtn, actionStatus);
         actionButtons.setAlignment(Pos.CENTER_LEFT);
         actionButtons.setPadding(new Insets(10));
-        actionButtons.setStyle("-fx-background-color: #1c1c1c;");
+        actionButtons.getStyleClass().add("panel-surface");
 
         VBox root = new VBox(actionButtons, tabs);
         VBox.setVgrow(tabs, Priority.ALWAYS);
@@ -2103,11 +2354,11 @@ public class DesktopClientApplication extends Application {
 
     private VBox buildDocumentTab(com.wmsdipl.desktop.model.Task task) {
         VBox content = new VBox(12);
-        content.setPadding(new Insets(16));
-        content.setStyle("-fx-background-color: #1c1c1c; -fx-text-fill: white;");
+        content.setPadding(new Insets(0, 16, 16, 16));
+        content.getStyleClass().add("dialog-surface");
 
         Label header = new Label(I18n.get("doc_tab.header"));
-        header.setStyle("-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: white;");
+        header.getStyleClass().add("sub-header");
 
         Label receiptLabel = new Label(I18n.format("doc_tab.receipt", (task.receiptDocNo() != null ? task.receiptDocNo() : "N/A")));
         Label taskTypeLabel = new Label(I18n.format("doc_tab.task_type", task.taskType()));
@@ -2115,21 +2366,21 @@ public class DesktopClientApplication extends Application {
         Label qtyLabel = new Label(I18n.format("doc_tab.qty", task.qtyAssigned()));
         
         Label skuCodeLabel = new Label(I18n.format("doc_tab.barcode", (task.skuCode() != null ? task.skuCode() : "N/A")));
-        skuCodeLabel.setStyle("-fx-text-fill: #2196F3; -fx-font-size: 14px; -fx-font-weight: bold;");
+        skuCodeLabel.getStyleClass().add("accent-label");
 
         Label palletCodeLabel = null;
         if ("PLACEMENT".equals(task.taskType())) {
             palletCodeLabel = new Label(I18n.format("doc_tab.pallet", (task.palletCode() != null ? task.palletCode() : "N/A")));
-            palletCodeLabel.setStyle("-fx-text-fill: #2196F3; -fx-font-size: 14px; -fx-font-weight: bold;");
+            palletCodeLabel.getStyleClass().add("accent-label");
         }
 
         Label assigneeLabel = new Label(I18n.format("doc_tab.assignee", (task.assignee() != null ? task.assignee() : I18n.get("doc_tab.unassigned"))));
 
-        receiptLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
-        taskTypeLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
-        statusLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
-        qtyLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
-        assigneeLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        receiptLabel.getStyleClass().add("form-label");
+        taskTypeLabel.getStyleClass().add("form-label");
+        statusLabel.getStyleClass().add("form-label");
+        qtyLabel.getStyleClass().add("form-label");
+        assigneeLabel.getStyleClass().add("form-label");
 
         content.getChildren().addAll(header, receiptLabel, taskTypeLabel, statusLabel, qtyLabel, skuCodeLabel);
         if (palletCodeLabel != null) {
@@ -2141,29 +2392,32 @@ public class DesktopClientApplication extends Application {
 
     private VBox buildFactTab(com.wmsdipl.desktop.model.Task task, Stage dialog) {
         VBox content = new VBox(16);
-        content.setPadding(new Insets(16));
-        content.setStyle("-fx-background-color: #1c1c1c;");
+        content.setPadding(new Insets(0, 16, 16, 16));
+        content.getStyleClass().add("dialog-surface");
 
         Label header = new Label(I18n.get("fact_tab.header"));
-        header.setStyle("-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: white;");
+        header.getStyleClass().addAll("sub-header", "fact-header-title");
+        HBox headerRow = new HBox(header);
+        headerRow.getStyleClass().add("fact-header-row");
+        headerRow.setAlignment(Pos.CENTER_LEFT);
 
         // Show target location for PLACEMENT tasks
         Label targetLocationInfo = null;
         if ("PLACEMENT".equals(task.taskType()) && task.targetLocationCode() != null) {
             targetLocationInfo = new Label(I18n.format("fact_tab.target_location", task.targetLocationCode()));
-            targetLocationInfo.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #4CAF50; -fx-padding: 8px; -fx-background-color: rgba(76,175,80,0.1); -fx-background-radius: 4px;");
+            targetLocationInfo.getStyleClass().add("success-banner");
         }
 
         // Scan fields (blue, 16px, with 📷 icon)
         Label palletLabel = new Label(I18n.get("terminal.scan.pallet"));
-        palletLabel.setStyle("-fx-text-fill: #2196F3; -fx-font-size: 14px;");
+        palletLabel.getStyleClass().add("accent-label");
         TextField palletField = new TextField();
         palletField.setPromptText(I18n.get("fact_tab.prompt.pallet"));
         palletField.getStyleClass().add("scan-field");
         palletField.setPrefHeight(48);
 
         Label barcodeLabel = new Label(I18n.get("terminal.scan.barcode"));
-        barcodeLabel.setStyle("-fx-text-fill: #2196F3; -fx-font-size: 14px;");
+        barcodeLabel.getStyleClass().add("accent-label");
         TextField barcodeField = new TextField();
         barcodeField.setPromptText(I18n.get("fact_tab.prompt.barcode"));
         barcodeField.getStyleClass().add("scan-field");
@@ -2171,7 +2425,7 @@ public class DesktopClientApplication extends Application {
 
         // Input fields (gray, 14px, with ✏️ icon)
         Label qtyLabel = new Label(I18n.get("terminal.scan.qty"));
-        qtyLabel.setStyle("-fx-text-fill: #9E9E9E; -fx-font-size: 14px;");
+        qtyLabel.getStyleClass().add("muted-label");
         TextField qtyField = new TextField();
         qtyField.setPromptText(I18n.get("fact_tab.prompt.qty"));
         qtyField.getStyleClass().add("input-field");
@@ -2188,10 +2442,10 @@ public class DesktopClientApplication extends Application {
 
         // Damage tracking section
         Label damageHeaderLabel = new Label(I18n.get("fact_tab.damage.header"));
-        damageHeaderLabel.setStyle("-fx-text-fill: #FF9800; -fx-font-size: 14px; -fx-font-weight: bold;");
+        damageHeaderLabel.getStyleClass().add("warning-label");
 
         CheckBox damageCheckBox = new CheckBox(I18n.get("fact_tab.damage.checkbox"));
-        damageCheckBox.setStyle("-fx-text-fill: white; -fx-font-size: 13px;");
+        damageCheckBox.getStyleClass().add("form-label");
 
         ComboBox<String> damageTypeCombo = new ComboBox<>();
         damageTypeCombo.getItems().addAll("PHYSICAL", "WATER", "EXPIRED", "OTHER");
@@ -2219,7 +2473,7 @@ public class DesktopClientApplication extends Application {
 
         // Lot tracking section
         Label lotHeaderLabel = new Label(I18n.get("fact_tab.lot.header"));
-        lotHeaderLabel.setStyle("-fx-text-fill: #9E9E9E; -fx-font-size: 14px; -fx-font-weight: bold;");
+        lotHeaderLabel.getStyleClass().add("muted-strong");
 
         TextField lotNumberField = new TextField();
         lotNumberField.setPromptText(I18n.get("fact_tab.lot.number_prompt"));
@@ -2238,7 +2492,7 @@ public class DesktopClientApplication extends Application {
         
         if (isPlacementTask) {
             locationLabel = new Label(I18n.get("fact_tab.location_label"));
-            locationLabel.setStyle("-fx-text-fill: #2196F3; -fx-font-size: 14px;");
+            locationLabel.getStyleClass().add("accent-label");
             locationField = new TextField();
             locationField.setPromptText(I18n.get("fact_tab.location_prompt"));
             locationField.getStyleClass().add("scan-field");
@@ -2246,7 +2500,7 @@ public class DesktopClientApplication extends Application {
         }
 
         Label commentLabel = new Label(I18n.get("fact_tab.comment_label"));
-        commentLabel.setStyle("-fx-text-fill: #9E9E9E; -fx-font-size: 14px;");
+        commentLabel.getStyleClass().add("muted-label");
         TextArea commentField = new TextArea();
         commentField.setPromptText(I18n.get("fact_tab.comment_prompt"));
         commentField.getStyleClass().add("input-field");
@@ -2275,6 +2529,7 @@ public class DesktopClientApplication extends Application {
 
         // Scan history table
         TableView<Scan> scanTable = new TableView<>();
+        enableAutoColumnSizing(scanTable);
         scanTable.setPlaceholder(new Label(I18n.get("fact_tab.no_scans")));
         scanTable.setPrefHeight(200);
         scanTable.getColumns().addAll(
@@ -2318,7 +2573,7 @@ public class DesktopClientApplication extends Application {
 
         // Submit action
         Label statusLabel = new Label("");
-        statusLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        statusLabel.getStyleClass().add("form-label");
 
         TextField finalLocationField2 = locationField;
         submitBtn.setOnAction(e -> {
@@ -2419,9 +2674,9 @@ public class DesktopClientApplication extends Application {
         }
 
         if (targetLocationInfo != null) {
-            content.getChildren().addAll(header, targetLocationInfo, form, new Label(I18n.get("fact_tab.scan_history")), scanTable);
+            content.getChildren().addAll(headerRow, targetLocationInfo, form, new Label(I18n.get("fact_tab.scan_history")), scanTable);
         } else {
-            content.getChildren().addAll(header, form, new Label(I18n.get("fact_tab.scan_history")), scanTable);
+            content.getChildren().addAll(headerRow, form, new Label(I18n.get("fact_tab.scan_history")), scanTable);
         }
         VBox.setVgrow(scanTable, Priority.ALWAYS);
 
@@ -2434,7 +2689,8 @@ public class DesktopClientApplication extends Application {
         javafx.scene.control.ScrollPane scrollPane = new javafx.scene.control.ScrollPane(content);
         scrollPane.setFitToWidth(true);
         scrollPane.setHbarPolicy(javafx.scene.control.ScrollPane.ScrollBarPolicy.NEVER);
-        scrollPane.setStyle("-fx-background: #1c1c1c; -fx-background-color: #1c1c1c;");
+        scrollPane.setPadding(Insets.EMPTY);
+        scrollPane.getStyleClass().add("transparent-scroll");
         
         VBox root = new VBox(scrollPane);
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
@@ -2491,14 +2747,14 @@ public class DesktopClientApplication extends Application {
         dialog.setTitle(I18n.get("pallet.create.title"));
 
         Label codeLabel = new Label(I18n.get("pallet.create.code_label"));
-        codeLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        codeLabel.getStyleClass().add("form-label");
         
         TextField codeField = new TextField();
         codeField.setPromptText(I18n.get("pallet.create.code_prompt"));
         codeField.setPrefWidth(300);
         
         Label statusLabel = new Label("");
-        statusLabel.setStyle("-fx-text-fill: white; -fx-font-size: 12px;");
+        statusLabel.getStyleClass().add("form-hint");
         
         Button createBtn = new Button(I18n.get("common.create"));
         createBtn.getStyleClass().add("refresh-btn");
@@ -2558,7 +2814,7 @@ public class DesktopClientApplication extends Application {
         VBox layout = new VBox(12, codeLabel, codeField, statusLabel, buttonBox);
         layout.setPadding(new Insets(24));
         layout.setAlignment(Pos.CENTER_LEFT);
-        layout.setStyle("-fx-background-color: #1c1c1c;");
+        layout.getStyleClass().add("dialog-surface");
         
         Scene scene = new Scene(layout, 400, 200);
         applyStyles(scene);
@@ -2574,24 +2830,24 @@ public class DesktopClientApplication extends Application {
         dialog.setTitle(I18n.get("sku.create.title"));
 
         Label codeLabel = new Label(I18n.get("sku.create.code_label"));
-        codeLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        codeLabel.getStyleClass().add("form-label");
         TextField codeField = new TextField();
         codeField.setPromptText(I18n.get("sku.create.code_prompt"));
         codeField.setPrefWidth(300);
 
         Label nameLabel = new Label(I18n.get("sku.create.name_label"));
-        nameLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        nameLabel.getStyleClass().add("form-label");
         TextField nameField = new TextField();
         nameField.setPromptText(I18n.get("sku.create.name_prompt"));
         nameField.setPrefWidth(300);
 
         Label uomLabel = new Label(I18n.get("sku.create.uom_label"));
-        uomLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        uomLabel.getStyleClass().add("form-label");
         TextField uomField = new TextField(I18n.get("sku.field.uom_default"));
         uomField.setPrefWidth(300);
 
         Label statusLabel = new Label("");
-        statusLabel.setStyle("-fx-text-fill: white; -fx-font-size: 12px;");
+        statusLabel.getStyleClass().add("form-hint");
 
         Button createBtn = new Button(I18n.get("common.create"));
         createBtn.getStyleClass().add("refresh-btn");
@@ -2669,7 +2925,7 @@ public class DesktopClientApplication extends Application {
         );
         layout.setPadding(new Insets(24));
         layout.setAlignment(Pos.CENTER_LEFT);
-        layout.setStyle("-fx-background-color: #1c1c1c;");
+        layout.getStyleClass().add("dialog-surface");
 
         Scene scene = new Scene(layout, 400, 350);
         applyStyles(scene);
@@ -2680,7 +2936,7 @@ public class DesktopClientApplication extends Application {
     }
 
     private boolean showDiscrepancyConfirmationDialog() {
-        Alert alert = new Alert(AlertType.CONFIRMATION);
+        Alert alert = createAlert(AlertType.CONFIRMATION);
         alert.setTitle(I18n.get("alert.discrepancy.title"));
         alert.setHeaderText(I18n.get("alert.discrepancy.header"));
         alert.setContentText(I18n.get("alert.discrepancy.content"));
@@ -2701,6 +2957,7 @@ public class DesktopClientApplication extends Application {
 
     private void openZoneCreationDialog(ListView<com.wmsdipl.desktop.model.Zone> zonesView) {
         Dialog<com.wmsdipl.desktop.model.Zone> dialog = new Dialog<>();
+        styleDialog(dialog);
         dialog.setTitle(I18n.get("zone.create.title"));
         dialog.setHeaderText(I18n.get("zone.create.header"));
         
@@ -2765,6 +3022,7 @@ public class DesktopClientApplication extends Application {
         if (zone == null) return;
         
         Dialog<com.wmsdipl.desktop.model.Zone> dialog = new Dialog<>();
+        styleDialog(dialog);
         dialog.setTitle(I18n.get("zone.edit.title"));
         dialog.setHeaderText(I18n.format("zone.edit.header", zone.code()));
         
@@ -2852,6 +3110,7 @@ public class DesktopClientApplication extends Application {
 
     private void openLocationCreationDialog(TableView<Location> locTable, ListView<com.wmsdipl.desktop.model.Zone> zonesView) {
         Dialog<Location> dialog = new Dialog<>();
+        styleDialog(dialog);
         dialog.setTitle(I18n.get("location.create.title"));
         dialog.setHeaderText(I18n.get("location.create.header"));
         
@@ -2968,6 +3227,7 @@ public class DesktopClientApplication extends Application {
         if (location == null) return;
         
         Dialog<Location> dialog = new Dialog<>();
+        styleDialog(dialog);
         dialog.setTitle(I18n.get("location.edit.title"));
         dialog.setHeaderText(I18n.format("location.edit.header", location.code()));
         
@@ -3139,7 +3399,7 @@ public class DesktopClientApplication extends Application {
 
     // Simple alert helpers for topology management
     private void showInfo(String message) {
-        Alert alert = new Alert(AlertType.INFORMATION);
+        Alert alert = createAlert(AlertType.INFORMATION);
         alert.setTitle(I18n.get("common.alert.info"));
         alert.setHeaderText(null);
         alert.setContentText(message);
@@ -3147,7 +3407,7 @@ public class DesktopClientApplication extends Application {
     }
 
     private void showError(String message) {
-        Alert alert = new Alert(AlertType.ERROR);
+        Alert alert = createAlert(AlertType.ERROR);
         alert.setTitle(I18n.get("common.alert.error"));
         alert.setHeaderText(null);
         alert.setContentText(message);
@@ -3155,7 +3415,7 @@ public class DesktopClientApplication extends Application {
     }
 
     private boolean showConfirm(String title, String message) {
-        Alert alert = new Alert(AlertType.CONFIRMATION);
+        Alert alert = createAlert(AlertType.CONFIRMATION);
         alert.setTitle(I18n.get("common.alert.confirm"));
         alert.setHeaderText(title);
         alert.setContentText(message);
@@ -3177,6 +3437,8 @@ public class DesktopClientApplication extends Application {
         // Show login dialog again
         if (showLoginDialog()) {
             // Refresh the navigation after successful re-login
+            refreshWorkspaceUserChip();
+            startTopStatusTimer();
             shell.setLeft(buildNav());
             showReceiptsPane();
         } else {
@@ -3190,159 +3452,294 @@ public class DesktopClientApplication extends Application {
         shell.setLeft(buildNav());
 
         Label header = new Label(I18n.get("analytics.header"));
-        header.setStyle("-fx-text-fill: white; -fx-font-size: 20px; -fx-font-weight: bold;");
+        header.getStyleClass().add("section-header");
 
-        // Period selection
-        ComboBox<String> periodCombo = new ComboBox<>();
-        periodCombo.getItems().addAll(I18n.get("analytics.range.today"), I18n.get("analytics.range.week"), I18n.get("analytics.range.month"));
-        periodCombo.setValue(I18n.get("analytics.range.today"));
-        periodCombo.setPrefHeight(40);
+        LocalDate today = LocalDate.now();
+        DatePicker fromDatePicker = new DatePicker(today.minusDays(6));
+        DatePicker toDatePicker = new DatePicker(today);
+        fromDatePicker.setPrefHeight(40);
+        toDatePicker.setPrefHeight(40);
+        fromDatePicker.setPrefWidth(150);
+        toDatePicker.setPrefWidth(150);
+        fromDatePicker.setEditable(false);
+        toDatePicker.setEditable(false);
+        fromDatePicker.setPromptText(I18n.get("analytics.lbl.from"));
+        toDatePicker.setPromptText(I18n.get("analytics.lbl.to"));
 
         Button refreshBtn = new Button(I18n.get("analytics.btn.refresh"));
         refreshBtn.getStyleClass().add("refresh-btn");
         refreshBtn.setPrefHeight(40);
 
-        HBox controls = new HBox(10, new Label(I18n.get("analytics.lbl.period")), periodCombo, refreshBtn);
-        controls.setAlignment(Pos.CENTER_LEFT);
-        controls.setStyle("-fx-text-fill: white;");
+        Button exportBtn = new Button(I18n.get("analytics.btn.export"));
+        exportBtn.getStyleClass().add("refresh-btn");
+        exportBtn.setPrefHeight(40);
 
-        // Analytics display area
+        Label fromLabel = new Label(I18n.get("analytics.lbl.from"));
+        fromLabel.getStyleClass().add("muted-label");
+        Label toLabel = new Label(I18n.get("analytics.lbl.to"));
+        toLabel.getStyleClass().add("muted-label");
+
+        HBox controls = new HBox(
+            10,
+            fromLabel,
+            fromDatePicker,
+            toLabel,
+            toDatePicker,
+            refreshBtn,
+            exportBtn
+        );
+        controls.setAlignment(Pos.CENTER_LEFT);
+
         VBox analyticsBox = new VBox(16);
         analyticsBox.setPadding(new Insets(16));
-        analyticsBox.setStyle("-fx-background-color: #2c2c2c; -fx-background-radius: 8px;");
-
-        Label loadingLabel = new Label(I18n.get("analytics.lbl.loading"));
-        loadingLabel.setStyle("-fx-text-fill: white; -fx-font-size: 16px;");
-        analyticsBox.getChildren().add(loadingLabel);
+        analyticsBox.getStyleClass().add("analytics-box");
 
         Runnable loadAnalytics = () -> {
-            String period = periodCombo.getValue();
-            
+            LocalDate fromDate = fromDatePicker.getValue();
+            LocalDate toDate = toDatePicker.getValue();
+            if (fromDate == null || toDate == null) {
+                analyticsBox.getChildren().setAll(createAnalyticsInfoLabel(I18n.get("analytics.error.invalid_range"), "#FF5252"));
+                return;
+            }
+            if (fromDate.isAfter(toDate)) {
+                analyticsBox.getChildren().setAll(createAnalyticsInfoLabel(I18n.get("analytics.error.invalid_range"), "#FF5252"));
+                return;
+            }
+
+            refreshBtn.setDisable(true);
+            exportBtn.setDisable(true);
+            analyticsBox.getChildren().setAll(createAnalyticsInfoLabel(I18n.get("analytics.lbl.loading"), "white"));
+
             CompletableFuture.supplyAsync(() -> {
                 try {
-                    if (period.equals(I18n.get("analytics.range.today"))) {
-                        return apiClient.getTodayAnalytics();
-                    } else if (period.equals(I18n.get("analytics.range.week"))) {
-                        return apiClient.getWeekAnalytics();
-                    } else if (period.equals(I18n.get("analytics.range.month"))) {
-                        return apiClient.getMonthAnalytics();
-                    } else {
-                        return apiClient.getTodayAnalytics();
-                    }
+                    Map<String, Object> analytics = apiClient.getReceivingAnalytics(fromDate, toDate);
+                    Map<String, Object> health = apiClient.getReceivingHealth(fromDate, toDate, 4);
+                    return Map.of("analytics", analytics, "health", health);
                 } catch (Exception ex) {
                     throw new RuntimeException(ex);
                 }
             }).whenComplete((data, error) -> Platform.runLater(() -> {
+                refreshBtn.setDisable(false);
+                exportBtn.setDisable(false);
                 analyticsBox.getChildren().clear();
-                
+
                 if (error != null) {
-                    Label errorLabel = new Label(I18n.format("common.error", error.getMessage()));
-                    errorLabel.setStyle("-fx-text-fill: #FF5252; -fx-font-size: 14px;");
-                    analyticsBox.getChildren().add(errorLabel);
+                    analyticsBox.getChildren().add(createAnalyticsInfoLabel(
+                        I18n.format("common.error", error.getMessage()),
+                        "#FF5252"
+                    ));
                     return;
                 }
 
-                // Cast data to Map
                 @SuppressWarnings("unchecked")
-                Map<String, Object> dataMap = (Map<String, Object>) data;
-
-                // Display analytics data
-                VBox metricsBox = new VBox(12);
-                metricsBox.setStyle("-fx-text-fill: white;");
-
-                // Receipts by status
-                Label receiptsHeader = new Label(I18n.get("analytics.lbl.receipts_by_status"));
-                receiptsHeader.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #2196F3;");
-                
+                Map<String, ?> responseMap = (Map<String, ?>) data;
                 @SuppressWarnings("unchecked")
-                Map<String, Integer> receiptsByStatus = (Map<String, Integer>) dataMap.get("receiptsByStatus");
-                if (receiptsByStatus != null) {
-                    receiptsByStatus.forEach((status, count) -> {
-                        Label statusLabel = new Label("  " + status + ": " + count);
-                        statusLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
-                        metricsBox.getChildren().add(statusLabel);
-                    });
-                }
-
-                // Discrepancies by type
-                Label discrepanciesHeader = new Label(I18n.get("analytics.lbl.discrepancies"));
-                discrepanciesHeader.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #FF9800;");
-                
+                Map<String, Object> dataMap = responseMap.get("analytics") instanceof Map<?, ?> map
+                    ? (Map<String, Object>) map
+                    : Map.of();
                 @SuppressWarnings("unchecked")
-                Map<String, Integer> discrepanciesByType = (Map<String, Integer>) dataMap.get("discrepanciesByType");
-                if (discrepanciesByType != null) {
-                    discrepanciesByType.forEach((type, count) -> {
-                        Label typeLabel = new Label("  " + type + ": " + count);
-                        typeLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
-                        metricsBox.getChildren().add(typeLabel);
-                    });
-                }
+                Map<String, Object> healthMap = responseMap.get("health") instanceof Map<?, ?> map
+                    ? (Map<String, Object>) map
+                    : Map.of();
 
-                // Pallets by status
-                Label palletsHeader = new Label(I18n.get("analytics.lbl.pallets_by_status"));
-                palletsHeader.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #4CAF50;");
-                
-                @SuppressWarnings("unchecked")
-                Map<String, Integer> palletsByStatus = (Map<String, Integer>) dataMap.get("palletsByStatus");
-                if (palletsByStatus != null) {
-                    palletsByStatus.forEach((status, count) -> {
-                        Label statusLabel = new Label("  " + status + ": " + count);
-                        statusLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
-                        metricsBox.getChildren().add(statusLabel);
-                    });
-                }
+                Map<String, Integer> receiptsByStatus = extractCountMap(dataMap.get("receiptsByStatus"));
+                Map<String, Integer> discrepanciesByType = extractCountMap(dataMap.get("discrepanciesByType"));
+                Map<String, Integer> palletsByStatus = extractCountMap(dataMap.get("palletsByStatus"));
 
-                // Key metrics
-                Label metricsHeader = new Label(I18n.get("analytics.lbl.key_metrics"));
-                metricsHeader.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #9C27B0;");
-                
-                Object discrepancyRateObj = dataMap.get("discrepancyRate");
-                Double discrepancyRate = discrepancyRateObj instanceof Number 
-                    ? ((Number) discrepancyRateObj).doubleValue() 
-                    : 0.0;
-                Label discrepancyLabel = new Label(String.format("  " + I18n.get("analytics.lbl.discrepancy_rate") + ": %.2f%%", discrepancyRate));
-                discrepancyLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
-                
-                Object damagedRateObj = dataMap.get("damagedPalletsRate");
-                Double damagedRate = damagedRateObj instanceof Number 
-                    ? ((Number) damagedRateObj).doubleValue() 
-                    : 0.0;
-                Label damagedLabel = new Label(String.format("  " + I18n.get("analytics.lbl.damage_rate") + ": %.2f%%", damagedRate));
-                damagedLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
-                
-                Object avgTimeObj = dataMap.get("avgReceivingTimeHours");
-                Double avgTime = avgTimeObj instanceof Number 
-                    ? ((Number) avgTimeObj).doubleValue() 
-                    : 0.0;
-                Label avgTimeLabel = new Label(String.format("  " + I18n.get("analytics.lbl.avg_time") + ": %.2f " + I18n.get("analytics.lbl.hours"), avgTime));
-                avgTimeLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+                double discrepancyRate = extractDouble(dataMap.get("discrepancyRate"));
+                double damagedRate = extractDouble(dataMap.get("damagedPalletsRate"));
+                double avgTime = extractDouble(dataMap.get("avgReceivingTimeHours"));
+                double avgPlacingTime = extractDouble(dataMap.get("avgPlacingTimeHours"));
+                long stuckReceipts = extractLong(healthMap.get("stuckReceivingReceipts")) + extractLong(healthMap.get("stuckPlacingReceipts"));
+                long staleTasks = extractLong(healthMap.get("staleTasks"));
+                String fromDateValue = Objects.toString(dataMap.get("fromDate"), fromDate.toString());
+                String toDateValue = Objects.toString(dataMap.get("toDate"), toDate.toString());
 
-                metricsBox.getChildren().addAll(
-                    receiptsHeader, 
-                    new Label(""), // spacer
-                    discrepanciesHeader, 
-                    new Label(""), // spacer
-                    palletsHeader,
-                    new Label(""), // spacer
-                    metricsHeader,
-                    discrepancyLabel,
-                    damagedLabel,
-                    avgTimeLabel
+                Label periodLabel = new Label(
+                    I18n.format("analytics.lbl.period_value", fromDateValue, toDateValue)
                 );
+                periodLabel.getStyleClass().add("muted-label");
 
-                analyticsBox.getChildren().add(metricsBox);
+                HBox keyMetricsRow = new HBox(
+                    12,
+                    createAnalyticsMetricCard(I18n.get("analytics.lbl.discrepancy_rate"), String.format("%.2f%%", discrepancyRate), "#FF9800"),
+                    createAnalyticsMetricCard(I18n.get("analytics.lbl.damage_rate"), String.format("%.2f%%", damagedRate), "#E53935"),
+                    createAnalyticsMetricCard(
+                        I18n.get("analytics.lbl.avg_time"),
+                        String.format("%.2f %s", avgTime, I18n.get("analytics.lbl.hours")),
+                        "#29B6F6"
+                    ),
+                    createAnalyticsMetricCard(
+                        I18n.get("analytics.lbl.avg_placing_time"),
+                        String.format("%.2f %s", avgPlacingTime, I18n.get("analytics.lbl.hours")),
+                        "#66BB6A"
+                    ),
+                    createAnalyticsMetricCard(
+                        I18n.get("analytics.lbl.stuck"),
+                        "R:" + stuckReceipts + " T:" + staleTasks,
+                        "#8E24AA"
+                    )
+                );
+                keyMetricsRow.setAlignment(Pos.CENTER_LEFT);
+
+                HBox chartsRow = new HBox(
+                    16,
+                    createAnalyticsChartBox(I18n.get("analytics.lbl.receipts_by_status"), receiptsByStatus),
+                    createAnalyticsChartBox(I18n.get("analytics.lbl.discrepancies"), discrepanciesByType),
+                    createAnalyticsChartBox(I18n.get("analytics.lbl.pallets_by_status"), palletsByStatus)
+                );
+                chartsRow.setAlignment(Pos.TOP_LEFT);
+                chartsRow.setFillHeight(true);
+
+                analyticsBox.getChildren().addAll(periodLabel, keyMetricsRow, chartsRow);
             }));
         };
 
         refreshBtn.setOnAction(e -> loadAnalytics.run());
+        exportBtn.setOnAction(e -> {
+            LocalDate fromDate = fromDatePicker.getValue();
+            LocalDate toDate = toDatePicker.getValue();
+            if (fromDate == null || toDate == null || fromDate.isAfter(toDate)) {
+                showError(I18n.get("analytics.error.invalid_range"));
+                return;
+            }
+
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle(I18n.get("analytics.export.dialog.title"));
+            chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("CSV files (*.csv)", "*.csv"));
+            chooser.setInitialFileName("receiving-analytics-" + fromDate + "-" + toDate + ".csv");
+            File file = chooser.showSaveDialog(shell.getScene().getWindow());
+            if (file == null) {
+                return;
+            }
+
+            exportBtn.setDisable(true);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    byte[] csv = apiClient.exportReceivingAnalyticsCsv(fromDate, toDate);
+                    Files.write(file.toPath(), csv);
+                } catch (IOException | InterruptedException ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((unused, error) -> Platform.runLater(() -> {
+                exportBtn.setDisable(false);
+                if (error != null) {
+                    showError(I18n.format("common.error", error.getMessage()));
+                } else {
+                    showInfo(I18n.format("analytics.export.success", file.getAbsolutePath()));
+                }
+            }));
+        });
         loadAnalytics.run(); // Initial load
 
         VBox layout = new VBox(16, header, controls, analyticsBox);
         layout.setPadding(new Insets(24));
-        layout.setStyle("-fx-background-color: #1c1c1c;");
+        layout.getStyleClass().add("page-root");
         VBox.setVgrow(analyticsBox, Priority.ALWAYS);
 
         setContent(layout);
+    }
+
+    private Label createAnalyticsInfoLabel(String text, String color) {
+        Label label = new Label(text);
+        label.setStyle("-fx-text-fill: " + color + "; -fx-font-size: 14px;");
+        label.getStyleClass().add("status-label");
+        return label;
+    }
+
+    private VBox createAnalyticsMetricCard(String title, String value, String accentColor) {
+        Label titleLabel = new Label(title);
+        titleLabel.getStyleClass().add("metric-title");
+
+        Label valueLabel = new Label(value);
+        valueLabel.getStyleClass().add("metric-value");
+
+        VBox card = new VBox(6, titleLabel, valueLabel);
+        card.getStyleClass().add("metric-card");
+        card.setPadding(new Insets(12));
+        card.setPrefWidth(200);
+        card.setStyle(
+            "-fx-border-color: " + accentColor + "; " +
+            "-fx-border-width: 0 0 0 4;"
+        );
+        return card;
+    }
+
+    private VBox createAnalyticsChartBox(String title, Map<String, Integer> values) {
+        Label titleLabel = new Label(title);
+        titleLabel.getStyleClass().add("sub-header");
+
+        if (values.isEmpty()) {
+            Label emptyLabel = new Label(I18n.get("analytics.lbl.no_data"));
+            emptyLabel.getStyleClass().add("muted-label");
+            VBox box = new VBox(8, titleLabel, emptyLabel);
+            box.getStyleClass().add("chart-card");
+            box.setPadding(new Insets(12));
+            box.setPrefWidth(320);
+            return box;
+        }
+
+        PieChart chart = new PieChart();
+        chart.setLabelsVisible(true);
+        chart.setLegendVisible(false);
+        chart.setPrefSize(300, 250);
+        values.forEach((key, count) -> chart.getData().add(new PieChart.Data(key + " (" + count + ")", count)));
+
+        VBox details = new VBox(4);
+        values.forEach((key, count) -> {
+            Label line = new Label(key + ": " + count);
+            line.getStyleClass().add("muted-label");
+            details.getChildren().add(line);
+        });
+
+        VBox box = new VBox(8, titleLabel, chart, details);
+        box.getStyleClass().add("chart-card");
+        box.setPadding(new Insets(12));
+        box.setPrefWidth(320);
+        return box;
+    }
+
+    private double extractDouble(Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        return 0.0;
+    }
+
+    private long extractLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        return 0L;
+    }
+
+    private Map<String, Integer> extractCountMap(Object value) {
+        if (!(value instanceof Map<?, ?> rawMap)) {
+            return Map.of();
+        }
+
+        return rawMap.entrySet().stream()
+            .filter(entry -> entry.getKey() instanceof String)
+            .map(entry -> {
+                String key = (String) entry.getKey();
+                Integer count = 0;
+                if (entry.getValue() instanceof Number number) {
+                    count = number.intValue();
+                }
+                return Map.entry(key, count);
+            })
+            .sorted(
+                Comparator
+                    .<Map.Entry<String, Integer>>comparingInt(Map.Entry::getValue)
+                    .reversed()
+                    .thenComparing(Map.Entry::getKey)
+            )
+            .collect(Collectors.toMap(
+                Map.Entry::getKey,
+                Map.Entry::getValue,
+                (left, right) -> left,
+                LinkedHashMap::new
+            ));
     }
 
     private ComboBox<String> createSearchableUserComboBox() {
@@ -3375,10 +3772,10 @@ public class DesktopClientApplication extends Application {
 
         VBox content = new VBox(12);
         content.setPadding(new Insets(16));
-        content.setStyle("-fx-background-color: #1c1c1c;");
+        content.getStyleClass().add("dialog-surface");
 
         Label label = new Label(I18n.get("assign.label"));
-        label.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        label.getStyleClass().add("form-label");
 
         ComboBox<String> userCombo = createSearchableUserComboBox();
         userCombo.setPrefWidth(250);
@@ -3460,28 +3857,28 @@ public class DesktopClientApplication extends Application {
 
         VBox content = new VBox(16);
         content.setPadding(new Insets(20));
-        content.setStyle("-fx-background-color: #1c1c1c;");
+        content.getStyleClass().add("dialog-surface");
 
         Label header = new Label(I18n.get("bulk.header"));
-        header.setStyle("-fx-font-size: 18px; -fx-font-weight: bold; -fx-text-fill: white;");
+        header.getStyleClass().add("sub-header");
 
         // Selected tasks info
         var selectedTasks = taskTable.getSelectionModel().getSelectedItems();
         Label infoLabel = new Label(I18n.format("bulk.selected_count", selectedTasks.size()));
-        infoLabel.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
+        infoLabel.getStyleClass().add("status-success");
 
         TabPane tabs = new TabPane();
-        tabs.setStyle("-fx-background-color: #2c2c2c;");
+        tabs.getStyleClass().add("panel-tabs");
 
         // Tab 1: Bulk Assign
         Tab assignTab = new Tab(I18n.get("bulk.tab.assign"));
         assignTab.setClosable(false);
         VBox assignBox = new VBox(12);
         assignBox.setPadding(new Insets(16));
-        assignBox.setStyle("-fx-background-color: #2c2c2c;");
+        assignBox.getStyleClass().add("panel-surface-alt");
 
         Label assignLabel = new Label(I18n.get("bulk.assign.label"));
-        assignLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        assignLabel.getStyleClass().add("form-label");
         
         ComboBox<String> assignCombo = createSearchableUserComboBox();
         assignCombo.setPrefWidth(300);
@@ -3524,10 +3921,10 @@ public class DesktopClientApplication extends Application {
         priorityTab.setClosable(false);
         VBox priorityBox = new VBox(12);
         priorityBox.setPadding(new Insets(16));
-        priorityBox.setStyle("-fx-background-color: #2c2c2c;");
+        priorityBox.getStyleClass().add("panel-surface-alt");
 
         Label priorityLabel = new Label(I18n.get("bulk.priority.label"));
-        priorityLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        priorityLabel.getStyleClass().add("form-label");
         TextField priorityField = new TextField();
         priorityField.setPromptText(I18n.get("bulk.priority.prompt"));
         priorityField.setPrefHeight(40);
@@ -3570,10 +3967,10 @@ public class DesktopClientApplication extends Application {
         cancelTab.setClosable(false);
         VBox cancelBox = new VBox(12);
         cancelBox.setPadding(new Insets(16));
-        cancelBox.setStyle("-fx-background-color: #2c2c2c;");
+        cancelBox.getStyleClass().add("panel-surface-alt");
 
         Label cancelWarning = new Label(I18n.format("bulk.cancel.warning", selectedTasks.size()));
-        cancelWarning.setStyle("-fx-text-fill: #FF9800; -fx-font-size: 14px; -fx-font-weight: bold;");
+        cancelWarning.getStyleClass().add("warning-label");
 
         Button cancelTasksBtn = new Button(I18n.get("bulk.cancel.button"));
         cancelTasksBtn.getStyleClass().add("btn-danger");
@@ -3705,23 +4102,23 @@ public class DesktopClientApplication extends Application {
 
         VBox content = new VBox(12);
         content.setPadding(new Insets(16));
-        content.setStyle("-fx-background-color: #2c2c2c;");
+        content.getStyleClass().add("dialog-surface-alt");
 
         Label header = new Label(I18n.get("pallet.bulk.header"));
-        header.setStyle("-fx-text-fill: white; -fx-font-size: 16px; -fx-font-weight: bold;");
+        header.getStyleClass().add("sub-header");
 
         Label prefixLabel = new Label(I18n.get("pallet.bulk.prefix_label"));
-        prefixLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        prefixLabel.getStyleClass().add("form-label");
         TextField prefixField = new TextField("PLT");
         prefixField.setPrefHeight(40);
 
         Label startLabel = new Label(I18n.get("pallet.bulk.start_label"));
-        startLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        startLabel.getStyleClass().add("form-label");
         TextField startField = new TextField("100");
         startField.setPrefHeight(40);
 
         Label countLabel = new Label(I18n.get("pallet.bulk.count_label"));
-        countLabel.setStyle("-fx-text-fill: white; -fx-font-size: 14px;");
+        countLabel.getStyleClass().add("form-label");
         TextField countField = new TextField("50");
         countField.setPrefHeight(40);
 
@@ -3758,11 +4155,57 @@ public class DesktopClientApplication extends Application {
         dialog.showAndWait();
     }
 
+    private Alert createAlert(AlertType type) {
+        Alert alert = new Alert(type);
+        styleDialogPane(alert.getDialogPane());
+        return alert;
+    }
+
+    private Alert createAlert(AlertType type, String contentText) {
+        Alert alert = new Alert(type, contentText);
+        styleDialogPane(alert.getDialogPane());
+        return alert;
+    }
+
+    private void styleDialog(Dialog<?> dialog) {
+        styleDialogPane(dialog.getDialogPane());
+    }
+
+    private void styleDialogPane(DialogPane dialogPane) {
+        var cssUrl = getClass().getResource("/style.css");
+        if (cssUrl != null) {
+            String css = cssUrl.toExternalForm();
+            if (!dialogPane.getStylesheets().contains(css)) {
+                dialogPane.getStylesheets().add(css);
+            }
+        }
+    }
+
+    @Override
+    public void stop() {
+        if (topStatusTimeline != null) {
+            topStatusTimeline.stop();
+        }
+    }
+
     private void applyStyles(Scene scene) {
         var cssUrl = getClass().getResource("/style.css");
         if (cssUrl != null) {
+            String css = cssUrl.toExternalForm();
             scene.getStylesheets().clear();
-            scene.getStylesheets().add(cssUrl.toExternalForm());
+            scene.getStylesheets().add(css);
+        }
+    }
+
+    private void applyStyles(javafx.scene.Parent parent) {
+        var cssUrl = getClass().getResource("/style.css");
+        if (cssUrl != null) {
+            String css = cssUrl.toExternalForm();
+            if (!parent.getStylesheets().contains(css)) {
+                parent.getStylesheets().add(css);
+            }
         }
     }
 }
+
+

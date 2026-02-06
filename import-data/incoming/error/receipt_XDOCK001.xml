@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Receipt>
+    <Header>
+        <DocNo>RCV-XDOCK-001</DocNo>
+        <DocDate>2026-01-12</DocDate>
+        <Supplier>ООО "Экспресс Логистика"</Supplier>
+        <MessageId>MSG-XDOCK-001</MessageId>
+        <ExternalKey>EXT-XDOCK-001</ExternalKey>
+        <CrossDock>true</CrossDock>
+    </Header>
+    <Lines>
+        <Line>
+            <LineNo>1</LineNo>
+            <SKU>
+                <Code>SKU-URGENT-001</Code>
+                <Name>Срочная отправка - документы</Name>
+                <UOM>ШТ</UOM>
+            </SKU>
+            <Packaging>
+                <Code>BOX-SMALL</Code>
+                <Name>Коробка малая</Name>
+                <Type>BOX</Type>
+            </Packaging>
+            <QtyExpected>5</QtyExpected>
+            <SSCCExpected>00312345678901234569</SSCCExpected>
+        </Line>
+    </Lines>
+</Receipt>

@@ -13,6 +13,9 @@ import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.TaskRepository;
 import com.wmsdipl.core.service.workflow.PlacementWorkflowService;
 import com.wmsdipl.core.service.workflow.ReceivingWorkflowService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -58,6 +61,30 @@ public class TaskService {
     @Transactional(readOnly = true)
     public List<Task> findAll() {
         return taskRepository.findAll();
+    }
+
+    @Transactional(readOnly = true)
+    public Page<Task> findFiltered(
+            String assignee,
+            TaskStatus status,
+            TaskType taskType,
+            Long receiptId,
+            Pageable pageable
+    ) {
+        Specification<Task> spec = Specification.where(null);
+        if (assignee != null && !assignee.isBlank()) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("assignee"), assignee));
+        }
+        if (status != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), status));
+        }
+        if (taskType != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("taskType"), taskType));
+        }
+        if (receiptId != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("receipt").get("id"), receiptId));
+        }
+        return taskRepository.findAll(spec, pageable);
     }
 
     @Transactional(readOnly = true)

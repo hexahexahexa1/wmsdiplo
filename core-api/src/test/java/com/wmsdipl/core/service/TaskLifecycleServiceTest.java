@@ -115,6 +115,7 @@ class TaskLifecycleServiceTest {
     void shouldCompleteTask_WhenQtyMatches() {
         // Given
         when(testTask.getQtyDone()).thenReturn(BigDecimal.TEN);
+        when(testTask.getStatus()).thenReturn(TaskStatus.IN_PROGRESS);
         when(taskRepository.findById(1L)).thenReturn(Optional.of(testTask));
         when(taskRepository.save(any(Task.class))).thenReturn(testTask);
 
@@ -136,6 +137,8 @@ class TaskLifecycleServiceTest {
         ReceiptLine line = mock(ReceiptLine.class);
         
         when(testTask.getQtyDone()).thenReturn(BigDecimal.valueOf(8));
+        when(testTask.getTaskType()).thenReturn(TaskType.RECEIVING);
+        when(testTask.getStatus()).thenReturn(TaskStatus.IN_PROGRESS);
         when(testTask.getReceipt()).thenReturn(receipt);
         when(testTask.getLine()).thenReturn(line);
         when(taskRepository.findById(1L)).thenReturn(Optional.of(testTask));
@@ -211,6 +214,33 @@ class TaskLifecycleServiceTest {
     }
 
     @Test
+    void shouldThrowException_WhenAssignFromNonNewStatus() {
+        when(testTask.getStatus()).thenReturn(TaskStatus.IN_PROGRESS);
+        when(taskRepository.findById(1L)).thenReturn(Optional.of(testTask));
+
+        assertThrows(IllegalStateException.class, () -> taskLifecycleService.assign(1L, "user1", "admin"));
+        verify(taskRepository, never()).save(any(Task.class));
+    }
+
+    @Test
+    void shouldThrowException_WhenStartFromCompletedStatus() {
+        when(testTask.getStatus()).thenReturn(TaskStatus.COMPLETED);
+        when(taskRepository.findById(1L)).thenReturn(Optional.of(testTask));
+
+        assertThrows(IllegalStateException.class, () -> taskLifecycleService.start(1L));
+        verify(taskRepository, never()).save(any(Task.class));
+    }
+
+    @Test
+    void shouldThrowException_WhenCancelCompletedTask() {
+        when(testTask.getStatus()).thenReturn(TaskStatus.COMPLETED);
+        when(taskRepository.findById(1L)).thenReturn(Optional.of(testTask));
+
+        assertThrows(IllegalStateException.class, () -> taskLifecycleService.cancel(1L));
+        verify(taskRepository, never()).save(any(Task.class));
+    }
+
+    @Test
     void shouldNotAutoStartTask_WhenStatusIsCompleted() {
         // Given
         when(testTask.getStatus()).thenReturn(TaskStatus.COMPLETED);
@@ -226,6 +256,7 @@ class TaskLifecycleServiceTest {
     void shouldThrowException_WhenCompletingPlacementTaskManually() {
         // Given
         when(taskRepository.findById(1L)).thenReturn(Optional.of(testTask));
+        when(testTask.getStatus()).thenReturn(TaskStatus.IN_PROGRESS);
         when(testTask.getTaskType()).thenReturn(TaskType.PLACEMENT);
 
         // When & Then
@@ -237,6 +268,7 @@ class TaskLifecycleServiceTest {
     void shouldCompleteReceivingTaskManually() {
         // Given
         when(taskRepository.findById(1L)).thenReturn(Optional.of(testTask));
+        when(testTask.getStatus()).thenReturn(TaskStatus.IN_PROGRESS);
         when(testTask.getTaskType()).thenReturn(TaskType.RECEIVING);
         when(testTask.getQtyDone()).thenReturn(BigDecimal.TEN);
         when(taskRepository.save(any(Task.class))).thenReturn(testTask);

@@ -1,6 +1,7 @@
 package com.wmsdipl.core.integration;
 
 import com.wmsdipl.contracts.dto.*;
+import com.wmsdipl.contracts.dto.DamageType;
 import com.wmsdipl.core.domain.*;
 import com.wmsdipl.core.repository.*;
 import com.wmsdipl.core.service.BulkOperationsService;
@@ -146,6 +147,7 @@ class ReceivingImprovementsIT {
         line.setReceipt(receipt);
         line.setLineNo(1);
         line.setSkuId(testSku.getId());
+        line.setUom("PCS");
         line.setQtyExpected(new BigDecimal("50"));
 
         receipt.addLine(line);
@@ -172,6 +174,7 @@ class ReceivingImprovementsIT {
 
         // Record scan with damage
         RecordScanRequest scanRequest = new RecordScanRequest(
+            null,
             "PLT-DAMAGE-001",
             50,
             null,
@@ -180,7 +183,7 @@ class ReceivingImprovementsIT {
             null,
             null,
             true,  // damageFlag
-            "PHYSICAL",  // damageType
+            DamageType.PHYSICAL_DAMAGE,  // damageType
             "Box crushed during transport",  // damageDescription
             null,
             null
@@ -189,13 +192,11 @@ class ReceivingImprovementsIT {
         receivingWorkflowService.recordScan(task.getId(), scanRequest);
 
         // Then: Verify damaged pallet created
-        List<Pallet> pallets = palletRepository.findAll();
-        assertEquals(1, pallets.size());
-        Pallet pallet = pallets.get(0);
+        Pallet pallet = palletRepository.findByCode("PLT-DAMAGE-001").orElseThrow();
         assertEquals(PalletStatus.DAMAGED, pallet.getStatus());
 
         // Verify discrepancy created
-        List<Discrepancy> discrepancies = discrepancyRepository.findAll();
+        List<Discrepancy> discrepancies = discrepancyRepository.findByReceipt(receipt);
         assertEquals(1, discrepancies.size());
         Discrepancy discrepancy = discrepancies.get(0);
         assertEquals("DAMAGE", discrepancy.getType());
@@ -205,7 +206,7 @@ class ReceivingImprovementsIT {
         assertEquals(1, scans.size());
         Scan scan = scans.get(0);
         assertTrue(scan.getDamageFlag());
-        assertEquals("PHYSICAL", scan.getDamageType());
+        assertEquals(DamageType.PHYSICAL_DAMAGE, scan.getDamageType());
         assertEquals("Box crushed during transport", scan.getDamageDescription());
 
         // Complete task
@@ -230,6 +231,7 @@ class ReceivingImprovementsIT {
         line.setReceipt(receipt);
         line.setLineNo(1);
         line.setSkuId(testSku.getId());
+        line.setUom("PCS");
         line.setQtyExpected(new BigDecimal("50"));
         line.setLotNumberExpected("LOT-2026-01");  // Expected lot number
         line.setExpiryDateExpected(LocalDate.of(2026, 6, 30));  // Expected expiry date
@@ -252,6 +254,7 @@ class ReceivingImprovementsIT {
         palletRepository.save(testPallet);
 
         RecordScanRequest scanRequest = new RecordScanRequest(
+            null,
             "PLT-XDOCK-001",
             30,
             null,
@@ -276,9 +279,7 @@ class ReceivingImprovementsIT {
         assertEquals(ReceiptStatus.READY_FOR_SHIPMENT, receipt.getStatus());
 
         // Verify pallet exists and would be routed to CROSS_DOCK location
-        List<Pallet> pallets = palletRepository.findAll();
-        assertEquals(1, pallets.size());
-        Pallet pallet = pallets.get(0);
+        Pallet pallet = palletRepository.findByCode("PLT-XDOCK-001").orElseThrow();
         assertEquals(PalletStatus.RECEIVED, pallet.getStatus());
     }
 
@@ -295,6 +296,7 @@ class ReceivingImprovementsIT {
         line.setReceipt(receipt);
         line.setLineNo(1);
         line.setSkuId(testSku.getId());
+        line.setUom("PCS");
         line.setQtyExpected(new BigDecimal("250"));  // Exceeds capacity of 100
 
         receipt.addLine(line);
@@ -332,6 +334,7 @@ class ReceivingImprovementsIT {
         line.setReceipt(receipt);
         line.setLineNo(1);
         line.setSkuId(testSku.getId());
+        line.setUom("PCS");
         line.setQtyExpected(new BigDecimal("50"));
         line.setLotNumberExpected("LOT-2026-01");  // Expected lot number
         line.setExpiryDateExpected(LocalDate.of(2026, 6, 30));  // Expected expiry date
@@ -354,6 +357,7 @@ class ReceivingImprovementsIT {
         palletRepository.save(testPallet);
 
         RecordScanRequest scanRequest = new RecordScanRequest(
+            null,
             "PLT-LOT-001",
             50,
             null,
@@ -396,6 +400,7 @@ class ReceivingImprovementsIT {
         line.setReceipt(receipt);
         line.setLineNo(1);
         line.setSkuId(testSku.getId());
+        line.setUom("PCS");
         line.setQtyExpected(new BigDecimal("50"));
         line.setExpiryDateExpected(LocalDate.of(2027, 12, 31));
 
@@ -416,6 +421,7 @@ class ReceivingImprovementsIT {
         palletRepository.save(testPallet);
 
         RecordScanRequest scanRequest = new RecordScanRequest(
+            null,
             "PLT-EXPIRED-001",
             50,
             null,
@@ -525,8 +531,9 @@ class ReceivingImprovementsIT {
         for (int i = 1; i <= count; i++) {
         ReceiptLine line = new ReceiptLine();
         line.setReceipt(receipt);
-        line.setLineNo(1);
+        line.setLineNo(i);
         line.setSkuId(testSku.getId());
+        line.setUom("PCS");
         line.setQtyExpected(new BigDecimal("50"));
         line.setLotNumberExpected("LOT-2026-01");  // Expected lot number
         line.setExpiryDateExpected(LocalDate.of(2026, 6, 30));  // Expected expiry date

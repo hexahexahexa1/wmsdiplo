@@ -4,10 +4,12 @@ import com.wmsdipl.core.domain.Task;
 import com.wmsdipl.core.domain.TaskStatus;
 import com.wmsdipl.core.domain.TaskType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
-public interface TaskRepository extends JpaRepository<Task, Long> {
+public interface TaskRepository extends JpaRepository<Task, Long>, JpaSpecificationExecutor<Task> {
     List<Task> findByReceiptId(Long receiptId);
     List<Task> findByReceiptIdAndTaskType(Long receiptId, TaskType taskType);
     List<Task> findByStatus(TaskStatus status);
@@ -29,6 +31,9 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
      * Used to filter "My tasks in progress", "My assigned tasks", etc.
      */
     List<Task> findByAssigneeAndStatus(String assignee, TaskStatus status);
+
+    List<Task> findByTaskTypeAndReceiptIdIn(TaskType taskType, List<Long> receiptIds);
+    List<Task> findByTaskTypeAndClosedAtBetween(TaskType taskType, LocalDateTime from, LocalDateTime to);
 
     long countByTargetLocationIdAndStatusIn(Long targetLocationId, java.util.Collection<TaskStatus> statuses);
 }

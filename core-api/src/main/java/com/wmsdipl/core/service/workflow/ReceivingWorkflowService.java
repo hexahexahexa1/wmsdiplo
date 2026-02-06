@@ -1,5 +1,6 @@
 package com.wmsdipl.core.service.workflow;
 
+import com.wmsdipl.contracts.dto.DiscrepancyType;
 import com.wmsdipl.contracts.dto.RecordScanRequest;
 import com.wmsdipl.core.domain.Discrepancy;
 import com.wmsdipl.core.domain.Location;
@@ -22,6 +23,7 @@ import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.SkuRepository;
 import com.wmsdipl.core.repository.TaskRepository;
+import com.wmsdipl.core.service.DuplicateScanDetectionService;
 import com.wmsdipl.core.service.TaskLifecycleService;
 import com.wmsdipl.core.service.StockMovementService;
 import org.springframework.stereotype.Service;
@@ -29,7 +31,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.List;
+import java.util.ArrayList;
 
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
@@ -52,6 +56,7 @@ public class ReceivingWorkflowService {
     private final LocationRepository locationRepository;
     private final SkuRepository skuRepository;
     private final StockMovementService stockMovementService;
+    private final DuplicateScanDetectionService duplicateScanDetectionService;
 
     public ReceivingWorkflowService(
             ReceiptRepository receiptRepository,
@@ -62,7 +67,8 @@ public class ReceivingWorkflowService {
             PalletRepository palletRepository,
             LocationRepository locationRepository,
             SkuRepository skuRepository,
-            StockMovementService stockMovementService
+            StockMovementService stockMovementService,
+            DuplicateScanDetectionService duplicateScanDetectionService
     ) {
         this.receiptRepository = receiptRepository;
         this.taskRepository = taskRepository;
@@ -73,6 +79,7 @@ public class ReceivingWorkflowService {
         this.locationRepository = locationRepository;
         this.skuRepository = skuRepository;
         this.stockMovementService = stockMovementService;
+        this.duplicateScanDetectionService = duplicateScanDetectionService;
     }
 
     /**
@@ -126,10 +133,6 @@ public class ReceivingWorkflowService {
         // Try to get SKU pallet capacity
         BigDecimal palletCapacity = null;
         if (line.getSkuId() != null) {
-            skuRepository.findById(line.getSkuId())
-                .ifPresent(sku -> {
-                    // Intentionally using local variable captured from outer scope
-                });
             Sku sku = skuRepository.findById(line.getSkuId()).orElse(null);
             if (sku != null) {
                 palletCapacity = sku.getPalletCapacity();
@@ -195,6 +198,31 @@ public class ReceivingWorkflowService {
         // === 1. VALIDATE TASK AND REQUEST ===
         Task task = taskLifecycleService.getTask(taskId);
         validateScanRequest(task, request);
+        String requestId = normalizeRequestId(request.requestId());
+        BigDecimal qtyDecimal = new BigDecimal(request.qty());
+
+        if (requestId != null) {
+            Scan existingScan = scanRepository.findByTaskIdAndRequestId(taskId, requestId).orElse(null);
+            if (existingScan != null) {
+                return markAsReplay(existingScan, true, "Idempotent replay: request already processed");
+            }
+        }
+
+        DuplicateScanDetectionService.ScanResult duplicateResult =
+            duplicateScanDetectionService.checkScan(request.palletCode());
+        if (duplicateResult.isDuplicate()) {
+            Scan recentScan = scanRepository.findFirstByTaskIdAndPalletCodeOrderByScannedAtDesc(
+                taskId,
+                request.palletCode()
+            ).orElse(null);
+            if (recentScan != null
+                && recentScan.getQty() != null
+                && recentScan.getQty().compareTo(qtyDecimal) == 0
+                && recentScan.getScannedAt() != null
+                && Duration.between(recentScan.getScannedAt(), java.time.LocalDateTime.now()).getSeconds() <= 5) {
+                return markAsReplay(recentScan, false, "Potential duplicate scan detected within 5 seconds");
+            }
+        }
         
         // === 2. FETCH AND VALIDATE PALLET ===
         Pallet pallet = palletRepository.findByCode(request.palletCode())
@@ -264,7 +292,6 @@ public class ReceivingWorkflowService {
         }
         
         // === 7. ACCUMULATE QUANTITY ON PALLET ===
-        BigDecimal qtyDecimal = new BigDecimal(request.qty());
         BigDecimal currentPalletQty = pallet.getQuantity() != null 
             ? pallet.getQuantity() : BigDecimal.ZERO;
         pallet.setQuantity(currentPalletQty.add(qtyDecimal));
@@ -290,18 +317,18 @@ public class ReceivingWorkflowService {
 
         // === 9. DETECT DISCREPANCIES ===
         boolean hasDiscrepancy = false;
-        String discrepancyType = null;
+        DiscrepancyType discrepancyType = null;
         
         // BARCODE_MISMATCH
         if (!barcodeMatches) {
             hasDiscrepancy = true;
-            discrepancyType = "BARCODE_MISMATCH";
+            discrepancyType = DiscrepancyType.BARCODE_MISMATCH;
         }
         
         // OVER_QTY
         if (expectedQty != null && newTotal.compareTo(expectedQty) > 0) {
             hasDiscrepancy = true;
-            discrepancyType = discrepancyType != null ? discrepancyType : "OVER_QTY";
+            discrepancyType = discrepancyType != null ? discrepancyType : DiscrepancyType.OVER_QTY;
         }
         
         // UNDER_QTY (detected only when task is being completed with less than expected)
@@ -312,31 +339,32 @@ public class ReceivingWorkflowService {
         if (line.getSsccExpected() != null && request.sscc() != null
             && !line.getSsccExpected().equals(request.sscc())) {
             hasDiscrepancy = true;
-            discrepancyType = discrepancyType != null ? discrepancyType : "SSCC_MISMATCH";
+            discrepancyType = discrepancyType != null ? discrepancyType : DiscrepancyType.SSCC_MISMATCH;
         }
         
         // NEW: DAMAGE - Damaged goods detected
         if (Boolean.TRUE.equals(request.damageFlag())) {
             hasDiscrepancy = true;
-            discrepancyType = discrepancyType != null ? discrepancyType : "DAMAGE";
+            discrepancyType = discrepancyType != null ? discrepancyType : DiscrepancyType.DAMAGE;
         }
         
         // NEW: EXPIRED_PRODUCT - Expiry date is in the past
         if (request.expiryDate() != null && request.expiryDate().isBefore(java.time.LocalDate.now())) {
             hasDiscrepancy = true;
-            discrepancyType = discrepancyType != null ? discrepancyType : "EXPIRED_PRODUCT";
+            discrepancyType = discrepancyType != null ? discrepancyType : DiscrepancyType.EXPIRED_PRODUCT;
         }
         
         // NEW: LOT_MISMATCH - Lot number doesn't match expected
         if (line.getLotNumberExpected() != null && request.lotNumber() != null
             && !line.getLotNumberExpected().equals(request.lotNumber())) {
             hasDiscrepancy = true;
-            discrepancyType = discrepancyType != null ? discrepancyType : "LOT_MISMATCH";
+            discrepancyType = discrepancyType != null ? discrepancyType : DiscrepancyType.LOT_MISMATCH;
         }
 
         // === 10. CREATE AND SAVE SCAN ===
         Scan scan = new Scan();
         scan.setTask(task);
+        scan.setRequestId(requestId);
         scan.setPalletCode(request.palletCode());
         scan.setSscc(request.sscc());
         scan.setBarcode(request.barcode());
@@ -496,6 +524,34 @@ public class ReceivingWorkflowService {
             throw new ResponseStatusException(BAD_REQUEST, 
                 "Quantity must be at least 1");
         }
+
+        if (Boolean.TRUE.equals(request.damageFlag()) && request.damageType() == null) {
+            throw new ResponseStatusException(BAD_REQUEST, "damageType is required when damageFlag=true");
+        }
+
+        if (request.expiryDate() != null && request.expiryDate().isBefore(java.time.LocalDate.of(2000, 1, 1))) {
+            throw new ResponseStatusException(BAD_REQUEST, "expiryDate is out of allowed range");
+        }
+    }
+
+    private String normalizeRequestId(String requestId) {
+        if (requestId == null || requestId.isBlank()) {
+            return null;
+        }
+        String normalized = requestId.trim();
+        if (normalized.length() > 128) {
+            throw new ResponseStatusException(BAD_REQUEST, "requestId length must not exceed 128 characters");
+        }
+        return normalized;
+    }
+
+    private Scan markAsReplay(Scan existingScan, boolean idempotentReplay, String warning) {
+        existingScan.setDuplicate(true);
+        existingScan.setIdempotentReplay(idempotentReplay);
+        List<String> warnings = new ArrayList<>();
+        warnings.add(warning);
+        existingScan.setWarnings(warnings);
+        return existingScan;
     }
 
     /**
@@ -511,12 +567,12 @@ public class ReceivingWorkflowService {
                 "Create locations with type RECEIVING and status AVAILABLE first."));
     }
 
-    private void createDiscrepancyRecord(Receipt receipt, ReceiptLine line, String type,
+    private void createDiscrepancyRecord(Receipt receipt, ReceiptLine line, DiscrepancyType type,
                                         BigDecimal expectedQty, BigDecimal actualQty, String comment) {
         Discrepancy d = new Discrepancy();
         d.setReceipt(receipt);
         d.setLine(line);
-        d.setType(type);
+        d.setType(type.name());
         d.setQtyExpected(expectedQty);
         d.setQtyActual(actualQty);
         d.setDescription(comment);

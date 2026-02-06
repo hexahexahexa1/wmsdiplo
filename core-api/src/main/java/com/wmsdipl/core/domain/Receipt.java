@@ -13,6 +13,7 @@ import jakarta.persistence.OneToMany;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -62,6 +63,10 @@ public class Receipt {
     @OneToMany(mappedBy = "receipt", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private List<ReceiptLine> lines = new ArrayList<>();
 
+    @Version
+    @Column(name = "entity_version", nullable = false)
+    private Long entityVersion = 0L;
+
     @PrePersist
     void onCreate() {
         this.createdAt = LocalDateTime.now();
@@ -81,4 +86,3 @@ public class Receipt {
         this.lines.add(line);
     }
 }
-

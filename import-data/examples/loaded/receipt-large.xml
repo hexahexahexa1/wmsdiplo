@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Тестовый документ прихода товара №2
+  Большой заказ с различными категориями товаров
+-->
+<receipt messageId="MSG-2026-01-002" 
+         docNo="RCP-2026-002" 
+         docDate="2026-01-12" 
+         supplier="Продуктовая База №1">
+    
+    <!-- Молочная продукция -->
+    <line lineNo="1" 
+          sku="MILK-001" 
+          name="Молоко Простоквашино 3.2% 1л" 
+          uom="шт" 
+          qtyExpected="200" 
+          packaging="коробка 12 шт" 
+          sscc="00012345000000000001"/>
+    
+    <line lineNo="2" 
+          sku="MILK-002" 
+          name="Кефир 2.5% 1л" 
+          uom="шт" 
+          qtyExpected="150" 
+          packaging="коробка 12 шт" 
+          sscc="00012345000000000002"/>
+    
+    <line lineNo="3" 
+          sku="MILK-003" 
+          name="Творог 9% 200г" 
+          uom="шт" 
+          qtyExpected="100" 
+          packaging="коробка 20 шт" 
+          sscc="00012345000000000003"/>
+    
+    <!-- Хлебобулочные изделия -->
+    <line lineNo="4" 
+          sku="BREAD-001" 
+          name="Хлеб Бородинский нарезной 500г" 
+          uom="шт" 
+          qtyExpected="80" 
+          packaging="ящик 20 шт" 
+          sscc="00012345000000000004"/>
+    
+    <line lineNo="5" 
+          sku="BREAD-002" 
+          name="Батон нарезной 400г" 
+          uom="шт" 
+          qtyExpected="120" 
+          packaging="ящик 20 шт" 
+          sscc="00012345000000000005"/>
+    
+    <line lineNo="6" 
+          sku="BREAD-003" 
+          name="Булочка с маком 80г" 
+          uom="шт" 
+          qtyExpected="200" 
+          packaging="ящик 30 шт" 
+          sscc="00012345000000000006"/>
+    
+    <!-- Масла и жиры -->
+    <line lineNo="7" 
+          sku="OIL-001" 
+          name="Масло подсолнечное рафинированное 1л" 
+          uom="шт" 
+          qtyExpected="150" 
+          packaging="коробка 10 шт" 
+          sscc="00012345000000000007"/>
+    
+    <line lineNo="8" 
+          sku="OIL-002" 
+          name="Масло оливковое Extra Virgin 0.5л" 
+          uom="шт" 
+          qtyExpected="50" 
+          packaging="коробка 6 шт" 
+          sscc="00012345000000000008"/>
+    
+    <!-- Консервы -->
+    <line lineNo="9" 
+          sku="CAN-001" 
+          name="Горошек зелёный консервированный 400г" 
+          uom="шт" 
+          qtyExpected="300" 
+          packaging="коробка 24 шт" 
+          sscc="00012345000000000009"/>
+    
+    <line lineNo="10" 
+          sku="CAN-002" 
+          name="Кукуруза консервированная 340г" 
+          uom="шт" 
+          qtyExpected="250" 
+          packaging="коробка 24 шт" 
+          sscc="00012345000000000010"/>
+    
+    <!-- Напитки -->
+    <line lineNo="11" 
+          sku="DRINK-001" 
+          name="Сок яблочный 1л" 
+          uom="шт" 
+          qtyExpected="180" 
+          packaging="коробка 6 шт" 
+          sscc="00012345000000000011"/>
+    
+    <line lineNo="12" 
+          sku="DRINK-002" 
+          name="Вода минеральная газированная 1.5л" 
+          uom="шт" 
+          qtyExpected="240" 
+          packaging="упаковка 6 шт" 
+          sscc="00012345000000000012"/>
+    
+</receipt>

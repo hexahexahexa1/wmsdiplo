@@ -23,6 +23,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Base64;
@@ -198,6 +199,50 @@ public class ApiClient {
         return getForList(path, new TypeReference<>() {});
     }
 
+    public List<Task> listTasksFiltered(
+            String assignee,
+            String status,
+            String taskType,
+            Long receiptId,
+            int page,
+            int size,
+            String sort
+    ) throws IOException, InterruptedException {
+        StringBuilder path = new StringBuilder("/api/tasks?page=" + page + "&size=" + size);
+        if (assignee != null && !assignee.isBlank()) {
+            path.append("&assignee=").append(encode(assignee));
+        }
+        if (status != null && !status.isBlank()) {
+            path.append("&status=").append(encode(status));
+        }
+        if (taskType != null && !taskType.isBlank()) {
+            path.append("&taskType=").append(encode(taskType));
+        }
+        if (receiptId != null) {
+            path.append("&receiptId=").append(receiptId);
+        }
+        if (sort != null && !sort.isBlank()) {
+            path.append("&sort=").append(encode(sort));
+        }
+
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + path))
+            .GET()
+            .header("Accept", "application/json")
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            var root = mapper.readTree(response.body());
+            var content = root.get("content");
+            if (content == null || !content.isArray()) {
+                return List.of();
+            }
+            return mapper.readValue(content.toString(), new TypeReference<>() {});
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), path.toString(), response.body()));
+    }
+
     public List<PutawayRule> listPutawayRules() throws IOException, InterruptedException {
         return getForList("/api/putaway-rules", new TypeReference<>() {});
     }
@@ -250,6 +295,7 @@ public class ApiClient {
                            Boolean damageFlag, String damageType, String damageDescription, 
                            String lotNumber, String expiryDate) throws IOException, InterruptedException {
         var payload = mapper.createObjectNode();
+        payload.put("requestId", java.util.UUID.randomUUID().toString());
         payload.put("palletCode", palletCode);
         payload.put("qty", qty);
         if (barcode != null && !barcode.isBlank()) {
@@ -265,7 +311,7 @@ public class ApiClient {
         if (damageFlag != null && damageFlag) {
             payload.put("damageFlag", true);
             if (damageType != null && !damageType.isBlank()) {
-                payload.put("damageType", damageType);
+                payload.put("damageType", mapDamageType(damageType));
             }
             if (damageDescription != null && !damageDescription.isBlank()) {
                 payload.put("damageDescription", damageDescription);
@@ -614,6 +660,22 @@ public class ApiClient {
         return body;
     }
 
+    private String encode(String value) {
+        return java.net.URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private String mapDamageType(String value) {
+        String normalized = value.trim().toUpperCase();
+        return switch (normalized) {
+            case "PHYSICAL", "PHYSICAL_DAMAGE" -> "PHYSICAL_DAMAGE";
+            case "WATER", "WATER_DAMAGE" -> "WATER_DAMAGE";
+            case "EXPIRED" -> "EXPIRED";
+            case "TEMPERATURE_ABUSE" -> "TEMPERATURE_ABUSE";
+            case "CONTAMINATION" -> "CONTAMINATION";
+            default -> "OTHER";
+        };
+    }
+
     // Stock Inventory API methods
     
     /**
@@ -846,6 +908,39 @@ public class ApiClient {
     }
 
     /**
+     * Get receiving analytics for date range.
+     */
+    public Map<String, Object> getReceivingAnalytics(LocalDate fromDate, LocalDate toDate) throws IOException, InterruptedException {
+        String path = "/api/analytics/receiving?fromDate=" + fromDate + "&toDate=" + toDate;
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + path))
+            .GET()
+            .header("Accept", "application/json")
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), new TypeReference<>() {});
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/analytics/receiving", response.body()));
+    }
+
+    public Map<String, Object> getReceivingHealth(LocalDate fromDate, LocalDate toDate, int thresholdHours) throws IOException, InterruptedException {
+        String path = "/api/analytics/receiving-health?fromDate=" + fromDate + "&toDate=" + toDate + "&thresholdHours=" + thresholdHours;
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + path))
+            .GET()
+            .header("Accept", "application/json")
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), new TypeReference<>() {});
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/analytics/receiving-health", response.body()));
+    }
+
+    /**
      * Get today's receiving analytics.
      */
     public Map<String, Object> getTodayAnalytics() throws IOException, InterruptedException {
@@ -894,6 +989,24 @@ public class ApiClient {
             return mapper.readValue(response.body(), new TypeReference<>() {});
         }
         throw new IOException("Get month analytics failed: status=" + response.statusCode() + " body=" + response.body());
+    }
+
+    /**
+     * Export receiving analytics to CSV for date range.
+     */
+    public byte[] exportReceivingAnalyticsCsv(LocalDate fromDate, LocalDate toDate) throws IOException, InterruptedException {
+        String path = "/api/analytics/export-csv?fromDate=" + fromDate + "&toDate=" + toDate;
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + path))
+            .GET()
+            .header("Accept", "text/csv")
+            .build();
+
+        HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return response.body();
+        }
+        throw new IOException("Export analytics failed: status=" + response.statusCode());
     }
 
     private HttpRequest.Builder withAuth(HttpRequest.Builder builder) {

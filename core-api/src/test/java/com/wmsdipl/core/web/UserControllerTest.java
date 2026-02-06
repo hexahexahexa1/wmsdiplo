@@ -154,7 +154,7 @@ class UserControllerTest {
     void shouldUpdateUser_WhenValidRequest() throws Exception {
         // Given
         UserRequest updateRequest = new UserRequest(
-            null, // username not updated
+            "testuser",
             null, // password not updated
             "Updated Name",
             "updated@example.com",

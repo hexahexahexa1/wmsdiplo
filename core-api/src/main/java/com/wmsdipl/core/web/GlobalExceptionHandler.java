@@ -41,9 +41,10 @@ public class GlobalExceptionHandler {
         Map<String, Object> response = new HashMap<>();
         response.put("timestamp", LocalDateTime.now().toString());
         response.put("status", HttpStatus.BAD_REQUEST.value());
+        response.put("code", "VALIDATION_FAILED");
         response.put("error", "Validation Failed");
         response.put("message", "Invalid request data");
-        response.put("validationErrors", errors);
+        response.put("details", errors);
         
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }
@@ -91,6 +92,7 @@ public class GlobalExceptionHandler {
         Map<String, Object> response = new HashMap<>();
         response.put("timestamp", LocalDateTime.now().toString());
         response.put("status", status);
+        response.put("code", HttpStatus.valueOf(status).name());
         response.put("error", HttpStatus.valueOf(status).getReasonPhrase());
         response.put("message", message);
         

@@ -6,6 +6,7 @@ import com.wmsdipl.contracts.dto.ScanDto;
 import com.wmsdipl.contracts.dto.TaskDto;
 import com.wmsdipl.core.domain.Scan;
 import com.wmsdipl.core.domain.Task;
+import com.wmsdipl.core.domain.TaskStatus;
 import com.wmsdipl.core.domain.TaskType;
 import com.wmsdipl.core.mapper.DiscrepancyMapper;
 import com.wmsdipl.core.mapper.ScanMapper;
@@ -18,6 +19,10 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -62,17 +67,26 @@ public class TaskController {
     @GetMapping
     @Operation(summary = "List all tasks", description = "Retrieves all warehouse tasks across all receipts and types")
     public List<TaskDto> all() {
-        return taskService.findAll().stream()
-            .map(taskMapper::toDto)
-            .collect(Collectors.toList());
+        return taskMapper.toDtoList(taskService.findAll());
     }
 
-    @GetMapping(params = "receiptId")
+    @GetMapping(params = {"page", "size"})
+    @Operation(summary = "List tasks with filters and pagination", description = "Retrieves paginated tasks with optional filters")
+    public Page<TaskDto> allFiltered(
+            @RequestParam(required = false) String assignee,
+            @RequestParam(required = false) TaskStatus status,
+            @RequestParam(required = false) TaskType taskType,
+            @RequestParam(required = false) Long receiptId,
+            @PageableDefault(size = 50, sort = "priority") Pageable pageable
+    ) {
+        return taskService.findFiltered(assignee, status, taskType, receiptId, pageable)
+            .map(taskMapper::toDto);
+    }
+
+    @GetMapping(params = {"receiptId", "!page"})
     @Operation(summary = "List tasks by receipt", description = "Retrieves all tasks associated with a specific receipt")
     public List<TaskDto> byReceipt(@RequestParam Long receiptId) {
-        return taskService.findByReceipt(receiptId).stream()
-            .map(taskMapper::toDto)
-            .collect(Collectors.toList());
+        return taskMapper.toDtoList(taskService.findByReceipt(receiptId));
     }
 
     @GetMapping("/{id}")
@@ -94,8 +108,14 @@ public class TaskController {
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR', 'OPERATOR')")
     @Operation(summary = "Assign task", description = "Assigns a task to a warehouse worker. Operators can only assign NEW tasks to themselves.")
     public TaskDto assign(@PathVariable Long id, @RequestBody AssignRequest req, java.security.Principal principal) {
-        String currentUser = principal.getName();
         var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) {
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED, "User is not authenticated");
+        }
+        String currentUser = principal != null ? principal.getName() : (auth != null ? auth.getName() : null);
+        if (currentUser == null) {
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.UNAUTHORIZED, "User is not authenticated");
+        }
         boolean isAdminOrSupervisor = auth.getAuthorities().stream()
             .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN") || a.getAuthority().equals("ROLE_SUPERVISOR"));
         
@@ -136,7 +156,7 @@ public class TaskController {
     @PostMapping("/{id}/release")
     @Operation(
         summary = "Release task", 
-        description = "Releases an assigned or in-progress task back to NEW status, making it available for other operators. Work already done (qtyDone, scans) is preserved."
+        description = "Releases an assigned or in-progress task back to NEW status and resets scan progress (qtyDone and scans are cleared)."
     )
     @ApiResponse(responseCode = "200", description = "Task released successfully")
     @ApiResponse(responseCode = "400", description = "Task cannot be released (invalid status)")
@@ -168,9 +188,9 @@ public class TaskController {
         Scan scan;
         
         if (task.getTaskType() == TaskType.RECEIVING) {
-            scan = receivingWorkflowService.recordScan(id, request);
+            scan = executeWithOptimisticRetry(() -> receivingWorkflowService.recordScan(id, request));
         } else if (task.getTaskType() == TaskType.PLACEMENT) {
-            scan = placementWorkflowService.recordPlacement(id, request);
+            scan = executeWithOptimisticRetry(() -> placementWorkflowService.recordPlacement(id, request));
         } else {
             throw new ResponseStatusException(
                 org.springframework.http.HttpStatus.BAD_REQUEST,
@@ -253,5 +273,28 @@ public class TaskController {
 
     private static class SetPriorityRequest {
         public Integer priority;
+    }
+
+    private Scan executeWithOptimisticRetry(java.util.concurrent.Callable<Scan> operation) {
+        int maxAttempts = 3;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return operation.call();
+            } catch (OptimisticLockingFailureException | jakarta.persistence.OptimisticLockException ex) {
+                if (attempt == maxAttempts) {
+                    throw new ResponseStatusException(
+                        org.springframework.http.HttpStatus.CONFLICT,
+                        "Failed to record scan due to concurrent update. Please retry.",
+                        ex
+                    );
+                }
+            } catch (Exception ex) {
+                if (ex instanceof RuntimeException runtimeException) {
+                    throw runtimeException;
+                }
+                throw new RuntimeException(ex);
+            }
+        }
+        throw new ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT, "Scan retry failed");
     }
 }

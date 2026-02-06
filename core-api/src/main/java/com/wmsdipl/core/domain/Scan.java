@@ -1,7 +1,10 @@
 package com.wmsdipl.core.domain;
 
+import com.wmsdipl.contracts.dto.DamageType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -10,9 +13,12 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "scans")
@@ -25,6 +31,9 @@ public class Scan {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "task_id")
     private Task task;
+
+    @Column(name = "request_id", length = 128)
+    private String requestId;
 
     @Column(name = "pallet_code", length = 64)
     private String palletCode;
@@ -47,8 +56,9 @@ public class Scan {
     @Column(name = "damage_flag")
     private Boolean damageFlag = false;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "damage_type", length = 64)
-    private String damageType;
+    private DamageType damageType;
 
     @Column(name = "damage_description", length = 512)
     private String damageDescription;
@@ -61,6 +71,15 @@ public class Scan {
 
     @Column(name = "scanned_at")
     private LocalDateTime scannedAt;
+
+    @Transient
+    private Boolean duplicate = false;
+
+    @Transient
+    private Boolean idempotentReplay = false;
+
+    @Transient
+    private List<String> warnings = new ArrayList<>();
 
     @PrePersist
     void onCreate() {
@@ -148,11 +167,11 @@ public class Scan {
         this.damageFlag = damageFlag;
     }
 
-    public String getDamageType() {
+    public DamageType getDamageType() {
         return damageType;
     }
 
-    public void setDamageType(String damageType) {
+    public void setDamageType(DamageType damageType) {
         this.damageType = damageType;
     }
 
@@ -178,5 +197,37 @@ public class Scan {
 
     public void setExpiryDate(java.time.LocalDate expiryDate) {
         this.expiryDate = expiryDate;
+    }
+
+    public String getRequestId() {
+        return requestId;
+    }
+
+    public void setRequestId(String requestId) {
+        this.requestId = requestId;
+    }
+
+    public Boolean getDuplicate() {
+        return duplicate;
+    }
+
+    public void setDuplicate(Boolean duplicate) {
+        this.duplicate = duplicate;
+    }
+
+    public Boolean getIdempotentReplay() {
+        return idempotentReplay;
+    }
+
+    public void setIdempotentReplay(Boolean idempotentReplay) {
+        this.idempotentReplay = idempotentReplay;
+    }
+
+    public List<String> getWarnings() {
+        return warnings;
+    }
+
+    public void setWarnings(List<String> warnings) {
+        this.warnings = warnings;
     }
 }

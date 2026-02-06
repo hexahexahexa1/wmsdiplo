@@ -3,6 +3,7 @@ package com.wmsdipl.core.service.workflow;
 import com.wmsdipl.contracts.dto.RecordScanRequest;
 import com.wmsdipl.core.domain.*;
 import com.wmsdipl.core.repository.*;
+import com.wmsdipl.core.service.DuplicateScanDetectionService;
 import com.wmsdipl.core.service.PutawayService;
 import com.wmsdipl.core.service.TaskLifecycleService;
 import com.wmsdipl.core.service.StockMovementService;
@@ -52,6 +53,9 @@ class PlacementWorkflowServiceTest {
     @Mock
     private StockMovementService stockMovementService;
 
+    @Mock
+    private DuplicateScanDetectionService duplicateScanDetectionService;
+
     @InjectMocks
     private PlacementWorkflowService placementWorkflowService;
 
@@ -74,9 +78,15 @@ class PlacementWorkflowServiceTest {
 
         sourceLocation = new Location();
         sourceLocation.setCode("RECEIVING-01");
+        Field sourceLocationIdField = Location.class.getDeclaredField("id");
+        sourceLocationIdField.setAccessible(true);
+        sourceLocationIdField.set(sourceLocation, 1L);
 
         targetLocation = new Location();
         targetLocation.setCode("STORAGE-A-01");
+        Field targetLocationIdField = Location.class.getDeclaredField("id");
+        targetLocationIdField.setAccessible(true);
+        targetLocationIdField.set(targetLocation, 2L);
 
         testPallet = new Pallet();
         testPallet.setCode("PALLET001");
@@ -96,6 +106,9 @@ class PlacementWorkflowServiceTest {
         testScan = new Scan();
         testScan.setTask(testTask);
         testScan.setPalletCode("PALLET001");
+
+        lenient().when(duplicateScanDetectionService.checkScan(anyString()))
+            .thenReturn(DuplicateScanDetectionService.ScanResult.valid("PALLET001"));
     }
 
     @Test
@@ -143,7 +156,7 @@ class PlacementWorkflowServiceTest {
     }
 
     @Test
-    void shouldRecordPlacementAndAutoCompleteReceipt_WhenLastTask() throws Exception {
+    void shouldRecordPlacement_WhenValidRequest() throws Exception {
         // Given
         testReceipt.setStatus(ReceiptStatus.PLACING);
         // Use reflection to set the ID on testPallet since there's no public setter
@@ -152,7 +165,7 @@ class PlacementWorkflowServiceTest {
         idField.set(testPallet, 1L);
         
         RecordScanRequest request = new RecordScanRequest(
-            "PALLET001", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null,
+            null, "PALLET001", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null,
             null, null, null, null, null
         );
 
@@ -166,11 +179,6 @@ class PlacementWorkflowServiceTest {
         when(scanRepository.save(any(Scan.class))).thenReturn(testScan);
         when(taskRepository.save(any(Task.class))).thenReturn(testTask);
 
-        // Mock that this is the last task (all completed after this one)
-        when(receiptRepository.findById(testReceipt.getId())).thenReturn(Optional.of(testReceipt));
-        when(taskRepository.findByReceiptIdAndTaskType(anyLong(), eq(TaskType.PLACEMENT)))
-            .thenReturn(List.of(testTask));
-
         // When
         Scan result = placementWorkflowService.recordPlacement(1L, request);
 
@@ -178,12 +186,8 @@ class PlacementWorkflowServiceTest {
         assertNotNull(result);
         assertEquals(PalletStatus.PLACED, testPallet.getStatus());
         assertEquals(targetLocation, testPallet.getLocation());
-        assertEquals(TaskStatus.COMPLETED, testTask.getStatus());
-        assertNotNull(testTask.getClosedAt());
-        
-        // Verify auto-complete logic was called
-        verify(receiptRepository, atLeast(1)).findById(anyLong());
-        verify(taskRepository, times(1)).findByReceiptIdAndTaskType(anyLong(), eq(TaskType.PLACEMENT));
+        assertEquals(TaskStatus.IN_PROGRESS, testTask.getStatus());
+        assertNull(testTask.getClosedAt());
     }
 
     @Test
@@ -191,7 +195,7 @@ class PlacementWorkflowServiceTest {
         // Given
         testTask.setTaskType(TaskType.RECEIVING);
         RecordScanRequest request = new RecordScanRequest(
-            "PALLET001", 10, "SSCC001", "BARCODE001", null, "DEVICE001", null,
+            null, "PALLET001", 10, "SSCC001", "BARCODE001", null, "DEVICE001", null,
             null, null, null, null, null
         );
 
@@ -207,7 +211,7 @@ class PlacementWorkflowServiceTest {
         // Given
         testTask.setStatus(TaskStatus.NEW);
         RecordScanRequest request = new RecordScanRequest(
-            "PALLET001", 10, "SSCC001", "BARCODE001", null, "DEVICE001", null,
+            null, "PALLET001", 10, "SSCC001", "BARCODE001", null, "DEVICE001", null,
             null, null, null, null, null
         );
 
@@ -222,7 +226,7 @@ class PlacementWorkflowServiceTest {
     void shouldThrowException_WhenPalletNotFound() {
         // Given
         RecordScanRequest request = new RecordScanRequest(
-            "INVALID", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null,
+            null, "INVALID", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null,
             null, null, null, null, null
         );
 
@@ -240,7 +244,7 @@ class PlacementWorkflowServiceTest {
         // Given
         testTask.setPalletId(999L);
         RecordScanRequest request = new RecordScanRequest(
-            "PALLET001", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null,
+            null, "PALLET001", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null,
             null, null, null, null, null
         );
 
@@ -261,6 +265,27 @@ class PlacementWorkflowServiceTest {
         // When & Then
         assertThrows(ResponseStatusException.class, 
             () -> placementWorkflowService.recordPlacement(1L, request));
+    }
+
+    @Test
+    void shouldReturnReplay_WhenSameRequestIdIsSentTwice() {
+        RecordScanRequest request = new RecordScanRequest(
+            "req-123", "PALLET001", 10, "SSCC001", "BARCODE001", "STORAGE-A-01", "DEVICE001", null,
+            null, null, null, null, null
+        );
+
+        Scan existing = new Scan();
+        existing.setRequestId("req-123");
+
+        when(taskLifecycleService.getTask(1L)).thenReturn(testTask);
+        when(locationRepository.findById(2L)).thenReturn(Optional.of(targetLocation));
+        when(scanRepository.findByTaskIdAndRequestId(1L, "req-123")).thenReturn(Optional.of(existing));
+
+        Scan result = placementWorkflowService.recordPlacement(1L, request);
+
+        assertTrue(Boolean.TRUE.equals(result.getDuplicate()));
+        assertTrue(Boolean.TRUE.equals(result.getIdempotentReplay()));
+        verifyNoInteractions(palletRepository);
     }
 
     @Test

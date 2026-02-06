@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Тестовый документ прихода товара №3
+  Минимальный пример с обязательными полями
+  (без supplier, без packaging, без sscc)
+-->
+<receipt messageId="MSG-MIN-001" 
+         docNo="RCP-MIN-001" 
+         docDate="2026-01-12">
+    
+    <line lineNo="1" 
+          sku="TEST-001" 
+          name="Тестовый товар 1" 
+          uom="шт" 
+          qtyExpected="10"/>
+    
+    <line lineNo="2" 
+          sku="TEST-002" 
+          name="Тестовый товар 2" 
+          uom="шт" 
+          qtyExpected="20"/>
+    
+</receipt>

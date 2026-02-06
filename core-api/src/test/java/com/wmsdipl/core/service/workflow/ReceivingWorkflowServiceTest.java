@@ -1,7 +1,9 @@
 package com.wmsdipl.core.service.workflow;
 
+import com.wmsdipl.contracts.dto.RecordScanRequest;
 import com.wmsdipl.core.domain.*;
 import com.wmsdipl.core.repository.*;
+import com.wmsdipl.core.service.DuplicateScanDetectionService;
 import com.wmsdipl.core.service.StockMovementService;
 import com.wmsdipl.core.service.TaskLifecycleService;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +20,8 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -42,6 +46,8 @@ class ReceivingWorkflowServiceTest {
     private SkuRepository skuRepository;
     @Mock
     private StockMovementService stockMovementService;
+    @Mock
+    private DuplicateScanDetectionService duplicateScanDetectionService;
 
     @InjectMocks
     private ReceivingWorkflowService receivingWorkflowService;
@@ -106,5 +112,82 @@ class ReceivingWorkflowServiceTest {
         receivingWorkflowService.checkAndCompleteReceipt(1L);
         
         assertEquals(ReceiptStatus.READY_FOR_SHIPMENT, testReceipt.getStatus());
+    }
+
+    @Test
+    void shouldReturnReplay_WhenSameRequestIdIsSentTwice() {
+        Task task = new Task();
+        task.setTaskType(TaskType.RECEIVING);
+        task.setStatus(TaskStatus.IN_PROGRESS);
+        task.setReceipt(testReceipt);
+
+        ReceiptLine line = new ReceiptLine();
+        line.setSkuId(1L);
+        line.setQtyExpected(BigDecimal.TEN);
+        task.setLine(line);
+        testReceipt.setStatus(ReceiptStatus.IN_PROGRESS);
+
+        Scan existing = new Scan();
+        existing.setRequestId("req-123");
+
+        when(taskLifecycleService.getTask(1L)).thenReturn(task);
+        when(scanRepository.findByTaskIdAndRequestId(1L, "req-123")).thenReturn(Optional.of(existing));
+
+        RecordScanRequest request = new RecordScanRequest(
+            "req-123",
+            "PLT-001",
+            10,
+            null,
+            null,
+            null,
+            null,
+            null,
+            false,
+            null,
+            null,
+            null,
+            null
+        );
+
+        Scan result = receivingWorkflowService.recordScan(1L, request);
+
+        assertTrue(Boolean.TRUE.equals(result.getDuplicate()));
+        assertTrue(Boolean.TRUE.equals(result.getIdempotentReplay()));
+        verifyNoInteractions(palletRepository);
+    }
+
+    @Test
+    void shouldRejectScan_WhenDamageFlagTrueAndDamageTypeMissing() {
+        Task task = new Task();
+        task.setTaskType(TaskType.RECEIVING);
+        task.setStatus(TaskStatus.IN_PROGRESS);
+        task.setReceipt(testReceipt);
+
+        ReceiptLine line = new ReceiptLine();
+        line.setSkuId(1L);
+        line.setQtyExpected(BigDecimal.TEN);
+        task.setLine(line);
+        testReceipt.setStatus(ReceiptStatus.IN_PROGRESS);
+
+        when(taskLifecycleService.getTask(1L)).thenReturn(task);
+
+        RecordScanRequest request = new RecordScanRequest(
+            null,
+            "PLT-001",
+            10,
+            null,
+            null,
+            null,
+            null,
+            null,
+            true,
+            null,
+            "damage",
+            null,
+            null
+        );
+
+        assertThrows(org.springframework.web.server.ResponseStatusException.class,
+            () -> receivingWorkflowService.recordScan(1L, request));
     }
 }

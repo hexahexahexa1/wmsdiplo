@@ -1,5 +1,6 @@
 package com.wmsdipl.core.service;
 
+import com.wmsdipl.contracts.dto.DiscrepancyType;
 import com.wmsdipl.core.domain.Discrepancy;
 import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.domain.ReceiptLine;
@@ -62,6 +63,11 @@ public class TaskLifecycleService {
     @Transactional
     public Task assign(Long id, String assignee, String assignedBy) {
         Task task = getTask(id);
+        if (task.getStatus() != TaskStatus.NEW) {
+            throw new IllegalStateException(
+                "Task can only be assigned from NEW status. Current status: " + task.getStatus()
+            );
+        }
         task.setAssignee(assignee);
         task.setAssignedBy(assignedBy);
         task.setStatus(TaskStatus.ASSIGNED);
@@ -77,6 +83,11 @@ public class TaskLifecycleService {
     @Transactional
     public Task start(Long id) {
         Task task = getTask(id);
+        if (task.getStatus() != TaskStatus.NEW && task.getStatus() != TaskStatus.ASSIGNED) {
+            throw new IllegalStateException(
+                "Task can only be started from NEW or ASSIGNED status. Current status: " + task.getStatus()
+            );
+        }
         task.setStatus(TaskStatus.IN_PROGRESS);
         task.setStartedAt(LocalDateTime.now());
         return taskRepository.save(task);
@@ -100,6 +111,11 @@ public class TaskLifecycleService {
     @Transactional
     public Task complete(Long id) {
         Task task = getTask(id);
+        if (task.getStatus() != TaskStatus.IN_PROGRESS) {
+            throw new IllegalStateException(
+                "Task can only be completed from IN_PROGRESS status. Current status: " + task.getStatus()
+            );
+        }
         
         // Validation: Cannot complete empty task
         BigDecimal qtyDone = task.getQtyDone() != null ? task.getQtyDone() : BigDecimal.ZERO;
@@ -130,7 +146,7 @@ public class TaskLifecycleService {
                 Discrepancy discrepancy = new Discrepancy();
                 discrepancy.setReceipt(receipt);
                 discrepancy.setLine(line);
-                discrepancy.setType("UNDER_QTY");
+                discrepancy.setType(DiscrepancyType.UNDER_QTY.name());
                 discrepancy.setQtyExpected(qtyAssigned);
                 discrepancy.setQtyActual(qtyDone);
                 
@@ -165,6 +181,9 @@ public class TaskLifecycleService {
     @Transactional
     public Task cancel(Long id) {
         Task task = getTask(id);
+        if (task.getStatus() == TaskStatus.COMPLETED) {
+            throw new IllegalStateException("Completed task cannot be cancelled");
+        }
         task.setStatus(TaskStatus.CANCELLED);
         task.setClosedAt(LocalDateTime.now());
         return taskRepository.save(task);

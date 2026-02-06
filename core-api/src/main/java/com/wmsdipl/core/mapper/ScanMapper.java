@@ -21,6 +21,7 @@ public class ScanMapper {
         return new ScanDto(
             scan.getId(),
             scan.getTask() != null ? scan.getTask().getId() : null,
+            scan.getRequestId(),
             scan.getPalletCode(),
             scan.getSscc(),
             scan.getBarcode(),
@@ -32,7 +33,10 @@ public class ScanMapper {
             scan.getDamageDescription(),
             scan.getLotNumber(),
             scan.getExpiryDate(),
-            scan.getScannedAt()
+            scan.getScannedAt(),
+            scan.getDuplicate(),
+            scan.getIdempotentReplay(),
+            scan.getWarnings()
         );
     }
 }

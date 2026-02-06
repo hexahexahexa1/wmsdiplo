@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Receipt>
+    <Header>
+        <DocNo>RCV-FOOD-001</DocNo>
+        <DocDate>2026-01-12</DocDate>
+        <Supplier>ООО "Продукты и Напитки"</Supplier>
+        <MessageId>MSG-FOOD-001</MessageId>
+        <ExternalKey>EXT-FOOD-001</ExternalKey>
+        <CrossDock>false</CrossDock>
+    </Header>
+    <Lines>
+        <Line>
+            <LineNo>1</LineNo>
+            <SKU>
+                <Code>SKU-WATER-001</Code>
+                <Name>Вода минеральная Боржоми 0.5л</Name>
+                <UOM>ШТ</UOM>
+            </SKU>
+            <Packaging>
+                <Code>PALLET-EURO</Code>
+                <Name>Европаллет</Name>
+                <Type>PALLET</Type>
+            </Packaging>
+            <QtyExpected>120</QtyExpected>
+            <SSCCExpected>00312345678901234570</SSCCExpected>
+            <LotNumber>LOT-2026-01-WATER</LotNumber>
+            <ExpiryDate>2027-01-12</ExpiryDate>
+        </Line>
+        <Line>
+            <LineNo>2</LineNo>
+            <SKU>
+                <Code>SKU-JUICE-001</Code>
+                <Name>Сок апельсиновый Rich 1л</Name>
+                <UOM>ШТ</UOM>
+            </SKU>
+            <Packaging>
+                <Code>BOX-MEDIUM</Code>
+                <Name>Коробка средняя</Name>
+                <Type>BOX</Type>
+            </Packaging>
+            <QtyExpected>80</QtyExpected>
+            <SSCCExpected>00312345678901234571</SSCCExpected>
+            <LotNumber>LOT-2026-01-JUICE</LotNumber>
+            <ExpiryDate>2026-06-12</ExpiryDate>
+        </Line>
+        <Line>
+            <LineNo>3</LineNo>
+            <SKU>
+                <Code>SKU-COFFEE-001</Code>
+                <Name>Кофе Jacobs Monarch 250г</Name>
+                <UOM>ШТ</UOM>
+            </SKU>
+            <Packaging>
+                <Code>BOX-SMALL</Code>
+                <Name>Коробка малая</Name>
+                <Type>BOX</Type>
+            </Packaging>
+            <QtyExpected>40</QtyExpected>
+            <LotNumber>LOT-2026-01-COFFEE</LotNumber>
+            <ExpiryDate>2027-12-31</ExpiryDate>
+        </Line>
+    </Lines>
+</Receipt>

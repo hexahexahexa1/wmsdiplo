@@ -13,6 +13,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -80,6 +81,10 @@ public class Task {
     @Column(name = "closed_at")
     private LocalDateTime closedAt;
 
+    @Version
+    @Column(name = "entity_version", nullable = false)
+    private Long entityVersion = 0L;
+
     @PrePersist
     void onCreate() {
         if (createdAt == null) {
@@ -96,4 +101,3 @@ public class Task {
         }
     }
 }
-

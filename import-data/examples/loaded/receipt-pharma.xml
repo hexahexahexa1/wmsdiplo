@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Тестовый документ прихода товара №5
+  Пример с фармацевтической продукцией (истекающие сроки годности)
+  Для тестирования FEFO стратегии размещения
+-->
+<receipt messageId="MSG-PHARMA-001" 
+         docNo="RCP-PHARMA-001" 
+         docDate="2026-01-12" 
+         supplier="Фарма Дистрибьюция">
+    
+    <line lineNo="1" 
+          sku="MED-001" 
+          name="Парацетамол таб. 500мг №20" 
+          uom="упак" 
+          qtyExpected="500" 
+          packaging="коробка 50 упак" 
+          sscc="00098765000000000001"/>
+    
+    <line lineNo="2" 
+          sku="MED-002" 
+          name="Аспирин таб. 500мг №10" 
+          uom="упак" 
+          qtyExpected="300" 
+          packaging="коробка 50 упак" 
+          sscc="00098765000000000002"/>
+    
+    <line lineNo="3" 
+          sku="MED-003" 
+          name="Но-шпа таб. 40мг №20" 
+          uom="упак" 
+          qtyExpected="200" 
+          packaging="коробка 50 упак" 
+          sscc="00098765000000000003"/>
+    
+    <line lineNo="4" 
+          sku="MED-004" 
+          name="Активированный уголь таб. №10" 
+          uom="упак" 
+          qtyExpected="600" 
+          packaging="коробка 100 упак" 
+          sscc="00098765000000000004"/>
+    
+    <line lineNo="5" 
+          sku="VIT-001" 
+          name="Витамин C 500мг №30" 
+          uom="упак" 
+          qtyExpected="250" 
+          packaging="коробка 40 упак" 
+          sscc="00098765000000000005"/>
+    
+</receipt>

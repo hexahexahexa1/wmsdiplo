@@ -13,6 +13,7 @@ WMSDIPL is a multi-module Java 17 application with Spring Boot 3, using Gradle.
 ```bash
 # Build
 gradle build                           # All modules
+gradle clean build                     # Clean + full rebuild
 gradle :core-api:build                # Specific module
 
 # Run
@@ -22,15 +23,65 @@ gradle :desktop-client:run            # JavaFX Client
 
 # Database
 docker compose up -d postgres
+docker compose stop postgres
+docker compose down
 ```
 
 ### Testing
 ```bash
 gradle test                           # All tests
 gradle :core-api:test                 # Module tests
-gradle :core-api:test --tests "*ReceiptServiceTest"              # Single Class
-gradle :core-api:test --tests "*ReceiptMapperTest.shouldMap*"    # Single Method
+gradle :import-service:test           # Import service tests
+gradle :desktop-client:test           # Desktop client tests
+gradle :core-api:test --tests "*ReceiptServiceTest"              # Single class
+gradle :core-api:test --tests "*ReceiptMapperTest.shouldMap*"    # Single method
 ```
+
+### Code Quality & Diagnostics
+```bash
+gradle check                          # Run all verification tasks
+gradle :core-api:check               # Verify single module
+gradle dependencies                   # Full dependency tree
+gradle :core-api:dependencies        # Module dependency tree
+gradle --refresh-dependencies build   # Refresh cached dependencies
+gradle --stop                         # Stop Gradle daemons
+```
+
+## Workflows
+
+### Local Development Workflow
+1. Start infrastructure: `docker compose up -d postgres`.
+2. Build once to validate environment: `gradle clean build`.
+3. Run the target service/client:
+   - API: `gradle :core-api:bootRun`
+   - Import: `gradle :import-service:bootRun`
+   - Desktop: `gradle :desktop-client:run`
+4. Run focused tests before commit:
+   - `gradle :core-api:test`
+   - or `gradle :core-api:test --tests "*ClassName.methodName*"`
+5. Run final verification: `gradle check`.
+
+### Feature Delivery Workflow
+1. Enter Planning Mode for features, refactors, and schema changes.
+2. Create the plan doc in `docs/planning/FEATURE-{name}.md`.
+3. Wait for explicit plan approval before implementation.
+4. Implement in small, reviewable commits per module.
+5. Validate with module tests, then run `gradle check`.
+
+### Bugfix Workflow
+1. Reproduce with a failing test first (unit or integration).
+2. Fix at the lowest responsible layer (mapper, service, repository).
+3. Add regression coverage for the failure mode.
+4. Re-run targeted tests, then module `check`.
+
+### API Change Workflow
+1. Update DTOs in `shared-contracts` first.
+2. Update mapper, controller, and service flow in `core-api`.
+3. Verify HTTP errors use `ResponseStatusException`.
+4. Validate with:
+   - `gradle :shared-contracts:build`
+   - `gradle :core-api:test`
+   - `gradle :core-api:bootRun` (smoke check)
 
 ## Code Style & Conventions
 
@@ -47,7 +98,7 @@ gradle :core-api:test --tests "*ReceiptMapperTest.shouldMap*"    # Single Method
     *   Must use **Constructor Injection** (No `@Autowired` fields).
     *   Must be `@Transactional` (use `readOnly=true` for queries).
 2.  **Controllers**:
-    *   Must use **Mappers** to convert DTO ↔ Entity.
+    *   Must use **Mappers** to convert DTO <-> Entity.
     *   Delegate all logic to Services.
 3.  **DTOs**: Defined in `shared-contracts`. Immutable Records preferred.
 4.  **Database**:
@@ -80,3 +131,5 @@ gradle :core-api:test --tests "*ReceiptMapperTest.shouldMap*"    # Single Method
 - **DB Credentials**: `admin` / `admin` (Default).
 - **Config**: `application.yml` + Env Vars.
 - **Copilot**: See `.github/copilot-instructions.md`.
+- **Java**: Java 17 required.
+- **Gradle Wrapper**: Prefer `./gradlew` (Unix) or `gradlew.bat` (Windows) when wrapper is present.

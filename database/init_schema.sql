@@ -131,6 +131,7 @@ CREATE TABLE receipts (
     message_id VARCHAR(100),
     external_key VARCHAR(100),
     cross_dock BOOLEAN DEFAULT false,
+    entity_version BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -170,6 +171,7 @@ CREATE TABLE pallets (
     height_cm NUMERIC(8,2),
     lot_number VARCHAR(100),
     expiry_date DATE,
+    entity_version BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -191,6 +193,7 @@ CREATE TABLE tasks (
     pallet_id BIGINT REFERENCES pallets(id),
     source_location_id BIGINT REFERENCES locations(id),
     target_location_id BIGINT REFERENCES locations(id),
+    entity_version BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     started_at TIMESTAMP,
     closed_at TIMESTAMP
@@ -202,6 +205,7 @@ CREATE TABLE tasks (
 CREATE TABLE scans (
     id BIGSERIAL PRIMARY KEY,
     task_id BIGINT NOT NULL REFERENCES tasks(id),
+    request_id VARCHAR(128),
     pallet_code VARCHAR(50) NOT NULL,
     sscc VARCHAR(50),
     barcode VARCHAR(50),
@@ -390,6 +394,7 @@ CREATE INDEX idx_tasks_status ON tasks(status);
 CREATE INDEX idx_tasks_type ON tasks(task_type);
 CREATE INDEX idx_scans_task ON scans(task_id);
 CREATE INDEX idx_scans_pallet ON scans(pallet_code);
+CREATE UNIQUE INDEX uq_scans_task_request_id ON scans(task_id, request_id) WHERE request_id IS NOT NULL;
 CREATE INDEX idx_discrepancies_receipt ON discrepancies(receipt_id);
 CREATE INDEX idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
 CREATE INDEX idx_status_history_entity ON status_history(entity_type, entity_id);

@@ -7,6 +7,7 @@ import com.wmsdipl.core.domain.Location;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.List;
 
@@ -15,6 +16,7 @@ public interface PalletRepository extends JpaRepository<Pallet, Long>, JpaSpecif
     boolean existsByCode(String code);
     List<Pallet> findByReceiptAndStatus(Receipt receipt, PalletStatus status);
     List<Pallet> findByReceipt(Receipt receipt);
+    List<Pallet> findByCreatedAtBetweenAndReceiptIsNotNull(LocalDateTime from, LocalDateTime to);
     List<Pallet> findByLocation(Location location);
     long countByLocation(Location location);
 }

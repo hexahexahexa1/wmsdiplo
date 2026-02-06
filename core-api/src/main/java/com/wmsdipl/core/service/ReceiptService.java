@@ -14,12 +14,16 @@ import com.wmsdipl.core.domain.Pallet;
 import com.wmsdipl.core.mapper.ReceiptMapper;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.PalletRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -49,6 +53,34 @@ public class ReceiptService {
     @Transactional(readOnly = true)
     public List<ReceiptDto> list() {
         return receiptRepository.findAll().stream().map(receiptMapper::toDto).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ReceiptDto> listFiltered(
+            String status,
+            String supplier,
+            LocalDate fromDate,
+            LocalDate toDate,
+            Pageable pageable
+    ) {
+        Specification<Receipt> spec = Specification.where(null);
+        if (status != null && !status.isBlank()) {
+            ReceiptStatus parsedStatus = ReceiptStatus.valueOf(status.trim().toUpperCase());
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), parsedStatus));
+        }
+        if (supplier != null && !supplier.isBlank()) {
+            spec = spec.and((root, query, cb) -> cb.like(
+                cb.lower(root.get("supplier")),
+                "%" + supplier.toLowerCase() + "%"
+            ));
+        }
+        if (fromDate != null) {
+            spec = spec.and((root, query, cb) -> cb.greaterThanOrEqualTo(root.get("docDate"), fromDate));
+        }
+        if (toDate != null) {
+            spec = spec.and((root, query, cb) -> cb.lessThanOrEqualTo(root.get("docDate"), toDate));
+        }
+        return receiptRepository.findAll(spec, pageable).map(receiptMapper::toDto);
     }
 
     @Transactional(readOnly = true)
@@ -128,6 +160,17 @@ public class ReceiptService {
     private void validateManual(CreateReceiptRequest request) {
         if (request.docNo() == null || request.docNo().isBlank()) {
             throw new ResponseStatusException(BAD_REQUEST, "docNo is required");
+        }
+        if (request.lines() == null || request.lines().isEmpty()) {
+            throw new ResponseStatusException(BAD_REQUEST, "At least one receipt line is required");
+        }
+        for (CreateReceiptRequest.Line line : request.lines()) {
+            if (line.skuId() == null) {
+                throw new ResponseStatusException(BAD_REQUEST, "skuId is required for manual receipt lines");
+            }
+            if (line.qtyExpected() == null || line.qtyExpected().compareTo(BigDecimal.ZERO) <= 0) {
+                throw new ResponseStatusException(BAD_REQUEST, "qtyExpected must be greater than zero");
+            }
         }
         if (receiptRepository.existsByDocNoAndSupplier(request.docNo(), request.supplier())) {
             throw new ResponseStatusException(CONFLICT, "Duplicate document for supplier");
@@ -279,4 +322,3 @@ public class ReceiptService {
         );
     }
 }
-

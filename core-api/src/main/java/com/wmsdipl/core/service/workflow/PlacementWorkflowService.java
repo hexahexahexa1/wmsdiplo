@@ -15,6 +15,7 @@ import com.wmsdipl.core.repository.PalletRepository;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.TaskRepository;
+import com.wmsdipl.core.service.DuplicateScanDetectionService;
 import com.wmsdipl.core.service.PutawayService;
 import com.wmsdipl.core.service.TaskLifecycleService;
 import com.wmsdipl.core.service.StockMovementService;
@@ -23,6 +24,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
@@ -52,6 +55,7 @@ public class PlacementWorkflowService {
     private final ReceiptRepository receiptRepository;
     private final PutawayService putawayService;
     private final StockMovementService stockMovementService;
+    private final DuplicateScanDetectionService duplicateScanDetectionService;
 
     public PlacementWorkflowService(
             TaskRepository taskRepository,
@@ -61,7 +65,8 @@ public class PlacementWorkflowService {
             TaskLifecycleService taskLifecycleService,
             ReceiptRepository receiptRepository,
             PutawayService putawayService,
-            StockMovementService stockMovementService
+            StockMovementService stockMovementService,
+            DuplicateScanDetectionService duplicateScanDetectionService
     ) {
         this.taskRepository = taskRepository;
         this.palletRepository = palletRepository;
@@ -71,6 +76,7 @@ public class PlacementWorkflowService {
         this.receiptRepository = receiptRepository;
         this.putawayService = putawayService;
         this.stockMovementService = stockMovementService;
+        this.duplicateScanDetectionService = duplicateScanDetectionService;
     }
 
     /**
@@ -85,6 +91,31 @@ public class PlacementWorkflowService {
         // === 1. VALIDATE TASK ===
         Task task = taskLifecycleService.getTask(taskId);
         validatePlacementRequest(task, request);
+        String requestId = normalizeRequestId(request.requestId());
+        BigDecimal qtyDecimal = request.qty() != null ? new BigDecimal(request.qty()) : BigDecimal.ZERO;
+
+        if (requestId != null) {
+            Scan existingScan = scanRepository.findByTaskIdAndRequestId(taskId, requestId).orElse(null);
+            if (existingScan != null) {
+                return markAsReplay(existingScan, true, "Idempotent replay: request already processed");
+            }
+        }
+
+        DuplicateScanDetectionService.ScanResult duplicateResult =
+            duplicateScanDetectionService.checkScan(request.palletCode());
+        if (duplicateResult.isDuplicate()) {
+            Scan recentScan = scanRepository.findFirstByTaskIdAndPalletCodeOrderByScannedAtDesc(
+                taskId,
+                request.palletCode()
+            ).orElse(null);
+            if (recentScan != null
+                && recentScan.getQty() != null
+                && recentScan.getQty().compareTo(qtyDecimal) == 0
+                && recentScan.getScannedAt() != null
+                && Duration.between(recentScan.getScannedAt(), java.time.LocalDateTime.now()).getSeconds() <= 5) {
+                return markAsReplay(recentScan, false, "Potential duplicate scan detected within 5 seconds");
+            }
+        }
 
         // === 2. VALIDATE PALLET ===
         Pallet pallet = palletRepository.findByCode(request.palletCode())
@@ -142,16 +173,16 @@ public class PlacementWorkflowService {
         // === 6. CREATE SCAN RECORD ===
         Scan scan = new Scan();
         scan.setTask(task);
+        scan.setRequestId(requestId);
         scan.setPalletCode(request.palletCode());
         scan.setSscc(request.sscc());
         scan.setBarcode(request.barcode());
-        scan.setQty(request.qty() != null ? new BigDecimal(request.qty()) : BigDecimal.ZERO);
+        scan.setQty(qtyDecimal);
         scan.setDeviceId(request.deviceId());
         scan.setDiscrepancy(false);
         Scan savedScan = scanRepository.save(scan);
 
         // === 7. UPDATE TASK QUANTITY (FOR TRACKING) ===
-        BigDecimal qtyDecimal = request.qty() != null ? new BigDecimal(request.qty()) : BigDecimal.ZERO;
         BigDecimal currentDone = task.getQtyDone() != null ? task.getQtyDone() : BigDecimal.ZERO;
         task.setQtyDone(currentDone.add(qtyDecimal));
 
@@ -200,6 +231,26 @@ public class PlacementWorkflowService {
                     ", отсканировано: " + request.locationCode());
             }
         }
+    }
+
+    private String normalizeRequestId(String requestId) {
+        if (requestId == null || requestId.isBlank()) {
+            return null;
+        }
+        String normalized = requestId.trim();
+        if (normalized.length() > 128) {
+            throw new ResponseStatusException(BAD_REQUEST, "requestId length must not exceed 128 characters");
+        }
+        return normalized;
+    }
+
+    private Scan markAsReplay(Scan existingScan, boolean idempotentReplay, String warning) {
+        existingScan.setDuplicate(true);
+        existingScan.setIdempotentReplay(idempotentReplay);
+        List<String> warnings = new ArrayList<>();
+        warnings.add(warning);
+        existingScan.setWarnings(warnings);
+        return existingScan;
     }
 
     /**

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Тестовый документ прихода товара №4
+  Пример с дробными количествами (для весовых товаров)
+-->
+<receipt messageId="MSG-2026-01-004" 
+         docNo="RCP-2026-004" 
+         docDate="2026-01-12" 
+         supplier="Весовые Товары ООО">
+    
+    <!-- Весовые товары -->
+    <line lineNo="1" 
+          sku="WEIGHT-001" 
+          name="Сыр Российский" 
+          uom="кг" 
+          qtyExpected="45.5" 
+          packaging="ящик" 
+          sscc="00012345000000000020"/>
+    
+    <line lineNo="2" 
+          sku="WEIGHT-002" 
+          name="Колбаса Докторская" 
+          uom="кг" 
+          qtyExpected="30.75" 
+          packaging="ящик" 
+          sscc="00012345000000000021"/>
+    
+    <line lineNo="3" 
+          sku="WEIGHT-003" 
+          name="Яблоки Голден" 
+          uom="кг" 
+          qtyExpected="120.25" 
+          packaging="ящик 18 кг" 
+          sscc="00012345000000000022"/>
+    
+    <line lineNo="4" 
+          sku="WEIGHT-004" 
+          name="Бананы" 
+          uom="кг" 
+          qtyExpected="80.5" 
+          packaging="коробка 13 кг" 
+          sscc="00012345000000000023"/>
+    
+    <!-- Штучные товары в том же приходе -->
+    <line lineNo="5" 
+          sku="PIECE-001" 
+          name="Арбуз" 
+          uom="шт" 
+          qtyExpected="50" 
+          packaging="поддон" 
+          sscc="00012345000000000024"/>
+    
+</receipt>
