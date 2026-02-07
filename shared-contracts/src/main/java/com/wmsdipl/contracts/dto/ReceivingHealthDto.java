@@ -8,6 +8,8 @@ public record ReceivingHealthDto(
     Integer thresholdHours,
     Long stuckReceivingReceipts,
     Long stuckPlacingReceipts,
+    Long stuckReadyForShipmentReceipts,
+    Long stuckShippingInProgressReceipts,
     Long staleTasks,
     Long autoResolvedDiscrepancies,
     Long criticalDiscrepancies

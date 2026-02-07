@@ -163,6 +163,87 @@ class AnalyticsServiceTest {
     }
 
     @Test
+    void shouldCalculateDamageRate_FromDamagedPalletReceipts_WhenNoDamageDiscrepancies() {
+        LocalDateTime from = LocalDateTime.of(2026, 2, 1, 0, 0, 0);
+        LocalDateTime to = LocalDateTime.of(2026, 2, 7, 23, 59, 59);
+
+        Receipt receipt = new Receipt();
+        receipt.setId(7L);
+        receipt.setStatus(ReceiptStatus.IN_PROGRESS);
+        receipt.setCreatedAt(from.plusHours(1));
+
+        Discrepancy discrepancy = new Discrepancy();
+        discrepancy.setReceipt(receipt);
+        discrepancy.setType("UNDER_QTY");
+        discrepancy.setCreatedAt(from.plusHours(2));
+
+        Pallet damagedPallet = new Pallet();
+        damagedPallet.setStatus(PalletStatus.DAMAGED);
+        damagedPallet.setCreatedAt(from.plusHours(3));
+        damagedPallet.setReceipt(receipt);
+
+        Pallet regularPallet = new Pallet();
+        regularPallet.setStatus(PalletStatus.RECEIVED);
+        regularPallet.setCreatedAt(from.plusHours(4));
+        regularPallet.setReceipt(receipt);
+
+        when(receiptRepository.findByCreatedAtBetween(from, to)).thenReturn(List.of(receipt));
+        when(receiptRepository.findAllById(any())).thenReturn(List.of(receipt));
+        when(discrepancyRepository.findByCreatedAtBetween(from, to)).thenReturn(List.of(discrepancy));
+        when(palletRepository.findByCreatedAtBetweenAndReceiptIsNotNull(from, to))
+            .thenReturn(List.of(damagedPallet, regularPallet));
+        when(taskRepository.findByTaskTypeAndClosedAtBetween(TaskType.RECEIVING, from, to)).thenReturn(List.of());
+        when(taskRepository.findByTaskTypeAndClosedAtBetween(TaskType.PLACEMENT, from, to)).thenReturn(List.of());
+
+        ReceivingAnalyticsDto result = analyticsService.calculateAnalytics(from, to);
+
+        assertEquals(100.0, result.damagedPalletsRate(), 0.0001);
+    }
+
+    @Test
+    void shouldCalculateDamageRate_FromDamageDiscrepancyReceipts_WhenNoDamagedPallets() {
+        LocalDateTime from = LocalDateTime.of(2026, 2, 1, 0, 0, 0);
+        LocalDateTime to = LocalDateTime.of(2026, 2, 7, 23, 59, 59);
+
+        Receipt receipt = new Receipt();
+        receipt.setId(11L);
+        receipt.setStatus(ReceiptStatus.IN_PROGRESS);
+        receipt.setCreatedAt(from.plusHours(1));
+
+        Discrepancy damage = new Discrepancy();
+        damage.setReceipt(receipt);
+        damage.setType("DAMAGE");
+        damage.setCreatedAt(from.plusHours(2));
+
+        Discrepancy underQty = new Discrepancy();
+        underQty.setReceipt(receipt);
+        underQty.setType("UNDER_QTY");
+        underQty.setCreatedAt(from.plusHours(3));
+
+        Pallet regularPallet1 = new Pallet();
+        regularPallet1.setStatus(PalletStatus.RECEIVED);
+        regularPallet1.setCreatedAt(from.plusHours(2));
+        regularPallet1.setReceipt(receipt);
+
+        Pallet regularPallet2 = new Pallet();
+        regularPallet2.setStatus(PalletStatus.PLACED);
+        regularPallet2.setCreatedAt(from.plusHours(4));
+        regularPallet2.setReceipt(receipt);
+
+        when(receiptRepository.findByCreatedAtBetween(from, to)).thenReturn(List.of(receipt));
+        when(receiptRepository.findAllById(any())).thenReturn(List.of(receipt));
+        when(discrepancyRepository.findByCreatedAtBetween(from, to)).thenReturn(List.of(damage, underQty));
+        when(palletRepository.findByCreatedAtBetweenAndReceiptIsNotNull(from, to))
+            .thenReturn(List.of(regularPallet1, regularPallet2));
+        when(taskRepository.findByTaskTypeAndClosedAtBetween(TaskType.RECEIVING, from, to)).thenReturn(List.of());
+        when(taskRepository.findByTaskTypeAndClosedAtBetween(TaskType.PLACEMENT, from, to)).thenReturn(List.of());
+
+        ReceivingAnalyticsDto result = analyticsService.calculateAnalytics(from, to);
+
+        assertEquals(100.0, result.damagedPalletsRate(), 0.0001);
+    }
+
+    @Test
     void shouldExportCsv_WhenRequested() {
         LocalDateTime from = LocalDateTime.of(2026, 2, 1, 0, 0, 0);
         LocalDateTime to = LocalDateTime.of(2026, 2, 1, 23, 59, 59);
@@ -238,6 +319,10 @@ class AnalyticsServiceTest {
             .thenReturn(List.of(stuckReceiving));
         when(receiptRepository.findByStatusAndUpdatedAtBefore(eq(ReceiptStatus.PLACING), any()))
             .thenReturn(List.of(stuckPlacing));
+        when(receiptRepository.findByStatusAndUpdatedAtBefore(eq(ReceiptStatus.READY_FOR_SHIPMENT), any()))
+            .thenReturn(List.of());
+        when(receiptRepository.findByStatusAndUpdatedAtBefore(eq(ReceiptStatus.SHIPPING_IN_PROGRESS), any()))
+            .thenReturn(List.of());
         when(taskRepository.findAll()).thenReturn(List.of(staleTask));
         when(scanRepository.existsByTaskIdAndScannedAtAfter(eq(1L), any())).thenReturn(false);
         when(discrepancyRepository.findByCreatedAtBetween(any(), any())).thenReturn(List.of(resolved));
@@ -246,6 +331,8 @@ class AnalyticsServiceTest {
 
         assertEquals(1L, result.stuckReceivingReceipts());
         assertEquals(1L, result.stuckPlacingReceipts());
+        assertEquals(0L, result.stuckReadyForShipmentReceipts());
+        assertEquals(0L, result.stuckShippingInProgressReceipts());
         assertEquals(1L, result.staleTasks());
         assertEquals(1L, result.autoResolvedDiscrepancies());
         assertEquals(1L, result.criticalDiscrepancies());

@@ -43,6 +43,15 @@ public class ReceiptLine {
     @Column(name = "qty_expected", nullable = false)
     private BigDecimal qtyExpected;
 
+    @Column(name = "qty_expected_base", precision = 18, scale = 3)
+    private BigDecimal qtyExpectedBase;
+
+    @Column(name = "unit_factor_to_base", precision = 18, scale = 6)
+    private BigDecimal unitFactorToBase;
+
+    @Column(name = "units_per_pallet_snapshot", precision = 18, scale = 3)
+    private BigDecimal unitsPerPalletSnapshot;
+
     @Column(name = "sscc_expected")
     private String ssccExpected;
 

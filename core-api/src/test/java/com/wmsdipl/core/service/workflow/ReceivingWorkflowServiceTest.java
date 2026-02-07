@@ -4,6 +4,7 @@ import com.wmsdipl.contracts.dto.RecordScanRequest;
 import com.wmsdipl.core.domain.*;
 import com.wmsdipl.core.repository.*;
 import com.wmsdipl.core.service.DuplicateScanDetectionService;
+import com.wmsdipl.core.service.ReceiptService;
 import com.wmsdipl.core.service.StockMovementService;
 import com.wmsdipl.core.service.TaskLifecycleService;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,6 +49,8 @@ class ReceivingWorkflowServiceTest {
     private StockMovementService stockMovementService;
     @Mock
     private DuplicateScanDetectionService duplicateScanDetectionService;
+    @Mock
+    private ReceiptService receiptService;
 
     @InjectMocks
     private ReceivingWorkflowService receivingWorkflowService;
@@ -79,6 +82,7 @@ class ReceivingWorkflowServiceTest {
         assertEquals(1, count);
         assertEquals(ReceiptStatus.IN_PROGRESS, testReceipt.getStatus());
         verify(taskRepository, times(1)).save(any(Task.class));
+        verify(receiptService).ensureReceiptLinesReadyForWorkflow(testReceipt);
     }
 
     @Test
@@ -99,7 +103,7 @@ class ReceivingWorkflowServiceTest {
     }
 
     @Test
-    void shouldTransitionToReadyForShipment_WhenCrossDock() {
+    void shouldTransitionToReadyForPlacement_WhenCrossDock() {
         testReceipt.setStatus(ReceiptStatus.IN_PROGRESS);
         testReceipt.setCrossDock(true);
         
@@ -111,7 +115,7 @@ class ReceivingWorkflowServiceTest {
         
         receivingWorkflowService.checkAndCompleteReceipt(1L);
         
-        assertEquals(ReceiptStatus.READY_FOR_SHIPMENT, testReceipt.getStatus());
+        assertEquals(ReceiptStatus.READY_FOR_PLACEMENT, testReceipt.getStatus());
     }
 
     @Test

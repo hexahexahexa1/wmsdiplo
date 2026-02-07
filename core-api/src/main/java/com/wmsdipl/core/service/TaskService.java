@@ -13,6 +13,7 @@ import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.TaskRepository;
 import com.wmsdipl.core.service.workflow.PlacementWorkflowService;
 import com.wmsdipl.core.service.workflow.ReceivingWorkflowService;
+import com.wmsdipl.core.service.workflow.ShippingWorkflowService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -39,6 +40,7 @@ public class TaskService {
     private final TaskLifecycleService taskLifecycleService;
     private final ReceivingWorkflowService receivingWorkflowService;
     private final PlacementWorkflowService placementWorkflowService;
+    private final ShippingWorkflowService shippingWorkflowService;
 
     public TaskService(
             TaskRepository taskRepository,
@@ -47,7 +49,8 @@ public class TaskService {
             ScanRepository scanRepository,
             TaskLifecycleService taskLifecycleService,
             ReceivingWorkflowService receivingWorkflowService,
-            PlacementWorkflowService placementWorkflowService
+            PlacementWorkflowService placementWorkflowService,
+            ShippingWorkflowService shippingWorkflowService
     ) {
         this.taskRepository = taskRepository;
         this.receiptRepository = receiptRepository;
@@ -56,6 +59,7 @@ public class TaskService {
         this.taskLifecycleService = taskLifecycleService;
         this.receivingWorkflowService = receivingWorkflowService;
         this.placementWorkflowService = placementWorkflowService;
+        this.shippingWorkflowService = shippingWorkflowService;
     }
 
     @Transactional(readOnly = true)
@@ -125,6 +129,8 @@ public class TaskService {
                 receivingWorkflowService.checkAndCompleteReceipt(completedTask.getReceipt().getId());
             } else if (completedTask.getTaskType() == TaskType.PLACEMENT) {
                 placementWorkflowService.autoCompleteReceiptIfAllTasksCompleted(completedTask.getReceipt().getId());
+            } else if (completedTask.getTaskType() == TaskType.SHIPPING) {
+                shippingWorkflowService.autoCompleteShippingIfAllTasksCompleted(completedTask.getReceipt().getId());
             }
         }
         

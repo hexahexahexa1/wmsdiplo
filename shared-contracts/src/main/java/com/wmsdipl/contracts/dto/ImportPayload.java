@@ -12,6 +12,8 @@ public record ImportPayload(
     @NotBlank String docNo,
     LocalDate docDate,
     String supplier,
+    Boolean crossDock,
+    String outboundRef,
     @NotNull List<Line> lines
 ) {
     public record Line(

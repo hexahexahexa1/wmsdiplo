@@ -254,7 +254,7 @@ public class PlacementWorkflowService {
     }
 
     /**
-     * Starts the placement process: ACCEPTED → PLACING
+     * Starts the placement process: ACCEPTED/READY_FOR_PLACEMENT → PLACING
      * Automatically generates placement tasks for all received pallets.
      * Only transitions to PLACING if tasks were successfully created.
      * 
@@ -265,9 +265,12 @@ public class PlacementWorkflowService {
         Receipt receipt = receiptRepository.findById(receiptId)
             .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Receipt not found"));
 
-        if (receipt.getStatus() != ReceiptStatus.ACCEPTED) {
+        boolean crossDockReady = Boolean.TRUE.equals(receipt.getCrossDock())
+            && receipt.getStatus() == ReceiptStatus.READY_FOR_PLACEMENT;
+        boolean regularReady = receipt.getStatus() == ReceiptStatus.ACCEPTED;
+        if (!regularReady && !crossDockReady) {
             throw new ResponseStatusException(BAD_REQUEST,
-                "Only accepted receipts can start placement");
+                "Only ACCEPTED receipts or cross-dock READY_FOR_PLACEMENT receipts can start placement");
         }
 
         // Generate placement tasks using PutawayService
@@ -316,7 +319,11 @@ public class PlacementWorkflowService {
                 "All placement tasks must be completed first");
         }
 
-        receipt.setStatus(ReceiptStatus.STOCKED);
+        if (Boolean.TRUE.equals(receipt.getCrossDock())) {
+            receipt.setStatus(ReceiptStatus.READY_FOR_SHIPMENT);
+        } else {
+            receipt.setStatus(ReceiptStatus.STOCKED);
+        }
         receiptRepository.save(receipt);
     }
 
@@ -347,8 +354,12 @@ public class PlacementWorkflowService {
             .allMatch(t -> t.getStatus() == TaskStatus.COMPLETED);
 
         if (allCompleted) {
-            // All tasks completed - auto-transition to STOCKED
-            receipt.setStatus(ReceiptStatus.STOCKED);
+            // All tasks completed - transition depends on receipt flow.
+            if (Boolean.TRUE.equals(receipt.getCrossDock())) {
+                receipt.setStatus(ReceiptStatus.READY_FOR_SHIPMENT);
+            } else {
+                receipt.setStatus(ReceiptStatus.STOCKED);
+            }
             receiptRepository.save(receipt);
         }
     }

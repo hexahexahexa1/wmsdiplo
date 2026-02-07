@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<receipt messageId="MSG-XDOCK-2026-02-07-001"
+         docNo="RCP-XDOCK-2026-02-07-001"
+         docDate="2026-02-07"
+         supplier="ООО Кроссдок Тест"
+         crossDock="true"
+         outboundRef="SO-XDOCK-2026-02-07-001">
+
+    <line lineNo="1"
+          sku="XD-SKU-001"
+          name="Тестовый товар XDock 1"
+          uom="шт"
+          qtyExpected="10"
+          packaging="короб"
+          sscc="00000000000000010001"/>
+
+    <line lineNo="2"
+          sku="XD-SKU-002"
+          name="Тестовый товар XDock 2"
+          uom="шт"
+          qtyExpected="5"
+          packaging="короб"
+          sscc="00000000000000010002"/>
+
+</receipt>

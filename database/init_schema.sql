@@ -33,6 +33,7 @@ DROP TABLE IF EXISTS receipts CASCADE;
 DROP TABLE IF EXISTS scans CASCADE;
 DROP TABLE IF EXISTS schema_version CASCADE;
 DROP TABLE IF EXISTS sku_storage_config CASCADE;
+DROP TABLE IF EXISTS sku_unit_configs CASCADE;
 DROP TABLE IF EXISTS skus CASCADE;
 DROP TABLE IF EXISTS status_history CASCADE;
 DROP TABLE IF EXISTS tasks CASCADE;
@@ -53,9 +54,21 @@ DROP TYPE IF EXISTS movement_type CASCADE;
 CREATE TYPE location_status AS ENUM ('AVAILABLE', 'OCCUPIED', 'RESERVED', 'BLOCKED', 'MAINTENANCE');
 CREATE TYPE location_type AS ENUM ('RECEIVING', 'STORAGE', 'PICKING', 'SHIPPING', 'CROSS_DOCK', 'DAMAGED', 'QUARANTINE');
 CREATE TYPE pallet_status AS ENUM ('EMPTY', 'RECEIVING', 'RECEIVED', 'STORED', 'IN_TRANSIT', 'PLACED', 'PICKING', 'SHIPPED', 'DAMAGED', 'QUARANTINE');
-CREATE TYPE receipt_status AS ENUM ('DRAFT', 'CONFIRMED', 'IN_PROGRESS', 'ACCEPTED', 'READY_FOR_SHIPMENT', 'CANCELLED');
+CREATE TYPE receipt_status AS ENUM (
+    'DRAFT',
+    'CONFIRMED',
+    'IN_PROGRESS',
+    'ACCEPTED',
+    'READY_FOR_PLACEMENT',
+    'READY_FOR_SHIPMENT',
+    'SHIPPING_IN_PROGRESS',
+    'SHIPPED',
+    'PLACING',
+    'STOCKED',
+    'CANCELLED'
+);
 CREATE TYPE task_status AS ENUM ('NEW', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED');
-CREATE TYPE task_type AS ENUM ('RECEIVING', 'PLACEMENT', 'PUTAWAY', 'PICKING', 'REPLENISHMENT', 'CYCLE_COUNT');
+CREATE TYPE task_type AS ENUM ('RECEIVING', 'PLACEMENT', 'SHIPPING', 'PUTAWAY', 'PICKING', 'REPLENISHMENT', 'CYCLE_COUNT');
 CREATE TYPE user_role AS ENUM ('OPERATOR', 'SUPERVISOR', 'ADMIN');
 CREATE TYPE movement_type AS ENUM ('RECEIVE', 'PUTAWAY', 'PICK', 'TRANSFER', 'ADJUSTMENT');
 
@@ -110,6 +123,22 @@ CREATE TABLE skus (
 );
 
 --
+-- Table: sku_unit_configs
+--
+CREATE TABLE sku_unit_configs (
+    id BIGSERIAL PRIMARY KEY,
+    sku_id BIGINT NOT NULL REFERENCES skus(id) ON DELETE CASCADE,
+    unit_code VARCHAR(32) NOT NULL,
+    factor_to_base NUMERIC(18,6) NOT NULL CHECK (factor_to_base > 0),
+    units_per_pallet NUMERIC(18,3) NOT NULL CHECK (units_per_pallet > 0),
+    is_base BOOLEAN NOT NULL DEFAULT false,
+    active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(sku_id, unit_code)
+);
+
+--
 -- Table: packagings
 --
 CREATE TABLE packagings (
@@ -131,6 +160,7 @@ CREATE TABLE receipts (
     message_id VARCHAR(100),
     external_key VARCHAR(100),
     cross_dock BOOLEAN DEFAULT false,
+    outbound_ref VARCHAR(128),
     entity_version BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -147,6 +177,9 @@ CREATE TABLE receipt_lines (
     packaging_id BIGINT REFERENCES packagings(id),
     uom VARCHAR(10) NOT NULL,
     qty_expected NUMERIC(10,2) NOT NULL,
+    qty_expected_base NUMERIC(18,3),
+    unit_factor_to_base NUMERIC(18,6),
+    units_per_pallet_snapshot NUMERIC(18,3),
     sscc_expected VARCHAR(50),
     lot_number_expected VARCHAR(100),
     expiry_date_expected DATE,
@@ -382,6 +415,8 @@ CREATE TABLE schema_version (
 CREATE INDEX idx_locations_zone ON locations(zone_id);
 CREATE INDEX idx_locations_type ON locations(location_type);
 CREATE INDEX idx_locations_status ON locations(status);
+CREATE UNIQUE INDEX uq_sku_unit_configs_single_base ON sku_unit_configs(sku_id) WHERE is_base = true;
+CREATE INDEX idx_sku_unit_configs_sku ON sku_unit_configs(sku_id);
 CREATE INDEX idx_receipt_lines_receipt ON receipt_lines(receipt_id);
 CREATE INDEX idx_receipt_lines_sku ON receipt_lines(sku_id);
 CREATE INDEX idx_pallets_sku ON pallets(sku_id);
@@ -404,6 +439,9 @@ CREATE INDEX idx_import_config_key ON import_config(config_key);
 CREATE INDEX idx_receipts_status ON receipts(status);
 CREATE INDEX idx_receipts_doc_date ON receipts(doc_date);
 CREATE INDEX idx_tasks_created ON tasks(created_at);
+CREATE INDEX idx_receipts_status_crossdock_updated_at ON receipts(status, cross_dock, updated_at);
+CREATE INDEX idx_tasks_receipt_tasktype_status ON tasks(receipt_id, task_type, status);
+CREATE INDEX idx_pallets_receipt_status_location ON pallets(receipt_id, status, location_id);
 
 -- Insert default import configuration
 INSERT INTO import_config (config_key, config_value, updated_at) 

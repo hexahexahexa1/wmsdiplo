@@ -2,6 +2,8 @@ package com.wmsdipl.core.web;
 
 import com.wmsdipl.contracts.dto.CreateSkuRequest;
 import com.wmsdipl.contracts.dto.SkuDto;
+import com.wmsdipl.contracts.dto.SkuUnitConfigDto;
+import com.wmsdipl.contracts.dto.UpsertSkuUnitConfigsRequest;
 import com.wmsdipl.core.service.SkuService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -69,5 +71,20 @@ public class SkuController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable Long id) {
         skuService.delete(id);
+    }
+
+    @GetMapping("/{id}/unit-configs")
+    @Operation(summary = "Get SKU unit configs", description = "Returns configured units and palletization rules for a SKU")
+    public List<SkuUnitConfigDto> getUnitConfigs(@PathVariable Long id) {
+        return skuService.getUnitConfigs(id);
+    }
+
+    @PutMapping("/{id}/unit-configs")
+    @Operation(summary = "Replace SKU unit configs", description = "Replaces full set of units/palletization configs for a SKU")
+    public List<SkuUnitConfigDto> replaceUnitConfigs(
+        @PathVariable Long id,
+        @RequestBody @Valid UpsertSkuUnitConfigsRequest request
+    ) {
+        return skuService.replaceUnitConfigs(id, request);
     }
 }

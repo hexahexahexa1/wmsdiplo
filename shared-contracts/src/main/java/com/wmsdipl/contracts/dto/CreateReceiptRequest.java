@@ -15,6 +15,7 @@ public record CreateReceiptRequest(
     LocalDate docDate,
     String supplier,
     Boolean crossDock,
+    String outboundRef,
     @NotEmpty List<@Valid Line> lines
 ) {
     public record Line(

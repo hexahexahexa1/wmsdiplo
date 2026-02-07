@@ -54,6 +54,9 @@ public class Receipt {
     @Column(name = "cross_dock")
     private Boolean crossDock = false;
 
+    @Column(name = "outbound_ref", length = 128)
+    private String outboundRef;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 

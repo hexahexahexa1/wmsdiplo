@@ -12,6 +12,7 @@ import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.service.TaskService;
 import com.wmsdipl.core.service.workflow.PlacementWorkflowService;
 import com.wmsdipl.core.service.workflow.ReceivingWorkflowService;
+import com.wmsdipl.core.service.workflow.ShippingWorkflowService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -54,6 +55,9 @@ class TaskControllerTest {
 
     @MockBean
     private PlacementWorkflowService placementWorkflowService;
+
+    @MockBean
+    private ShippingWorkflowService shippingWorkflowService;
 
     @MockBean
     private ScanRepository scanRepository;
@@ -107,13 +111,15 @@ class TaskControllerTest {
 
         when(taskService.findFiltered(isNull(), isNull(), isNull(), isNull(), any()))
             .thenReturn(new PageImpl<>(List.of(task), PageRequest.of(0, 10), 1));
-        when(taskMapper.toDto(task)).thenReturn(dto);
+        when(taskMapper.toDtoList(List.of(task))).thenReturn(List.of(dto));
 
         mockMvc.perform(get("/api/tasks").param("page", "0").param("size", "10"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.content[0].id").value(1));
 
         verify(taskService).findFiltered(isNull(), isNull(), isNull(), isNull(), any());
+        verify(taskMapper).toDtoList(List.of(task));
+        verify(taskMapper, never()).toDto(any(Task.class));
     }
 
     @Test
@@ -364,6 +370,53 @@ class TaskControllerTest {
     }
 
     @Test
+    void shouldRecordShippingScan_WhenTaskTypeIsShipping() throws Exception {
+        Task task = createMockTask(1L, TaskType.SHIPPING);
+        Scan scan = createMockScan(1L);
+        ScanDto scanDto = new ScanDto(
+                1L,
+                1L,
+                null,
+                "PALLET-001",
+                "SSCC-001",
+                "BARCODE-001",
+                BigDecimal.TEN,
+                "DEVICE-01",
+                false,
+                false,
+                null,
+                null,
+                null,
+                null,
+                LocalDateTime.now(),
+                false,
+                false,
+                List.of()
+        );
+
+        when(taskService.get(1L)).thenReturn(task);
+        when(shippingWorkflowService.recordShipping(eq(1L), any(RecordScanRequest.class))).thenReturn(scan);
+        when(scanMapper.toDto(scan)).thenReturn(scanDto);
+
+        String requestBody = """
+                {
+                    "palletCode": "PALLET-001",
+                    "qty": 10,
+                    "sscc": "SSCC-001",
+                    "barcode": "BARCODE-001"
+                }
+                """;
+
+        mockMvc.perform(post("/api/tasks/1/scans")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.barcode").value("BARCODE-001"));
+
+        verify(shippingWorkflowService).recordShipping(eq(1L), any(RecordScanRequest.class));
+    }
+
+    @Test
     void shouldGenerateTasks_WhenValidRequest() throws Exception {
         // Given
         doNothing().when(taskService).createReceivingTasks(100L, TaskType.RECEIVING, 5);
@@ -478,6 +531,9 @@ class TaskControllerTest {
                 null,                   // skuId
                 BigDecimal.ZERO,        // qtyAssigned
                 BigDecimal.ZERO,        // qtyDone
+                null,                   // lineUom
+                null,                   // baseUom
+                null,                   // unitFactorToBase
                 null,                   // skuCode
                 null,                   // palletCode
                 null,                   // priority

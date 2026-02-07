@@ -4,12 +4,14 @@ import com.wmsdipl.contracts.dto.TaskDto;
 import com.wmsdipl.core.domain.Location;
 import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.domain.ReceiptLine;
+import com.wmsdipl.core.domain.SkuUnitConfig;
 import com.wmsdipl.core.domain.Task;
 import com.wmsdipl.core.domain.Pallet;
 import com.wmsdipl.core.domain.Sku;
 import com.wmsdipl.core.repository.LocationRepository;
 import com.wmsdipl.core.repository.PalletRepository;
 import com.wmsdipl.core.repository.SkuRepository;
+import com.wmsdipl.core.repository.SkuUnitConfigRepository;
 import org.springframework.stereotype.Component;
 
 import java.util.Collection;
@@ -25,11 +27,18 @@ public class TaskMapper {
     private final LocationRepository locationRepository;
     private final SkuRepository skuRepository;
     private final PalletRepository palletRepository;
+    private final SkuUnitConfigRepository skuUnitConfigRepository;
     
-    public TaskMapper(LocationRepository locationRepository, SkuRepository skuRepository, PalletRepository palletRepository) {
+    public TaskMapper(
+        LocationRepository locationRepository,
+        SkuRepository skuRepository,
+        PalletRepository palletRepository,
+        SkuUnitConfigRepository skuUnitConfigRepository
+    ) {
         this.locationRepository = locationRepository;
         this.skuRepository = skuRepository;
         this.palletRepository = palletRepository;
+        this.skuUnitConfigRepository = skuUnitConfigRepository;
     }
 
     public List<TaskDto> toDtoList(List<Task> tasks) {
@@ -57,9 +66,10 @@ public class TaskMapper {
             tasks,
             palletsById.values()
         );
+        Map<Long, String> baseUomBySkuId = loadBaseUomBySkuId(skuCodesById.keySet());
 
         return tasks.stream()
-            .map(task -> toDto(task, targetLocationCodes, palletsById, skuCodesById))
+            .map(task -> toDto(task, targetLocationCodes, palletsById, skuCodesById, baseUomBySkuId))
             .toList();
     }
     
@@ -74,7 +84,8 @@ public class TaskMapper {
                 .ifPresent(location -> locationCodes.put(location.getId(), location.getCode()));
         }
         Map<Long, String> skuCodes = loadSkuCodes(List.of(task), pallets.values());
-        return toDto(task, locationCodes, pallets, skuCodes);
+        Map<Long, String> baseUomBySkuId = loadBaseUomBySkuId(skuCodes.keySet());
+        return toDto(task, locationCodes, pallets, skuCodes, baseUomBySkuId);
     }
 
     private Map<Long, String> loadSkuCodes(List<Task> tasks, Collection<Pallet> pallets) {
@@ -102,7 +113,8 @@ public class TaskMapper {
             Task task,
             Map<Long, String> targetLocationCodes,
             Map<Long, Pallet> palletsById,
-            Map<Long, String> skuCodesById
+            Map<Long, String> skuCodesById,
+            Map<Long, String> baseUomBySkuId
     ) {
         String targetLocationCode = task.getTargetLocationId() != null
             ? targetLocationCodes.get(task.getTargetLocationId())
@@ -118,6 +130,9 @@ public class TaskMapper {
             skuId = pallet.getSkuId();
         }
         String skuCode = skuId != null ? skuCodesById.get(skuId) : null;
+        String baseUom = skuId != null ? baseUomBySkuId.get(skuId) : null;
+        String lineUom = line != null ? line.getUom() : null;
+        java.math.BigDecimal unitFactorToBase = line != null ? line.getUnitFactorToBase() : null;
 
         Receipt receipt = task.getReceipt();
         return new TaskDto(
@@ -136,6 +151,9 @@ public class TaskMapper {
                 line != null ? line.getSkuId() : null,
                 task.getQtyAssigned(),
                 task.getQtyDone(),
+                lineUom,
+                baseUom,
+                unitFactorToBase,
                 skuCode,
                 palletCode,
                 task.getPriority(),
@@ -143,5 +161,13 @@ public class TaskMapper {
                 task.getStartedAt(),
                 task.getClosedAt()
         );
+    }
+
+    private Map<Long, String> loadBaseUomBySkuId(Collection<Long> skuIds) {
+        if (skuIds == null || skuIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return skuUnitConfigRepository.findBySkuIdInAndIsBaseTrueAndActiveTrue(skuIds).stream()
+            .collect(java.util.stream.Collectors.toMap(SkuUnitConfig::getSkuId, SkuUnitConfig::getUnitCode));
     }
 }

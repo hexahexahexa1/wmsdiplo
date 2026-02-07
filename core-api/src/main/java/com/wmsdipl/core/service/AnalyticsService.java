@@ -38,6 +38,7 @@ import java.util.stream.Stream;
  */
 @Service
 public class AnalyticsService {
+    private static final Set<String> DAMAGE_DISCREPANCY_TYPES = Set.of("DAMAGE", "EXPIRED_PRODUCT", "EXPIRED");
 
     private final ReceiptRepository receiptRepository;
     private final TaskRepository taskRepository;
@@ -67,7 +68,8 @@ public class AnalyticsService {
      * Metrics include:
      * - Receipt counts by status
      * - Discrepancy counts by type and rate
-     * - Pallet counts by status and damaged rate
+     * - Pallet counts by status
+     * - Damage rate (damage discrepancies share, with fallback to damaged pallets share)
      * - Average receiving time
      * 
      * @param startDate start of period (inclusive)
@@ -129,7 +131,7 @@ public class AnalyticsService {
             ? 0.0
             : ((double) receiptsWithDiscrepancies / activeReceipts.size()) * 100.0;
 
-        double damagedPalletsRate = calculateDamageRate(discrepancies, pallets);
+        double damagedPalletsRate = calculateDamageRate(activeReceipts, activeReceiptIds, discrepancies, pallets);
         double avgReceivingTimeHours = calculateAverageTaskTimeHours(receivingTasks);
         double avgPlacingTimeHours = calculateAverageTaskTimeHours(placementTasks);
 
@@ -195,8 +197,22 @@ public class AnalyticsService {
             .filter(receipt -> isWithinPeriod(receipt.getCreatedAt(), startDate, endDate))
             .count();
 
+        long stuckReadyForShipmentReceipts = receiptRepository
+            .findByStatusAndUpdatedAtBefore(ReceiptStatus.READY_FOR_SHIPMENT, staleThreshold)
+            .stream()
+            .filter(receipt -> isWithinPeriod(receipt.getCreatedAt(), startDate, endDate))
+            .count();
+
+        long stuckShippingInProgressReceipts = receiptRepository
+            .findByStatusAndUpdatedAtBefore(ReceiptStatus.SHIPPING_IN_PROGRESS, staleThreshold)
+            .stream()
+            .filter(receipt -> isWithinPeriod(receipt.getCreatedAt(), startDate, endDate))
+            .count();
+
         long staleTasks = taskRepository.findAll().stream()
-            .filter(task -> task.getTaskType() == TaskType.RECEIVING || task.getTaskType() == TaskType.PLACEMENT)
+            .filter(task -> task.getTaskType() == TaskType.RECEIVING
+                || task.getTaskType() == TaskType.PLACEMENT
+                || task.getTaskType() == TaskType.SHIPPING)
             .filter(task -> task.getStatus() == TaskStatus.ASSIGNED || task.getStatus() == TaskStatus.IN_PROGRESS)
             .filter(task -> {
                 LocalDateTime activityReference = task.getStartedAt() != null ? task.getStartedAt() : task.getCreatedAt();
@@ -227,6 +243,8 @@ public class AnalyticsService {
             thresholdHours,
             stuckReceivingReceipts,
             stuckPlacingReceipts,
+            stuckReadyForShipmentReceipts,
+            stuckShippingInProgressReceipts,
             staleTasks,
             autoResolvedDiscrepancies,
             criticalDiscrepancies
@@ -307,23 +325,38 @@ public class AnalyticsService {
             .orElse(0.0);
     }
 
-    private double calculateDamageRate(List<Discrepancy> discrepancies, List<Pallet> pallets) {
-        if (!discrepancies.isEmpty()) {
-            long damageDiscrepancies = discrepancies.stream()
-                .filter(discrepancy -> discrepancy.getType() != null)
-                .filter(discrepancy -> "DAMAGE".equalsIgnoreCase(discrepancy.getType()))
-                .count();
-            return ((double) damageDiscrepancies / discrepancies.size()) * 100.0;
-        }
-
-        if (pallets.isEmpty()) {
+    private double calculateDamageRate(
+        List<Receipt> activeReceipts,
+        Set<Long> activeReceiptIds,
+        List<Discrepancy> discrepancies,
+        List<Pallet> pallets
+    ) {
+        if (activeReceipts == null || activeReceipts.isEmpty()) {
             return 0.0;
         }
 
-        long damagedPalletsCount = pallets.stream()
-            .filter(pallet -> pallet.getStatus() == PalletStatus.DAMAGED)
-            .count();
-        return ((double) damagedPalletsCount / pallets.size()) * 100.0;
+        Set<Long> damagedReceiptIds = discrepancies.stream()
+            .filter(discrepancy -> discrepancy.getType() != null)
+            .filter(discrepancy -> DAMAGE_DISCREPANCY_TYPES.contains(discrepancy.getType().trim().toUpperCase()))
+            .map(Discrepancy::getReceipt)
+            .filter(Objects::nonNull)
+            .map(Receipt::getId)
+            .filter(Objects::nonNull)
+            .filter(activeReceiptIds::contains)
+            .collect(Collectors.toSet());
+
+        if (damagedReceiptIds.isEmpty()) {
+            damagedReceiptIds = pallets.stream()
+                .filter(pallet -> pallet.getStatus() == PalletStatus.DAMAGED)
+                .map(Pallet::getReceipt)
+                .filter(Objects::nonNull)
+                .map(Receipt::getId)
+                .filter(Objects::nonNull)
+                .filter(activeReceiptIds::contains)
+                .collect(Collectors.toSet());
+        }
+
+        return ((double) damagedReceiptIds.size() / activeReceipts.size()) * 100.0;
     }
 
     private <T> Map<String, Integer> countByKey(List<T> items, Function<T, String> keyExtractor) {

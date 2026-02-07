@@ -15,12 +15,14 @@ import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.service.TaskService;
 import com.wmsdipl.core.service.workflow.PlacementWorkflowService;
 import com.wmsdipl.core.service.workflow.ReceivingWorkflowService;
+import com.wmsdipl.core.service.workflow.ShippingWorkflowService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
@@ -41,6 +43,7 @@ public class TaskController {
     private final TaskService taskService;
     private final ReceivingWorkflowService receivingWorkflowService;
     private final PlacementWorkflowService placementWorkflowService;
+    private final ShippingWorkflowService shippingWorkflowService;
     private final ScanRepository scanRepository;
     private final ScanMapper scanMapper;
     private final TaskMapper taskMapper;
@@ -50,6 +53,7 @@ public class TaskController {
             TaskService taskService, 
             ReceivingWorkflowService receivingWorkflowService,
             PlacementWorkflowService placementWorkflowService,
+            ShippingWorkflowService shippingWorkflowService,
             ScanRepository scanRepository,
             ScanMapper scanMapper,
             TaskMapper taskMapper,
@@ -58,6 +62,7 @@ public class TaskController {
         this.taskService = taskService;
         this.receivingWorkflowService = receivingWorkflowService;
         this.placementWorkflowService = placementWorkflowService;
+        this.shippingWorkflowService = shippingWorkflowService;
         this.scanRepository = scanRepository;
         this.scanMapper = scanMapper;
         this.taskMapper = taskMapper;
@@ -79,8 +84,9 @@ public class TaskController {
             @RequestParam(required = false) Long receiptId,
             @PageableDefault(size = 50, sort = "priority") Pageable pageable
     ) {
-        return taskService.findFiltered(assignee, status, taskType, receiptId, pageable)
-            .map(taskMapper::toDto);
+        Page<Task> taskPage = taskService.findFiltered(assignee, status, taskType, receiptId, pageable);
+        List<TaskDto> content = taskMapper.toDtoList(taskPage.getContent());
+        return new PageImpl<>(content, taskPage.getPageable(), taskPage.getTotalElements());
     }
 
     @GetMapping(params = {"receiptId", "!page"})
@@ -181,7 +187,7 @@ public class TaskController {
     }
 
     @PostMapping("/{id}/scans")
-    @Operation(summary = "Record scan", description = "Records a barcode scan during task execution (RECEIVING or PLACEMENT)")
+    @Operation(summary = "Record scan", description = "Records a barcode scan during task execution (RECEIVING, PLACEMENT, or SHIPPING)")
     public ResponseEntity<ScanDto> scan(@PathVariable Long id, @RequestBody @Valid RecordScanRequest request) {
         // Route to appropriate workflow service based on task type
         Task task = taskService.get(id);
@@ -191,6 +197,8 @@ public class TaskController {
             scan = executeWithOptimisticRetry(() -> receivingWorkflowService.recordScan(id, request));
         } else if (task.getTaskType() == TaskType.PLACEMENT) {
             scan = executeWithOptimisticRetry(() -> placementWorkflowService.recordPlacement(id, request));
+        } else if (task.getTaskType() == TaskType.SHIPPING) {
+            scan = executeWithOptimisticRetry(() -> shippingWorkflowService.recordShipping(id, request));
         } else {
             throw new ResponseStatusException(
                 org.springframework.http.HttpStatus.BAD_REQUEST,

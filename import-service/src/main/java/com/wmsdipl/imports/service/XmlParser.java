@@ -48,6 +48,12 @@ public class XmlParser {
         String docDateAttr = root.getAttribute("docDate");
         LocalDate docDate = docDateAttr == null || docDateAttr.isBlank() ? null : LocalDate.parse(docDateAttr);
         String supplier = root.getAttribute("supplier");
+        String crossDockAttr = root.getAttribute("crossDock");
+        Boolean crossDock = crossDockAttr == null || crossDockAttr.isBlank() ? null : Boolean.parseBoolean(crossDockAttr);
+        String outboundRef = root.getAttribute("outboundRef");
+        if (outboundRef != null && outboundRef.isBlank()) {
+            outboundRef = null;
+        }
 
         List<ImportPayload.Line> lines = new ArrayList<>();
         NodeList lineNodes = root.getElementsByTagName("line");
@@ -66,7 +72,7 @@ public class XmlParser {
         }
 
         log.info("Parsed XML docNo={} lines={}", docNo, lines.size());
-        return new ImportPayload(messageId, docNo, docDate, supplier, lines);
+        return new ImportPayload(messageId, docNo, docDate, supplier, crossDock, outboundRef, lines);
     }
 
     private String hashFile(File file) throws Exception {

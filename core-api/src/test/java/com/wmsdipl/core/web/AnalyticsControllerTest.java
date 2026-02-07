@@ -81,6 +81,8 @@ class AnalyticsControllerTest {
             4,
             2L,
             1L,
+            0L,
+            0L,
             5L,
             3L,
             4L

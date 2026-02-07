@@ -156,6 +156,24 @@ class PlacementWorkflowServiceTest {
     }
 
     @Test
+    void shouldStartPlacement_WhenCrossDockReceiptReadyForPlacement() {
+        testReceipt.setCrossDock(true);
+        testReceipt.setStatus(ReceiptStatus.READY_FOR_PLACEMENT);
+        Task createdTask = new Task();
+        createdTask.setTaskType(TaskType.PLACEMENT);
+
+        when(receiptRepository.findById(1L)).thenReturn(Optional.of(testReceipt));
+        when(putawayService.generatePlacementTasks(1L)).thenReturn(List.of(createdTask));
+        when(receiptRepository.save(any(Receipt.class))).thenReturn(testReceipt);
+
+        int created = placementWorkflowService.startPlacement(1L);
+
+        assertEquals(1, created);
+        assertEquals(ReceiptStatus.PLACING, testReceipt.getStatus());
+        verify(receiptRepository, times(1)).save(testReceipt);
+    }
+
+    @Test
     void shouldRecordPlacement_WhenValidRequest() throws Exception {
         // Given
         testReceipt.setStatus(ReceiptStatus.PLACING);
@@ -307,6 +325,23 @@ class PlacementWorkflowServiceTest {
 
         // Then
         assertEquals(ReceiptStatus.STOCKED, testReceipt.getStatus());
+        verify(receiptRepository, times(1)).save(testReceipt);
+    }
+
+    @Test
+    void shouldReturnReadyForShipment_WhenCompletePlacementForCrossDock() {
+        testReceipt.setCrossDock(true);
+        testReceipt.setStatus(ReceiptStatus.PLACING);
+        Task task = new Task();
+        task.setStatus(TaskStatus.COMPLETED);
+
+        when(receiptRepository.findById(1L)).thenReturn(Optional.of(testReceipt));
+        when(taskRepository.findByReceiptIdAndTaskType(1L, TaskType.PLACEMENT)).thenReturn(List.of(task));
+        when(receiptRepository.save(any(Receipt.class))).thenReturn(testReceipt);
+
+        placementWorkflowService.completePlacement(1L);
+
+        assertEquals(ReceiptStatus.READY_FOR_SHIPMENT, testReceipt.getStatus());
         verify(receiptRepository, times(1)).save(testReceipt);
     }
 

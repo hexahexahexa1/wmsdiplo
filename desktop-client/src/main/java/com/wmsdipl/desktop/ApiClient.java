@@ -12,6 +12,7 @@ import com.wmsdipl.desktop.model.Receipt;
 import com.wmsdipl.desktop.model.ReceiptLine;
 import com.wmsdipl.desktop.model.Scan;
 import com.wmsdipl.desktop.model.Sku;
+import com.wmsdipl.desktop.model.SkuUnitConfig;
 import com.wmsdipl.desktop.model.StockItem;
 import com.wmsdipl.desktop.model.StockMovement;
 import com.wmsdipl.desktop.model.Task;
@@ -23,6 +24,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -109,22 +111,28 @@ public class ApiClient {
         throw new IOException(formatErrorMessage(response.statusCode(), "/api/receipts", response.body()));
     }
 
-    public Receipt createDraft(String docNo, String supplier) throws IOException, InterruptedException {
+    public Receipt createDraft(
+        String docNo,
+        LocalDate docDate,
+        String supplier,
+        boolean crossDock,
+        String outboundRef
+    ) throws IOException, InterruptedException {
         var payload = mapper.createObjectNode();
         payload.put("docNo", docNo);
+        if (docDate != null) {
+            payload.put("docDate", docDate.toString());
+        }
         if (supplier != null && !supplier.isBlank()) {
             payload.put("supplier", supplier);
         }
-        var lines = mapper.createArrayNode();
-        var line = mapper.createObjectNode();
-        line.put("lineNo", 1);
-        line.put("skuCode", "DEFAULT");
-        line.put("qtyOrdered", 1);
-        lines.add(line);
-        payload.set("lines", lines);
+        payload.put("crossDock", crossDock);
+        if (outboundRef != null && !outboundRef.isBlank()) {
+            payload.put("outboundRef", outboundRef);
+        }
 
         HttpRequest request = withAuth(HttpRequest.newBuilder())
-            .uri(URI.create(baseUrl + "/api/receipts"))
+            .uri(URI.create(baseUrl + "/api/receipts/drafts"))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload)))
             .build();
@@ -132,7 +140,87 @@ public class ApiClient {
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             return mapper.readValue(response.body(), Receipt.class);
         }
-        throw new IOException(formatErrorMessage(response.statusCode(), "/api/receipts", response.body()));
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/receipts/drafts", response.body()));
+    }
+
+    public ReceiptLine addReceiptLine(
+        long receiptId,
+        Integer lineNo,
+        long skuId,
+        String uom,
+        BigDecimal qtyExpected,
+        String ssccExpected
+    ) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        if (lineNo != null) {
+            payload.put("lineNo", lineNo);
+        }
+        payload.put("skuId", skuId);
+        payload.put("uom", uom);
+        payload.put("qtyExpected", qtyExpected);
+        if (ssccExpected != null && !ssccExpected.isBlank()) {
+            payload.put("ssccExpected", ssccExpected);
+        }
+
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/receipts/" + receiptId + "/lines"))
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload)))
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), ReceiptLine.class);
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/receipts/" + receiptId + "/lines", response.body()));
+    }
+
+    public ReceiptLine updateReceiptLine(
+        long receiptId,
+        long lineId,
+        Integer lineNo,
+        long skuId,
+        String uom,
+        BigDecimal qtyExpected,
+        String ssccExpected
+    ) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        if (lineNo != null) {
+            payload.put("lineNo", lineNo);
+        }
+        payload.put("skuId", skuId);
+        payload.put("uom", uom);
+        payload.put("qtyExpected", qtyExpected);
+        if (ssccExpected != null && !ssccExpected.isBlank()) {
+            payload.put("ssccExpected", ssccExpected);
+        }
+
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/receipts/" + receiptId + "/lines/" + lineId))
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .PUT(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload)))
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), ReceiptLine.class);
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/receipts/" + receiptId + "/lines/" + lineId, response.body()));
+    }
+
+    public void deleteReceiptLine(long receiptId, long lineId) throws IOException, InterruptedException {
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/receipts/" + receiptId + "/lines/" + lineId))
+            .DELETE()
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return;
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/receipts/" + receiptId + "/lines/" + lineId, response.body()));
     }
 
     public void confirm(long id) throws IOException, InterruptedException {
@@ -159,6 +247,15 @@ public class ApiClient {
 
     public void completePlacement(long id) throws IOException, InterruptedException {
         postNoBody("/api/receipts/" + id + "/complete-placement");
+    }
+
+    public Integer startShipping(long id) throws IOException, InterruptedException {
+        Map<String, Integer> res = postForObject("/api/receipts/" + id + "/start-shipping", null, new TypeReference<Map<String, Integer>>(){});
+        return res.get("count");
+    }
+
+    public void completeShipping(long id) throws IOException, InterruptedException {
+        postNoBody("/api/receipts/" + id + "/complete-shipping");
     }
 
     public List<ReceiptLine> getReceiptLines(long receiptId) throws IOException, InterruptedException {
@@ -270,6 +367,42 @@ public class ApiClient {
             return;
         }
         throw new IOException("Delete SKU failed: status=" + response.statusCode() + " body=" + response.body());
+    }
+
+    public List<SkuUnitConfig> listSkuUnitConfigs(Long skuId) throws IOException, InterruptedException {
+        return getForList("/api/skus/" + skuId + "/unit-configs", new TypeReference<>() {});
+    }
+
+    public List<SkuUnitConfig> replaceSkuUnitConfigs(Long skuId, List<SkuUnitConfig> configs)
+            throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        var array = mapper.createArrayNode();
+        for (SkuUnitConfig config : configs) {
+            var node = mapper.createObjectNode();
+            if (config.id() != null) {
+                node.put("id", config.id());
+            }
+            node.put("unitCode", config.unitCode());
+            node.put("factorToBase", config.factorToBase());
+            node.put("unitsPerPallet", config.unitsPerPallet());
+            node.put("isBase", Boolean.TRUE.equals(config.isBase()));
+            node.put("active", Boolean.TRUE.equals(config.active()));
+            array.add(node);
+        }
+        payload.set("configs", array);
+
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/skus/" + skuId + "/unit-configs"))
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .PUT(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload)))
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), new TypeReference<>() {});
+        }
+        throw new IOException("Replace SKU unit configs failed: status=" + response.statusCode() + " body=" + response.body());
     }
 
     // Terminal lifecycle methods

@@ -6,12 +6,14 @@ import com.wmsdipl.core.domain.Pallet;
 import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.domain.ReceiptLine;
 import com.wmsdipl.core.domain.Sku;
+import com.wmsdipl.core.domain.SkuUnitConfig;
 import com.wmsdipl.core.domain.Task;
 import com.wmsdipl.core.domain.TaskStatus;
 import com.wmsdipl.core.domain.TaskType;
 import com.wmsdipl.core.repository.LocationRepository;
 import com.wmsdipl.core.repository.PalletRepository;
 import com.wmsdipl.core.repository.SkuRepository;
+import com.wmsdipl.core.repository.SkuUnitConfigRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -29,13 +31,16 @@ class TaskMapperTest {
     private LocationRepository locationRepository;
     private SkuRepository skuRepository;
     private PalletRepository palletRepository;
+    private SkuUnitConfigRepository skuUnitConfigRepository;
 
     @BeforeEach
     void setUp() {
         locationRepository = mock(LocationRepository.class);
         skuRepository = mock(SkuRepository.class);
         palletRepository = mock(PalletRepository.class);
-        taskMapper = new TaskMapper(locationRepository, skuRepository, palletRepository);
+        skuUnitConfigRepository = mock(SkuUnitConfigRepository.class);
+        when(skuUnitConfigRepository.findBySkuIdInAndIsBaseTrueAndActiveTrue(anyCollection())).thenReturn(List.of());
+        taskMapper = new TaskMapper(locationRepository, skuRepository, palletRepository, skuUnitConfigRepository);
     }
 
     @Test
@@ -48,6 +53,8 @@ class TaskMapperTest {
         ReceiptLine line = mock(ReceiptLine.class);
         when(line.getId()).thenReturn(10L);
         when(line.getSkuId()).thenReturn(100L);
+        when(line.getUom()).thenReturn("BOX");
+        when(line.getUnitFactorToBase()).thenReturn(BigDecimal.valueOf(12));
 
         Location targetLocation = mock(Location.class);
         when(targetLocation.getId()).thenReturn(300L);
@@ -58,6 +65,10 @@ class TaskMapperTest {
         when(sku.getId()).thenReturn(100L);
         when(sku.getCode()).thenReturn("SKU-100");
         when(skuRepository.findAllById(any())).thenReturn(List.of(sku));
+        SkuUnitConfig baseConfig = mock(SkuUnitConfig.class);
+        when(baseConfig.getSkuId()).thenReturn(100L);
+        when(baseConfig.getUnitCode()).thenReturn("PCS");
+        when(skuUnitConfigRepository.findBySkuIdInAndIsBaseTrueAndActiveTrue(anyCollection())).thenReturn(List.of(baseConfig));
 
         Pallet pallet = mock(Pallet.class);
         when(pallet.getId()).thenReturn(50L);
@@ -104,6 +115,9 @@ class TaskMapperTest {
         assertEquals("PALLET-050", dto.palletCode());
         assertEquals(BigDecimal.TEN, dto.qtyAssigned());
         assertEquals(BigDecimal.valueOf(5), dto.qtyDone());
+        assertEquals("BOX", dto.lineUom());
+        assertEquals("PCS", dto.baseUom());
+        assertEquals(BigDecimal.valueOf(12), dto.unitFactorToBase());
         assertEquals(1, dto.priority());
         assertEquals(LocalDateTime.of(2026, 1, 1, 10, 0), dto.createdAt());
         assertEquals(LocalDateTime.of(2026, 1, 1, 11, 0), dto.startedAt());

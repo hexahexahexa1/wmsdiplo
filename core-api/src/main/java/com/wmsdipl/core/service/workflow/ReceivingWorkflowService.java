@@ -24,6 +24,7 @@ import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.SkuRepository;
 import com.wmsdipl.core.repository.TaskRepository;
 import com.wmsdipl.core.service.DuplicateScanDetectionService;
+import com.wmsdipl.core.service.ReceiptService;
 import com.wmsdipl.core.service.TaskLifecycleService;
 import com.wmsdipl.core.service.StockMovementService;
 import org.springframework.stereotype.Service;
@@ -57,6 +58,7 @@ public class ReceivingWorkflowService {
     private final SkuRepository skuRepository;
     private final StockMovementService stockMovementService;
     private final DuplicateScanDetectionService duplicateScanDetectionService;
+    private final ReceiptService receiptService;
 
     public ReceivingWorkflowService(
             ReceiptRepository receiptRepository,
@@ -68,7 +70,8 @@ public class ReceivingWorkflowService {
             LocationRepository locationRepository,
             SkuRepository skuRepository,
             StockMovementService stockMovementService,
-            DuplicateScanDetectionService duplicateScanDetectionService
+            DuplicateScanDetectionService duplicateScanDetectionService,
+            ReceiptService receiptService
     ) {
         this.receiptRepository = receiptRepository;
         this.taskRepository = taskRepository;
@@ -80,6 +83,7 @@ public class ReceivingWorkflowService {
         this.skuRepository = skuRepository;
         this.stockMovementService = stockMovementService;
         this.duplicateScanDetectionService = duplicateScanDetectionService;
+        this.receiptService = receiptService;
     }
 
     /**
@@ -108,6 +112,7 @@ public class ReceivingWorkflowService {
         if (receipt.getLines() == null || receipt.getLines().isEmpty()) {
             throw new ResponseStatusException(BAD_REQUEST, "Receipt has no lines to receive");
         }
+        receiptService.ensureReceiptLinesReadyForWorkflow(receipt);
         
         // Create tasks for each line (with multi-pallet auto-split if needed)
         int[] count = {0};
@@ -120,59 +125,41 @@ public class ReceivingWorkflowService {
     }
     
     /**
-     * Creates one or more tasks for a receipt line based on SKU pallet capacity.
-     * 
-     * @param receipt the receipt
-     * @param line the receipt line
-     * @return number of tasks created
+     * Creates one or more tasks for a receipt line based on line UOM palletization snapshot.
+     * All task quantities are persisted in base UOM.
      */
     private int createTasksForLine(Receipt receipt, ReceiptLine line) {
-        BigDecimal qtyExpected = line.getQtyExpected();
+        BigDecimal qtyExpectedBase = resolveQtyExpectedBase(line);
         int tasksCreated = 0;
-        
-        // Try to get SKU pallet capacity
-        BigDecimal palletCapacity = null;
-        if (line.getSkuId() != null) {
-            Sku sku = skuRepository.findById(line.getSkuId()).orElse(null);
-            if (sku != null) {
-                palletCapacity = sku.getPalletCapacity();
-            }
-        }
-        
-        // If pallet capacity is defined and qty exceeds it, split into multiple tasks
-        if (palletCapacity != null && palletCapacity.compareTo(BigDecimal.ZERO) > 0 
-            && qtyExpected.compareTo(palletCapacity) > 0) {
-            
-            // Calculate number of tasks needed
-            int taskCount = qtyExpected.divide(palletCapacity, 0, java.math.RoundingMode.UP).intValue();
-            BigDecimal remaining = qtyExpected;
-            
+
+        BigDecimal unitsPerPalletBase = resolveUnitsPerPalletBase(line);
+        if (unitsPerPalletBase != null
+            && unitsPerPalletBase.compareTo(BigDecimal.ZERO) > 0
+            && qtyExpectedBase.compareTo(unitsPerPalletBase) > 0) {
+            int taskCount = qtyExpectedBase.divide(unitsPerPalletBase, 0, java.math.RoundingMode.UP).intValue();
+            BigDecimal remaining = qtyExpectedBase;
+
             for (int i = 1; i <= taskCount; i++) {
-                BigDecimal qtyForThisTask = remaining.min(palletCapacity);
-                
-                Task task = new Task();
-                task.setReceipt(receipt);
-                task.setLine(line);
-                task.setTaskType(TaskType.RECEIVING);
-                task.setStatus(TaskStatus.NEW);
-                task.setQtyAssigned(qtyForThisTask);
-                taskRepository.save(task);
+                BigDecimal qtyForThisTask = remaining.min(unitsPerPalletBase);
+                taskRepository.save(buildReceivingTask(receipt, line, qtyForThisTask));
                 tasksCreated++;
-                
                 remaining = remaining.subtract(qtyForThisTask);
             }
         } else {
-            // Create single task (legacy behavior)
-            Task task = new Task();
-            task.setReceipt(receipt);
-            task.setLine(line);
-            task.setTaskType(TaskType.RECEIVING);
-            task.setStatus(TaskStatus.NEW);
-            task.setQtyAssigned(qtyExpected);
-            taskRepository.save(task);
+            taskRepository.save(buildReceivingTask(receipt, line, qtyExpectedBase));
             tasksCreated++;
         }
         return tasksCreated;
+    }
+
+    private Task buildReceivingTask(Receipt receipt, ReceiptLine line, BigDecimal qtyAssignedBase) {
+        Task task = new Task();
+        task.setReceipt(receipt);
+        task.setLine(line);
+        task.setTaskType(TaskType.RECEIVING);
+        task.setStatus(TaskStatus.NEW);
+        task.setQtyAssigned(qtyAssignedBase);
+        return task;
     }
 
     /**
@@ -199,7 +186,8 @@ public class ReceivingWorkflowService {
         Task task = taskLifecycleService.getTask(taskId);
         validateScanRequest(task, request);
         String requestId = normalizeRequestId(request.requestId());
-        BigDecimal qtyDecimal = new BigDecimal(request.qty());
+        BigDecimal qtyLine = new BigDecimal(request.qty());
+        BigDecimal qtyBase = convertLineQtyToBase(qtyLine, task.getLine());
 
         if (requestId != null) {
             Scan existingScan = scanRepository.findByTaskIdAndRequestId(taskId, requestId).orElse(null);
@@ -217,7 +205,7 @@ public class ReceivingWorkflowService {
             ).orElse(null);
             if (recentScan != null
                 && recentScan.getQty() != null
-                && recentScan.getQty().compareTo(qtyDecimal) == 0
+                && recentScan.getQty().compareTo(qtyBase) == 0
                 && recentScan.getScannedAt() != null
                 && Duration.between(recentScan.getScannedAt(), java.time.LocalDateTime.now()).getSeconds() <= 5) {
                 return markAsReplay(recentScan, false, "Potential duplicate scan detected within 5 seconds");
@@ -294,7 +282,8 @@ public class ReceivingWorkflowService {
         // === 7. ACCUMULATE QUANTITY ON PALLET ===
         BigDecimal currentPalletQty = pallet.getQuantity() != null 
             ? pallet.getQuantity() : BigDecimal.ZERO;
-        pallet.setQuantity(currentPalletQty.add(qtyDecimal));
+        pallet.setQuantity(currentPalletQty.add(qtyBase));
+        pallet.setUom(resolveBaseUom(line));
         Pallet savedPallet = palletRepository.save(pallet);
         
         // === 7.1. RECORD STOCK MOVEMENT (only for first scan on this pallet) ===
@@ -310,10 +299,10 @@ public class ReceivingWorkflowService {
         // === 8. UPDATE TASK QUANTITY ===
         Receipt receipt = task.getReceipt();
         BigDecimal currentDone = zeroIfNull(task.getQtyDone());
-        BigDecimal newTotal = currentDone.add(qtyDecimal);
+        BigDecimal newTotal = currentDone.add(qtyBase);
         task.setQtyDone(newTotal);
 
-        BigDecimal expectedQty = line.getQtyExpected();
+        BigDecimal expectedQty = resolveQtyExpectedBase(line);
 
         // === 9. DETECT DISCREPANCIES ===
         boolean hasDiscrepancy = false;
@@ -368,7 +357,7 @@ public class ReceivingWorkflowService {
         scan.setPalletCode(request.palletCode());
         scan.setSscc(request.sscc());
         scan.setBarcode(request.barcode());
-        scan.setQty(qtyDecimal);
+        scan.setQty(qtyBase);
         scan.setDeviceId(request.deviceId());
         scan.setDiscrepancy(hasDiscrepancy);
         
@@ -407,7 +396,7 @@ public class ReceivingWorkflowService {
     }
 
     /**
-     * Completes the receiving workflow: IN_PROGRESS → ACCEPTED or READY_FOR_SHIPMENT
+     * Completes the receiving workflow: IN_PROGRESS → ACCEPTED or READY_FOR_PLACEMENT
      * 
      * Operator confirms all discrepancies during task completion via dialog in desktop client.
      * Backend does not check for unresolved discrepancies - operator already made the decision.
@@ -434,8 +423,8 @@ public class ReceivingWorkflowService {
         // Operator confirmed all discrepancies during task completion
         // Proceed to next status based on cross-dock flag
         if (Boolean.TRUE.equals(receipt.getCrossDock())) {
-            // Cross-dock: skip ACCEPTED and go straight to READY_FOR_SHIPMENT
-            receipt.setStatus(ReceiptStatus.READY_FOR_SHIPMENT);
+            // Cross-dock: skip ACCEPTED and go to READY_FOR_PLACEMENT
+            receipt.setStatus(ReceiptStatus.READY_FOR_PLACEMENT);
         } else {
             // Normal flow: ACCEPTED
             receipt.setStatus(ReceiptStatus.ACCEPTED);
@@ -456,7 +445,7 @@ public class ReceivingWorkflowService {
 
     /**
      * Automatically checks if all receiving tasks are completed, and if so,
-     * transitions the receipt to ACCEPTED (or READY_FOR_SHIPMENT).
+     * transitions the receipt to ACCEPTED (or READY_FOR_PLACEMENT).
      * 
      * Called by TaskService when a receiving task is completed.
      */
@@ -567,6 +556,53 @@ public class ReceivingWorkflowService {
                 "Create locations with type RECEIVING and status AVAILABLE first."));
     }
 
+    private BigDecimal resolveQtyExpectedBase(ReceiptLine line) {
+        if (line.getQtyExpectedBase() != null) {
+            return line.getQtyExpectedBase();
+        }
+        BigDecimal factor = line.getUnitFactorToBase() != null
+            ? line.getUnitFactorToBase()
+            : BigDecimal.ONE;
+        return zeroIfNull(line.getQtyExpected()).multiply(factor).setScale(3, java.math.RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal resolveUnitsPerPalletBase(ReceiptLine line) {
+        if (line.getUnitsPerPalletSnapshot() != null) {
+            BigDecimal factor = line.getUnitFactorToBase() != null
+                ? line.getUnitFactorToBase()
+                : BigDecimal.ONE;
+            return line.getUnitsPerPalletSnapshot().multiply(factor).setScale(3, java.math.RoundingMode.HALF_UP);
+        }
+
+        if (line.getSkuId() != null) {
+            Sku sku = skuRepository.findById(line.getSkuId()).orElse(null);
+            if (sku != null && sku.getPalletCapacity() != null && sku.getPalletCapacity().compareTo(BigDecimal.ZERO) > 0) {
+                return sku.getPalletCapacity().setScale(3, java.math.RoundingMode.HALF_UP);
+            }
+        }
+        return null;
+    }
+
+    private BigDecimal convertLineQtyToBase(BigDecimal qtyLine, ReceiptLine line) {
+        BigDecimal factor = line != null && line.getUnitFactorToBase() != null
+            ? line.getUnitFactorToBase()
+            : BigDecimal.ONE;
+        return qtyLine.multiply(factor).setScale(3, java.math.RoundingMode.HALF_UP);
+    }
+
+    private String resolveBaseUom(ReceiptLine line) {
+        if (line == null || line.getSkuId() == null) {
+            return line != null ? line.getUom() : null;
+        }
+        return skuRepository.findById(line.getSkuId())
+            .map(Sku::getUom)
+            .orElse(line.getUom());
+    }
+
+    private BigDecimal zeroIfNull(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
+    }
+
     private void createDiscrepancyRecord(Receipt receipt, ReceiptLine line, DiscrepancyType type,
                                         BigDecimal expectedQty, BigDecimal actualQty, String comment) {
         Discrepancy d = new Discrepancy();
@@ -577,9 +613,5 @@ public class ReceivingWorkflowService {
         d.setQtyActual(actualQty);
         d.setDescription(comment);
         discrepancyRepository.save(d);
-    }
-
-    private BigDecimal zeroIfNull(BigDecimal value) {
-        return value == null ? BigDecimal.ZERO : value;
     }
 }

@@ -22,6 +22,6 @@ public record ReceivingAnalyticsDto(
     
     // Pallet Analytics
     Map<String, Integer> palletsByStatus,   // Count by status: {PLACED: 450, DAMAGED: 12, ...}
-    Double damagedPalletsRate               // % of pallets that are damaged
+    Double damagedPalletsRate               // Legacy name: damage rate (%) as share of active receipts with damage (fallback: damaged pallet receipts)
 ) {
 }

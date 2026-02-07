@@ -11,8 +11,10 @@ import com.wmsdipl.core.domain.TaskType;
 import com.wmsdipl.core.repository.DiscrepancyRepository;
 import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.TaskRepository;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -41,7 +43,7 @@ public class TaskLifecycleService {
 
     /**
      * Retrieves a task by ID.
-     * 
+     *
      * @param id task ID
      * @return the task
      * @throws IllegalArgumentException if task not found
@@ -54,7 +56,7 @@ public class TaskLifecycleService {
 
     /**
      * Assigns a task to a user.
-     * 
+     *
      * @param id task ID
      * @param assignee username of the assignee
      * @param assignedBy username of the person assigning the task
@@ -76,7 +78,7 @@ public class TaskLifecycleService {
 
     /**
      * Starts a task, transitioning it to IN_PROGRESS status.
-     * 
+     *
      * @param id task ID
      * @return updated task
      */
@@ -95,16 +97,16 @@ public class TaskLifecycleService {
 
     /**
      * Completes a task, transitioning it to COMPLETED status.
-     * 
+     *
      * Detects UNDER_QTY discrepancy if qtyDone < qtyAssigned:
      * - Creates Discrepancy record (auto-resolved, since user confirmed completion)
      * - Marks last scan with discrepancy flag
-     * 
+     *
      * The UNDER_QTY discrepancy is automatically marked as resolved because:
      * - User explicitly clicked "Complete" button after seeing the shortage
      * - Desktop client shows confirmation dialog before allowing completion
      * - This means the operator has visually confirmed and accepted the discrepancy
-     * 
+     *
      * @param id task ID
      * @return updated task
      */
@@ -116,32 +118,30 @@ public class TaskLifecycleService {
                 "Task can only be completed from IN_PROGRESS status. Current status: " + task.getStatus()
             );
         }
-        
-        // Validation: Cannot complete empty task
+
         BigDecimal qtyDone = task.getQtyDone() != null ? task.getQtyDone() : BigDecimal.ZERO;
         if (qtyDone.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                org.springframework.http.HttpStatus.BAD_REQUEST, 
-                "Нельзя завершить задание: ничего не отсканировано");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot complete task: no scans recorded");
         }
 
         BigDecimal qtyAssigned = task.getQtyAssigned() != null ? task.getQtyAssigned() : BigDecimal.ZERO;
 
-        // Specific validation for PLACEMENT tasks: no discrepancies allowed
-        if (task.getTaskType() == TaskType.PLACEMENT) {
+        // PLACEMENT and SHIPPING require full quantity completion.
+        if (task.getTaskType() == TaskType.PLACEMENT || task.getTaskType() == TaskType.SHIPPING) {
             if (qtyDone.compareTo(qtyAssigned) != 0) {
-                throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.BAD_REQUEST,
-                    "Нельзя завершить размещение при наличии расхождений. Ожидалось: " + qtyAssigned + ", Размещено: " + qtyDone);
+                throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Cannot complete task with incomplete quantity. Expected: " + qtyAssigned + ", Done: " + qtyDone
+                );
             }
         }
-        
+
         // Check for UNDER_QTY discrepancy (for RECEIVING tasks)
         if (task.getTaskType() == TaskType.RECEIVING && qtyAssigned.compareTo(BigDecimal.ZERO) > 0 && qtyDone.compareTo(qtyAssigned) < 0) {
             // Create UNDER_QTY discrepancy record (auto-resolved)
             Receipt receipt = task.getReceipt();
             ReceiptLine line = task.getLine();
-            
+
             if (receipt != null && line != null) {
                 Discrepancy discrepancy = new Discrepancy();
                 discrepancy.setReceipt(receipt);
@@ -149,14 +149,14 @@ public class TaskLifecycleService {
                 discrepancy.setType(DiscrepancyType.UNDER_QTY.name());
                 discrepancy.setQtyExpected(qtyAssigned);
                 discrepancy.setQtyActual(qtyDone);
-                
+
                 // Auto-resolve: user confirmed completion despite shortage
                 discrepancy.setResolved(true);
                 discrepancy.setDescription("Shortage confirmed by operator during task completion. " +
                     "Expected: " + qtyAssigned + ", Received: " + qtyDone);
-                
+
                 discrepancyRepository.save(discrepancy);
-                
+
                 // Mark last scan with discrepancy flag for UI visibility
                 List<Scan> scans = scanRepository.findByTask(task);
                 if (!scans.isEmpty()) {
@@ -166,7 +166,7 @@ public class TaskLifecycleService {
                 }
             }
         }
-        
+
         task.setStatus(TaskStatus.COMPLETED);
         task.setClosedAt(LocalDateTime.now());
         return taskRepository.save(task);
@@ -174,7 +174,7 @@ public class TaskLifecycleService {
 
     /**
      * Cancels a task, transitioning it to CANCELLED status.
-     * 
+     *
      * @param id task ID
      * @return updated task
      */
@@ -192,7 +192,7 @@ public class TaskLifecycleService {
     /**
      * Automatically starts a task if it's in NEW or ASSIGNED status.
      * Used during scan recording to auto-transition tasks.
-     * 
+     *
      * @param task the task to potentially start
      */
     @Transactional

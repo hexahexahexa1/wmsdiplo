@@ -1,6 +1,7 @@
 package com.wmsdipl.desktop.model;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 public record ReceiptLine(Long id,
                           Integer lineNo,
@@ -8,5 +9,10 @@ public record ReceiptLine(Long id,
                           Long packagingId,
                           String uom,
                           BigDecimal qtyExpected,
-                          String ssccExpected) {
+                          BigDecimal qtyExpectedBase,
+                          BigDecimal unitFactorToBase,
+                          BigDecimal unitsPerPalletSnapshot,
+                          String ssccExpected,
+                          String lotNumberExpected,
+                          LocalDate expiryDateExpected) {
 }

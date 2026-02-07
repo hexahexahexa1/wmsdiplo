@@ -1,10 +1,10 @@
 package com.wmsdipl.core.domain;
 
 import com.wmsdipl.contracts.dto.DamageType;
+import com.wmsdipl.core.persistence.DamageTypeConverter;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -56,7 +56,7 @@ public class Scan {
     @Column(name = "damage_flag")
     private Boolean damageFlag = false;
 
-    @Enumerated(EnumType.STRING)
+    @Convert(converter = DamageTypeConverter.class)
     @Column(name = "damage_type", length = 64)
     private DamageType damageType;
 

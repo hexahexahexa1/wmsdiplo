@@ -1,15 +1,18 @@
 package com.wmsdipl.core.service;
 
 import com.wmsdipl.contracts.dto.CreateReceiptRequest;
+import com.wmsdipl.contracts.dto.CreateReceiptDraftRequest;
 import com.wmsdipl.contracts.dto.ImportPayload;
 import com.wmsdipl.contracts.dto.ReceiptDiscrepancyDto;
 import com.wmsdipl.contracts.dto.ReceiptDto;
 import com.wmsdipl.contracts.dto.ReceiptLineDto;
 import com.wmsdipl.contracts.dto.ReceiptSummaryDto;
+import com.wmsdipl.contracts.dto.UpsertReceiptLineRequest;
 import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.domain.ReceiptLine;
 import com.wmsdipl.core.domain.ReceiptStatus;
 import com.wmsdipl.core.domain.Pallet;
+import com.wmsdipl.core.domain.SkuUnitConfig;
 import com.wmsdipl.core.mapper.ReceiptMapper;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.PalletRepository;
@@ -71,6 +74,7 @@ class ReceiptServiceTest {
             "DRAFT",
             null,
             false,  // crossDock
+            null,   // outboundRef
             LocalDateTime.now()
         );
 
@@ -90,8 +94,10 @@ class ReceiptServiceTest {
             LocalDate.now(),
             "Test Supplier",
             false,  // crossDock
+            null,   // outboundRef
             List.of(line)
         );
+
     }
 
     @Test
@@ -143,7 +149,20 @@ class ReceiptServiceTest {
         line.setLineNo(1);
         testReceipt.addLine(line);
 
-        ReceiptLineDto lineDto = new ReceiptLineDto(1L, 1, 100L, 1L, "PCS", BigDecimal.TEN, "SSCC001", null, null);
+        ReceiptLineDto lineDto = new ReceiptLineDto(
+            1L,
+            1,
+            100L,
+            1L,
+            "PCS",
+            BigDecimal.TEN,
+            BigDecimal.TEN,
+            BigDecimal.ONE,
+            new BigDecimal("10"),
+            "SSCC001",
+            null,
+            null
+        );
 
         when(receiptRepository.findById(1L)).thenReturn(Optional.of(testReceipt));
         when(receiptMapper.toLineDto(any(ReceiptLine.class))).thenReturn(lineDto);
@@ -160,6 +179,7 @@ class ReceiptServiceTest {
     @Test
     void shouldCreateManualReceipt_WhenValidRequest() {
         // Given
+        stubActiveSkuUnitConfig("PCS", new BigDecimal("10"));
         ReceiptLine line = new ReceiptLine();
         when(receiptRepository.existsByDocNoAndSupplier(anyString(), anyString())).thenReturn(false);
         when(receiptMapper.toLine(any())).thenReturn(line);
@@ -172,6 +192,134 @@ class ReceiptServiceTest {
         // Then
         assertNotNull(result);
         verify(receiptRepository, times(1)).save(any(Receipt.class));
+    }
+
+    @Test
+    void shouldCreateDraftReceipt_WhenValidHeader() {
+        CreateReceiptDraftRequest request = new CreateReceiptDraftRequest(
+            "RCP-DRAFT-001",
+            LocalDate.now(),
+            "Supplier A",
+            true,
+            "OUT-001"
+        );
+
+        Receipt saved = new Receipt();
+        saved.setDocNo("RCP-DRAFT-001");
+        saved.setStatus(ReceiptStatus.DRAFT);
+        saved.setCrossDock(true);
+
+        ReceiptDto dto = new ReceiptDto(
+            10L,
+            "RCP-DRAFT-001",
+            LocalDate.now(),
+            "Supplier A",
+            "DRAFT",
+            null,
+            true,
+            "OUT-001",
+            LocalDateTime.now()
+        );
+
+        when(receiptRepository.existsByDocNoAndSupplier("RCP-DRAFT-001", "Supplier A")).thenReturn(false);
+        when(receiptRepository.save(any(Receipt.class))).thenReturn(saved);
+        when(receiptMapper.toDto(any(Receipt.class))).thenReturn(dto);
+
+        ReceiptDto result = receiptService.createDraft(request);
+
+        assertNotNull(result);
+        assertEquals("RCP-DRAFT-001", result.docNo());
+        assertEquals("DRAFT", result.status());
+        verify(receiptRepository).save(any(Receipt.class));
+    }
+
+    @Test
+    void shouldAddDraftLine_WhenReceiptInDraft() throws Exception {
+        stubActiveSkuUnitConfig("BOX", new BigDecimal("12"));
+
+        Receipt draft = new Receipt();
+        draft.setStatus(ReceiptStatus.DRAFT);
+        setEntityId(draft, 100L);
+        draft.setLines(new ArrayList<>());
+
+        UpsertReceiptLineRequest request = new UpsertReceiptLineRequest(
+            1,
+            500L,
+            null,
+            "BOX",
+            new BigDecimal("2"),
+            "SSCC-001",
+            null,
+            null
+        );
+
+        ReceiptLineDto mapped = new ReceiptLineDto(
+            200L,
+            1,
+            500L,
+            null,
+            "BOX",
+            new BigDecimal("2"),
+            new BigDecimal("2.000"),
+            BigDecimal.ONE,
+            new BigDecimal("12.000"),
+            "SSCC-001",
+            null,
+            null
+        );
+
+        when(receiptRepository.findById(100L)).thenReturn(Optional.of(draft));
+        when(receiptRepository.save(any(Receipt.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(receiptMapper.toLineDto(any(ReceiptLine.class))).thenReturn(mapped);
+
+        ReceiptLineDto result = receiptService.addDraftLine(100L, request);
+
+        assertNotNull(result);
+        assertEquals(1, draft.getLines().size());
+        verify(receiptRepository).save(draft);
+        verify(skuService).getActiveUnitConfigOrThrow(500L, "BOX");
+    }
+
+    @Test
+    void shouldRejectDraftLineUpdate_WhenReceiptIsNotDraft() {
+        Receipt nonDraft = new Receipt();
+        nonDraft.setStatus(ReceiptStatus.CONFIRMED);
+        when(receiptRepository.findById(100L)).thenReturn(Optional.of(nonDraft));
+
+        UpsertReceiptLineRequest request = new UpsertReceiptLineRequest(
+            1,
+            500L,
+            null,
+            "PCS",
+            BigDecimal.ONE,
+            null,
+            null,
+            null
+        );
+
+        assertThrows(ResponseStatusException.class, () -> receiptService.updateDraftLine(100L, 1L, request));
+        verify(receiptRepository, never()).save(any(Receipt.class));
+    }
+
+    @Test
+    void shouldRevalidateLines_WhenConfirmingDraft() throws Exception {
+        stubActiveSkuUnitConfig("PCS", new BigDecimal("10"));
+
+        Receipt draft = new Receipt();
+        draft.setStatus(ReceiptStatus.DRAFT);
+        setEntityId(draft, 1L);
+        ReceiptLine line = new ReceiptLine();
+        line.setSkuId(42L);
+        line.setUom("PCS");
+        line.setQtyExpected(new BigDecimal("5"));
+        draft.addLine(line);
+
+        when(receiptRepository.findById(1L)).thenReturn(Optional.of(draft));
+
+        receiptService.confirm(1L);
+
+        assertEquals(ReceiptStatus.CONFIRMED, draft.getStatus());
+        verify(skuService).getActiveUnitConfigOrThrow(42L, "PCS");
     }
 
     @Test
@@ -195,6 +343,7 @@ class ReceiptServiceTest {
             LocalDate.now(),
             "Test Supplier",
             false,
+            null,
             List.of(line)
         );
 
@@ -206,6 +355,7 @@ class ReceiptServiceTest {
     @Test
     void shouldCreateFromImport_WhenValidPayload() {
         // Given
+        stubActiveSkuUnitConfig("PCS", new BigDecimal("10"));
         ImportPayload.Line importLine = new ImportPayload.Line(
             1, "SKU001", "Product Name", "PCS", BigDecimal.TEN, "PKG001", "SSCC001"
         );
@@ -214,6 +364,8 @@ class ReceiptServiceTest {
             "DOC001",
             LocalDate.now(),
             "Test Supplier",
+            false,
+            null,
             List.of(importLine)
         );
 
@@ -245,6 +397,8 @@ class ReceiptServiceTest {
             "DOC001",
             LocalDate.now(),
             "Test Supplier",
+            false,
+            null,
             List.of(importLine)
         );
 
@@ -270,6 +424,8 @@ class ReceiptServiceTest {
             "DOC001",
             LocalDate.now(),
             "Test Supplier",
+            false,
+            null,
             List.of(importLine)
         );
 
@@ -281,6 +437,12 @@ class ReceiptServiceTest {
     @Test
     void shouldConfirmReceipt_WhenStatusIsDraft() {
         // Given
+        stubActiveSkuUnitConfig("PCS", new BigDecimal("10"));
+        ReceiptLine line = new ReceiptLine();
+        line.setSkuId(100L);
+        line.setUom("PCS");
+        line.setQtyExpected(BigDecimal.ONE);
+        testReceipt.addLine(line);
         when(receiptRepository.findById(1L)).thenReturn(Optional.of(testReceipt));
 
         // When
@@ -570,7 +732,22 @@ class ReceiptServiceTest {
         pallet.setSkuId(line.getSkuId());
         pallet.setQuantity(quantity);
         pallet.setUom(line.getUom());
-        
+
         return pallet;
+    }
+
+    private void setEntityId(Object entity, Long id) throws Exception {
+        java.lang.reflect.Field idField = entity.getClass().getDeclaredField("id");
+        idField.setAccessible(true);
+        idField.set(entity, id);
+    }
+
+    private void stubActiveSkuUnitConfig(String uom, BigDecimal unitsPerPallet) {
+        SkuUnitConfig unitConfig = new SkuUnitConfig();
+        unitConfig.setUnitCode(uom);
+        unitConfig.setFactorToBase(BigDecimal.ONE);
+        unitConfig.setUnitsPerPallet(unitsPerPallet);
+        unitConfig.setActive(true);
+        when(skuService.getActiveUnitConfigOrThrow(anyLong(), anyString())).thenReturn(unitConfig);
     }
 }

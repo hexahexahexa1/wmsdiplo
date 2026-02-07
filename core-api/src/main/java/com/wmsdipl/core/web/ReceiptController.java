@@ -1,15 +1,18 @@
 package com.wmsdipl.core.web;
 
 import com.wmsdipl.contracts.dto.CreateReceiptRequest;
+import com.wmsdipl.contracts.dto.CreateReceiptDraftRequest;
 import com.wmsdipl.contracts.dto.ReceiptDiscrepancyDto;
 import com.wmsdipl.contracts.dto.ReceiptDto;
 import com.wmsdipl.contracts.dto.ReceiptLineDto;
 import com.wmsdipl.contracts.dto.ReceiptSummaryDto;
+import com.wmsdipl.contracts.dto.UpsertReceiptLineRequest;
 import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.service.CsvExportService;
 import com.wmsdipl.core.service.workflow.PlacementWorkflowService;
 import com.wmsdipl.core.service.workflow.ReceivingWorkflowService;
+import com.wmsdipl.core.service.workflow.ShippingWorkflowService;
 import com.wmsdipl.core.service.ReceiptService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -39,17 +42,20 @@ public class ReceiptController {
     private final ReceiptService receiptService;
     private final ReceivingWorkflowService receivingWorkflowService;
     private final PlacementWorkflowService placementWorkflowService;
+    private final ShippingWorkflowService shippingWorkflowService;
     private final CsvExportService csvExportService;
     private final ReceiptRepository receiptRepository;
 
     public ReceiptController(ReceiptService receiptService,
                              ReceivingWorkflowService receivingWorkflowService,
                              PlacementWorkflowService placementWorkflowService,
+                             ShippingWorkflowService shippingWorkflowService,
                              CsvExportService csvExportService,
                              ReceiptRepository receiptRepository) {
         this.receiptService = receiptService;
         this.receivingWorkflowService = receivingWorkflowService;
         this.placementWorkflowService = placementWorkflowService;
+        this.shippingWorkflowService = shippingWorkflowService;
         this.csvExportService = csvExportService;
         this.receiptRepository = receiptRepository;
     }
@@ -85,9 +91,46 @@ public class ReceiptController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
     @Operation(summary = "Create receipt", description = "Creates a new receipt in DRAFT status")
     public ResponseEntity<ReceiptDto> create(@RequestBody @Valid CreateReceiptRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(receiptService.createManual(request));
+    }
+
+    @PostMapping("/drafts")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
+    @Operation(summary = "Create receipt draft", description = "Creates a new manual receipt draft header without lines")
+    public ResponseEntity<ReceiptDto> createDraft(@RequestBody @Valid CreateReceiptDraftRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(receiptService.createDraft(request));
+    }
+
+    @PostMapping("/{id}/lines")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
+    @Operation(summary = "Add draft receipt line", description = "Adds a line to a draft receipt")
+    public ResponseEntity<ReceiptLineDto> addDraftLine(
+        @PathVariable Long id,
+        @RequestBody @Valid UpsertReceiptLineRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(receiptService.addDraftLine(id, request));
+    }
+
+    @PutMapping("/{id}/lines/{lineId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
+    @Operation(summary = "Update draft receipt line", description = "Updates a line in a draft receipt")
+    public ResponseEntity<ReceiptLineDto> updateDraftLine(
+        @PathVariable Long id,
+        @PathVariable Long lineId,
+        @RequestBody @Valid UpsertReceiptLineRequest request
+    ) {
+        return ResponseEntity.ok(receiptService.updateDraftLine(id, lineId, request));
+    }
+
+    @DeleteMapping("/{id}/lines/{lineId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
+    @Operation(summary = "Delete draft receipt line", description = "Deletes a line from a draft receipt")
+    public ResponseEntity<Void> deleteDraftLine(@PathVariable Long id, @PathVariable Long lineId) {
+        receiptService.deleteDraftLine(id, lineId);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{id}/confirm")
@@ -126,6 +169,7 @@ public class ReceiptController {
     }
 
     @PostMapping("/{id}/start-placement")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
     @Operation(summary = "Start placement", description = "Begins placement workflow - automatically generates placement tasks and transitions to PLACING status")
     public ResponseEntity<java.util.Map<String, Integer>> startPlacement(@PathVariable Long id) {
         int count = placementWorkflowService.startPlacement(id);
@@ -133,9 +177,26 @@ public class ReceiptController {
     }
 
     @PostMapping("/{id}/complete-placement")
-    @Operation(summary = "Complete placement (manual)", description = "Manually completes placement workflow - transitions to STOCKED status. Note: Receipt auto-completes to STOCKED when all placement tasks are done.")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
+    @Operation(summary = "Complete placement (manual)", description = "Manual fallback for placement completion. Regular receipts move to STOCKED, cross-dock receipts return to READY_FOR_SHIPMENT.")
     public ResponseEntity<Void> completePlacement(@PathVariable Long id) {
         placementWorkflowService.completePlacement(id);
+        return ResponseEntity.accepted().build();
+    }
+
+    @PostMapping("/{id}/start-shipping")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
+    @Operation(summary = "Start shipping", description = "Begins cross-dock shipping workflow and creates shipping tasks")
+    public ResponseEntity<java.util.Map<String, Integer>> startShipping(@PathVariable Long id) {
+        int count = shippingWorkflowService.startShipping(id);
+        return ResponseEntity.accepted().body(java.util.Map.of("count", count));
+    }
+
+    @PostMapping("/{id}/complete-shipping")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
+    @Operation(summary = "Complete shipping (manual)", description = "Manual fallback: completes shipping workflow to SHIPPED if all shipping tasks are completed")
+    public ResponseEntity<Void> completeShipping(@PathVariable Long id) {
+        shippingWorkflowService.completeShipping(id);
         return ResponseEntity.accepted().build();
     }
 

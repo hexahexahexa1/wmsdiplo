@@ -12,6 +12,7 @@ import com.wmsdipl.core.service.CsvExportService;
 import com.wmsdipl.core.service.ReceiptService;
 import com.wmsdipl.core.service.workflow.PlacementWorkflowService;
 import com.wmsdipl.core.service.workflow.ReceivingWorkflowService;
+import com.wmsdipl.core.service.workflow.ShippingWorkflowService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -52,6 +53,9 @@ class ReceiptControllerTest {
 
     @MockBean
     private PlacementWorkflowService placementWorkflowService;
+
+    @MockBean
+    private ShippingWorkflowService shippingWorkflowService;
 
     @MockBean
     private CsvExportService csvExportService;
@@ -95,8 +99,11 @@ class ReceiptControllerTest {
                 1,               // lineNo (Integer, not Long)
                 1L,              // skuId
                 null,            // packagingId
-                "ШТ",            // uom
+                "РЁРў",            // uom
                 BigDecimal.TEN,  // qtyExpected
+                BigDecimal.TEN,  // qtyExpectedBase
+                BigDecimal.ONE,  // unitFactorToBase
+                BigDecimal.TEN,  // unitsPerPalletSnapshot
                 null,            // ssccExpected
                 null,            // lotNumberExpected
                 null             // expiryDateExpected
@@ -143,6 +150,68 @@ class ReceiptControllerTest {
                 .andExpect(jsonPath("$.docNo").value("RCP-001"));
 
         verify(receiptService).createManual(any(CreateReceiptRequest.class));
+    }
+
+    @Test
+    void shouldCreateDraftReceipt_WhenValidRequest() throws Exception {
+        ReceiptDto created = createMockReceiptDto(2L, "RCP-DRAFT-001");
+        when(receiptService.createDraft(any())).thenReturn(created);
+
+        String requestBody = """
+                {
+                    "docNo": "RCP-DRAFT-001",
+                    "docDate": "2026-02-07",
+                    "supplier": "SUP-001",
+                    "crossDock": true,
+                    "outboundRef": "OUT-001"
+                }
+                """;
+
+        mockMvc.perform(post("/api/receipts/drafts")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestBody))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.docNo").value("RCP-DRAFT-001"));
+
+        verify(receiptService).createDraft(any());
+    }
+
+    @Test
+    void shouldAddDraftLine_WhenValidRequest() throws Exception {
+        ReceiptLineDto line = new ReceiptLineDto(
+            10L,
+            1,
+            1L,
+            null,
+            "PCS",
+            BigDecimal.TEN,
+            BigDecimal.TEN,
+            BigDecimal.ONE,
+            new BigDecimal("10.000"),
+            "SSCC-01",
+            null,
+            null
+        );
+        when(receiptService.addDraftLine(eq(1L), any())).thenReturn(line);
+
+        String requestBody = """
+                {
+                    "lineNo": 1,
+                    "skuId": 1,
+                    "uom": "PCS",
+                    "qtyExpected": 10,
+                    "ssccExpected": "SSCC-01"
+                }
+                """;
+
+        mockMvc.perform(post("/api/receipts/1/lines")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestBody))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.id").value(10))
+            .andExpect(jsonPath("$.uom").value("PCS"));
+
+        verify(receiptService).addDraftLine(eq(1L), any());
     }
 
     @Test
@@ -236,6 +305,27 @@ class ReceiptControllerTest {
     }
 
     @Test
+    void shouldStartShipping_AndReturnCount() throws Exception {
+        when(shippingWorkflowService.startShipping(1L)).thenReturn(2);
+
+        mockMvc.perform(post("/api/receipts/1/start-shipping"))
+            .andExpect(status().isAccepted())
+            .andExpect(jsonPath("$.count").value(2));
+
+        verify(shippingWorkflowService).startShipping(1L);
+    }
+
+    @Test
+    void shouldCompleteShipping_WhenValidId() throws Exception {
+        doNothing().when(shippingWorkflowService).completeShipping(1L);
+
+        mockMvc.perform(post("/api/receipts/1/complete-shipping"))
+            .andExpect(status().isAccepted());
+
+        verify(shippingWorkflowService).completeShipping(1L);
+    }
+
+    @Test
     void shouldValidateRequest_WhenCreatingReceiptWithInvalidData() throws Exception {
         // Given - empty docNo (should fail validation)
         String requestBody = """
@@ -306,7 +396,7 @@ class ReceiptControllerTest {
     void shouldReturnSummaryWithNoDiscrepancies_WhenAllQuantitiesMatch() throws Exception {
         // Given - summary with no discrepancies
         ReceiptSummaryDto.LineSummary line1 = new ReceiptSummaryDto.LineSummary(
-                1L, 1, 1L, "ШТ", 
+                1L, 1, 1L, "РЁРў", 
                 BigDecimal.valueOf(50), BigDecimal.valueOf(50), 
                 2, false
         );
@@ -341,19 +431,20 @@ class ReceiptControllerTest {
                 "DRAFT",                // status (String)
                 null,                   // messageId
                 false,                  // crossDock
+                null,                   // outboundRef
                 LocalDateTime.now()     // createdAt
         );
     }
 
     private ReceiptSummaryDto createMockSummaryDto(Long id) {
         ReceiptSummaryDto.LineSummary line1 = new ReceiptSummaryDto.LineSummary(
-                1L, 1, 1L, "ШТ", 
+                1L, 1, 1L, "РЁРў", 
                 BigDecimal.valueOf(50), BigDecimal.valueOf(50), 
                 2, false
         );
         
         ReceiptSummaryDto.LineSummary line2 = new ReceiptSummaryDto.LineSummary(
-                2L, 2, 2L, "ШТ", 
+                2L, 2, 2L, "РЁРў", 
                 BigDecimal.valueOf(50), BigDecimal.valueOf(45), 
                 1, true
         );
@@ -368,13 +459,13 @@ class ReceiptControllerTest {
 
     private ReceiptDiscrepancyDto createMockDiscrepancyDto(Long id) {
         ReceiptDiscrepancyDto.LineDiscrepancy line1 = new ReceiptDiscrepancyDto.LineDiscrepancy(
-                1L, 1, 1L, "ШТ",
+                1L, 1, 1L, "РЁРў",
                 BigDecimal.valueOf(50), BigDecimal.valueOf(50),
                 BigDecimal.ZERO, "MATCH", "INFO"
         );
         
         ReceiptDiscrepancyDto.LineDiscrepancy line2 = new ReceiptDiscrepancyDto.LineDiscrepancy(
-                2L, 2, 2L, "ШТ",
+                2L, 2, 2L, "РЁРў",
                 BigDecimal.valueOf(50), BigDecimal.valueOf(45),
                 BigDecimal.valueOf(-5), "UNDER", "CRITICAL"
         );
@@ -384,3 +475,6 @@ class ReceiptControllerTest {
         );
     }
 }
+
+
+

@@ -9,8 +9,9 @@ public record Receipt(Long id,
                       String supplier,
                       String status,
                       String messageId,
-                      LocalDateTime createdAt,
-                      Boolean crossDock) {
+                      Boolean crossDock,
+                      String outboundRef,
+                      LocalDateTime createdAt) {
     @Override
     public String toString() {
         return docNo + " | " + status + (supplier != null ? " | " + supplier : "");

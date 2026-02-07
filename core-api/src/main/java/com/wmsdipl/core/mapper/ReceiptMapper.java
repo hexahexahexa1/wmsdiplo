@@ -21,6 +21,7 @@ public class ReceiptMapper {
             receipt.getStatus().name(),
             receipt.getMessageId(),
             receipt.getCrossDock(),
+            receipt.getOutboundRef(),
             receipt.getCreatedAt()
         );
     }
@@ -33,6 +34,9 @@ public class ReceiptMapper {
             line.getPackagingId(),
             line.getUom(),
             line.getQtyExpected(),
+            line.getQtyExpectedBase(),
+            line.getUnitFactorToBase(),
+            line.getUnitsPerPalletSnapshot(),
             line.getSsccExpected(),
             line.getLotNumberExpected(),
             line.getExpiryDateExpected()

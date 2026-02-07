@@ -60,6 +60,9 @@ class ReceivingImprovementsIT {
     private SkuRepository skuRepository;
 
     @Autowired
+    private SkuUnitConfigRepository skuUnitConfigRepository;
+
+    @Autowired
     private PalletRepository palletRepository;
 
     @Autowired
@@ -99,6 +102,15 @@ class ReceivingImprovementsIT {
         testSku.setUom("ШТ");  // Required field
         testSku.setPalletCapacity(new BigDecimal("100")); // Max 100 units per pallet
         testSku = skuRepository.save(testSku);
+
+        SkuUnitConfig baseUnit = new SkuUnitConfig();
+        baseUnit.setSkuId(testSku.getId());
+        baseUnit.setUnitCode("PCS");
+        baseUnit.setFactorToBase(BigDecimal.ONE.setScale(6));
+        baseUnit.setUnitsPerPallet(new BigDecimal("100.000"));
+        baseUnit.setIsBase(true);
+        baseUnit.setActive(true);
+        skuUnitConfigRepository.save(baseUnit);
 
         // Create test locations
         storageLocation = new Location();
@@ -274,9 +286,9 @@ class ReceivingImprovementsIT {
 
         receivingWorkflowService.completeReceiving(receipt.getId());
 
-        // Then: Verify receipt status is READY_FOR_SHIPMENT (not ACCEPTED)
+        // Then: Verify receipt status is READY_FOR_PLACEMENT (not ACCEPTED)
         receipt = receiptRepository.findById(receipt.getId()).orElseThrow();
-        assertEquals(ReceiptStatus.READY_FOR_SHIPMENT, receipt.getStatus());
+        assertEquals(ReceiptStatus.READY_FOR_PLACEMENT, receipt.getStatus());
 
         // Verify pallet exists and would be routed to CROSS_DOCK location
         Pallet pallet = palletRepository.findByCode("PLT-XDOCK-001").orElseThrow();
@@ -310,9 +322,9 @@ class ReceivingImprovementsIT {
         assertEquals(3, tasks.size());
 
         // Verify quantities
-        assertEquals(new BigDecimal("100"), tasks.get(0).getQtyAssigned());
-        assertEquals(new BigDecimal("100"), tasks.get(1).getQtyAssigned());
-        assertEquals(new BigDecimal("50"), tasks.get(2).getQtyAssigned());
+        assertEquals(0, new BigDecimal("100").compareTo(tasks.get(0).getQtyAssigned()));
+        assertEquals(0, new BigDecimal("100").compareTo(tasks.get(1).getQtyAssigned()));
+        assertEquals(0, new BigDecimal("50").compareTo(tasks.get(2).getQtyAssigned()));
 
         // Verify all are RECEIVING tasks
         tasks.forEach(task -> {

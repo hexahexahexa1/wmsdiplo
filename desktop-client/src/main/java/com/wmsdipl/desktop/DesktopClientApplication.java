@@ -7,6 +7,7 @@ import com.wmsdipl.desktop.model.PutawayRule;
 import com.wmsdipl.desktop.model.Receipt;
 import com.wmsdipl.desktop.model.Scan;
 import com.wmsdipl.desktop.model.Sku;
+import com.wmsdipl.desktop.model.SkuUnitConfig;
 import com.wmsdipl.desktop.model.StockItem;
 import com.wmsdipl.desktop.model.StockMovement;
 import com.wmsdipl.desktop.model.User;
@@ -334,6 +335,16 @@ public class DesktopClientApplication extends Application {
         filterField.setId("searchField");
         filterField.setPrefWidth(520);
         filterField.setPrefHeight(48);
+        String role = apiClient.getCurrentUser() != null ? apiClient.getCurrentUser().role() : "OPERATOR";
+        boolean canCreateManual = "ADMIN".equalsIgnoreCase(role) || "SUPERVISOR".equalsIgnoreCase(role);
+        Button createBtn = null;
+        if (canCreateManual) {
+            createBtn = new Button(I18n.get("receipts.btn.create_manual"));
+            createBtn.getStyleClass().add("refresh-btn");
+            createBtn.setPrefWidth(200);
+            createBtn.setPrefHeight(48);
+            createBtn.setMinWidth(200);
+        }
         Button refreshBtn = new Button(I18n.get("btn.refresh"));
         refreshBtn.getStyleClass().add("refresh-btn");
         refreshBtn.setPrefWidth(200);
@@ -345,6 +356,8 @@ public class DesktopClientApplication extends Application {
         Button completeReceivingBtn = new Button(I18n.get("receipts.btn.complete_receiving"));
         Button acceptBtn = new Button(I18n.get("receipts.btn.accept"));
         Button startPlacementBtn = new Button(I18n.get("receipts.btn.start_placement"));
+        Button startShippingBtn = new Button(I18n.get("receipts.btn.start_shipping"));
+        Button completeShippingBtn = new Button(I18n.get("receipts.btn.complete_shipping"));
         Button tasksBtn = new Button(I18n.get("receipts.btn.tasks"));
 
         confirmBtn.getStyleClass().add("refresh-btn");
@@ -352,6 +365,8 @@ public class DesktopClientApplication extends Application {
         completeReceivingBtn.getStyleClass().add("refresh-btn");
         acceptBtn.getStyleClass().add("refresh-btn");
         startPlacementBtn.getStyleClass().add("refresh-btn");
+        startShippingBtn.getStyleClass().add("refresh-btn");
+        completeShippingBtn.getStyleClass().add("refresh-btn");
         tasksBtn.getStyleClass().add("refresh-btn");
 
         confirmBtn.setPrefHeight(48);
@@ -359,23 +374,45 @@ public class DesktopClientApplication extends Application {
         completeReceivingBtn.setPrefHeight(48);
         acceptBtn.setPrefHeight(48);
         startPlacementBtn.setPrefHeight(48);
+        startShippingBtn.setPrefHeight(48);
+        completeShippingBtn.setPrefHeight(48);
         tasksBtn.setPrefHeight(48);
 
         TableView<Receipt> table = buildReceiptTable();
-        table.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
-            boolean hasSelection = newV != null;
+        Runnable updateReceiptActions = () -> {
+            Receipt selected = table.getSelectionModel().getSelectedItem();
+            boolean hasSelection = selected != null;
             confirmBtn.setDisable(!hasSelection);
             startReceivingBtn.setDisable(!hasSelection);
             completeReceivingBtn.setDisable(!hasSelection);
             acceptBtn.setDisable(!hasSelection);
             startPlacementBtn.setDisable(!hasSelection);
+            startShippingBtn.setDisable(!hasSelection);
+            completeShippingBtn.setDisable(!hasSelection);
             tasksBtn.setDisable(!hasSelection);
-        });
+            if (!hasSelection) {
+                return;
+            }
+
+            String status = selected.status() != null ? selected.status().trim().toUpperCase() : "";
+            boolean crossDock = Boolean.TRUE.equals(selected.crossDock());
+            confirmBtn.setDisable(!"DRAFT".equals(status));
+            startReceivingBtn.setDisable(!"CONFIRMED".equals(status));
+            completeReceivingBtn.setDisable(!"IN_PROGRESS".equals(status));
+            acceptBtn.setDisable(!"CONFIRMED".equals(status));
+            startPlacementBtn.setDisable(!(("ACCEPTED".equals(status)) || (crossDock && "READY_FOR_PLACEMENT".equals(status))));
+            startShippingBtn.setDisable(!(crossDock && "READY_FOR_SHIPMENT".equals(status)));
+            completeShippingBtn.setDisable(!(crossDock && "SHIPPING_IN_PROGRESS".equals(status)));
+            tasksBtn.setDisable(false);
+        };
+        table.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> updateReceiptActions.run());
         confirmBtn.setDisable(true);
         startReceivingBtn.setDisable(true);
         completeReceivingBtn.setDisable(true);
         acceptBtn.setDisable(true);
         startPlacementBtn.setDisable(true);
+        startShippingBtn.setDisable(true);
+        completeShippingBtn.setDisable(true);
         tasksBtn.setDisable(true);
 
         confirmBtn.setOnAction(e -> withSelectedReceipt(table, r -> asyncAction(() -> apiClient.confirm(r.id()), table)));
@@ -414,20 +451,55 @@ public class DesktopClientApplication extends Application {
                 loadReceipts(table, "");
             }));
         }));
+
+        startShippingBtn.setOnAction(e -> withSelectedReceipt(table, r -> {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    int count = apiClient.startShipping(r.id());
+                    Platform.runLater(() -> showNotification(I18n.format("tasks.created.notification", count)));
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((v, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    showError(I18n.format("common.error", error.getMessage()));
+                }
+                loadReceipts(table, "");
+            }));
+        }));
+
+        completeShippingBtn.setOnAction(e -> withSelectedReceipt(table,
+            r -> asyncAction(() -> apiClient.completeShipping(r.id()), table)));
         
         tasksBtn.setOnAction(e -> withSelectedReceipt(table, this::showTasksDialog));
 
-        HBox filterRow = new HBox(14, filterField, refreshBtn);
+        HBox filterRow = createBtn == null
+            ? new HBox(14, filterField, refreshBtn)
+            : new HBox(14, filterField, createBtn, refreshBtn);
         HBox.setHgrow(filterField, Priority.ALWAYS);
         filterRow.setAlignment(Pos.CENTER_LEFT);
 
-        HBox actionsRow = new HBox(10, confirmBtn, startReceivingBtn, completeReceivingBtn, acceptBtn, startPlacementBtn, tasksBtn);
+        HBox actionsRow = new HBox(
+            10,
+            confirmBtn,
+            startReceivingBtn,
+            completeReceivingBtn,
+            acceptBtn,
+            startPlacementBtn,
+            startShippingBtn,
+            completeShippingBtn,
+            tasksBtn
+        );
         VBox card = new VBox(16, filterRow, actionsRow, table);
         card.setPadding(new Insets(24));
         card.setId("main-card");
 
         refreshBtn.setOnAction(e -> loadReceipts(table, filterField.getText()));
+        if (createBtn != null) {
+            createBtn.setOnAction(e -> showCreateReceiptDraftDialog(table));
+        }
         filterField.setOnAction(e -> loadReceipts(table, filterField.getText()));
+        table.itemsProperty().addListener((obs, oldItems, newItems) -> updateReceiptActions.run());
 
         setContent(new VBox(card));
         loadReceipts(table, "");
@@ -445,7 +517,15 @@ public class DesktopClientApplication extends Application {
             TableRow<Receipt> row = new TableRow<>();
             row.setOnMouseClicked(event -> {
                 if (event.getClickCount() == 2 && !row.isEmpty()) {
-                    showLinesDialog(row.getItem());
+                    Receipt selected = row.getItem();
+                    String role = apiClient.getCurrentUser() != null ? apiClient.getCurrentUser().role() : "OPERATOR";
+                    boolean canEditDraft = ("ADMIN".equalsIgnoreCase(role) || "SUPERVISOR".equalsIgnoreCase(role))
+                        && "DRAFT".equalsIgnoreCase(selected.status());
+                    if (canEditDraft) {
+                        showDraftLinesEditorDialog(selected, null);
+                    } else {
+                        showLinesDialog(selected);
+                    }
                 }
             });
             return row;
@@ -480,8 +560,13 @@ public class DesktopClientApplication extends Application {
             cell.getValue().crossDock() != null && cell.getValue().crossDock() ? "🚀 Cross-Dock" : ""
         ));
         crossDockCol.setPrefWidth(120);
+        TableColumn<Receipt, String> outboundRefCol = new TableColumn<>(I18n.get("receipts.table.outbound_ref"));
+        outboundRefCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(
+            cell.getValue().outboundRef() != null ? cell.getValue().outboundRef() : ""
+        ));
+        outboundRefCol.setPrefWidth(150);
 
-        table.getColumns().addAll(docNoCol, msgCol, statusCol, dateCol, supplierCol, crossDockCol);
+        table.getColumns().addAll(docNoCol, msgCol, statusCol, dateCol, supplierCol, crossDockCol, outboundRefCol);
         return table;
     }
 
@@ -536,6 +621,476 @@ public class DesktopClientApplication extends Application {
                 lineTable.setItems(FXCollections.observableArrayList(lines));
                 lineTable.setPlaceholder(new Label(I18n.get("common.no_data")));
             }));
+    }
+
+    private void showCreateReceiptDraftDialog(TableView<Receipt> receiptTable) {
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.setTitle(I18n.get("receipts.dialog.create_title"));
+
+        Label docNoLabel = new Label(I18n.get("receipts.field.doc_no"));
+        docNoLabel.getStyleClass().add("form-label");
+        TextField docNoField = new TextField();
+        docNoField.setPromptText(I18n.get("receipts.field.doc_no_prompt"));
+        docNoField.setPrefWidth(360);
+
+        Label docDateLabel = new Label(I18n.get("receipts.field.doc_date"));
+        docDateLabel.getStyleClass().add("form-label");
+        DatePicker docDatePicker = new DatePicker(LocalDate.now());
+
+        Label supplierLabel = new Label(I18n.get("receipts.field.supplier"));
+        supplierLabel.getStyleClass().add("form-label");
+        TextField supplierField = new TextField();
+        supplierField.setPromptText(I18n.get("receipts.field.supplier_prompt"));
+
+        CheckBox crossDockCheck = new CheckBox(I18n.get("receipts.field.cross_dock"));
+        crossDockCheck.getStyleClass().add("form-label");
+
+        Label outboundRefLabel = new Label(I18n.get("receipts.field.outbound_ref"));
+        outboundRefLabel.getStyleClass().add("form-label");
+        TextField outboundRefField = new TextField();
+        outboundRefField.setPromptText(I18n.get("receipts.field.outbound_ref_prompt"));
+        outboundRefField.disableProperty().bind(crossDockCheck.selectedProperty().not());
+
+        Label statusLabel = new Label();
+        statusLabel.getStyleClass().add("form-hint");
+
+        Button createBtn = new Button(I18n.get("common.create"));
+        createBtn.getStyleClass().add("refresh-btn");
+        createBtn.setPrefWidth(160);
+
+        Button cancelBtn = new Button(I18n.get("common.cancel"));
+        cancelBtn.getStyleClass().add("refresh-btn");
+        cancelBtn.setPrefWidth(160);
+        cancelBtn.setOnAction(e -> dialog.close());
+
+        createBtn.setOnAction(e -> {
+            String docNo = docNoField.getText() != null ? docNoField.getText().trim() : "";
+            if (docNo.isBlank()) {
+                statusLabel.setText(I18n.get("receipts.error.doc_no_required"));
+                statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
+                return;
+            }
+
+            String supplier = supplierField.getText() != null ? supplierField.getText().trim() : null;
+            if (supplier != null && supplier.isBlank()) {
+                supplier = null;
+            }
+            String outboundRef = outboundRefField.getText() != null ? outboundRefField.getText().trim() : null;
+            if (outboundRef != null && outboundRef.isBlank()) {
+                outboundRef = null;
+            }
+
+            createBtn.setDisable(true);
+            statusLabel.setText(I18n.get("receipts.status.creating_draft"));
+            statusLabel.setStyle("-fx-text-fill: #FFC107; -fx-font-size: 12px;");
+
+            String finalSupplier = supplier;
+            String finalOutboundRef = outboundRef;
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.createDraft(
+                        docNo,
+                        docDatePicker.getValue(),
+                        finalSupplier,
+                        crossDockCheck.isSelected(),
+                        finalOutboundRef
+                    );
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((created, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    markSyncFailure();
+                    statusLabel.setText(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                    statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
+                    createBtn.setDisable(false);
+                    return;
+                }
+                markSyncSuccess();
+                dialog.close();
+                showDraftLinesEditorDialog(created, receiptTable);
+            }));
+        });
+
+        HBox buttonRow = new HBox(12, createBtn, cancelBtn);
+        buttonRow.setAlignment(Pos.CENTER_LEFT);
+
+        VBox content = new VBox(
+            10,
+            docNoLabel, docNoField,
+            docDateLabel, docDatePicker,
+            supplierLabel, supplierField,
+            crossDockCheck,
+            outboundRefLabel, outboundRefField,
+            statusLabel,
+            buttonRow
+        );
+        content.setPadding(new Insets(20));
+        content.getStyleClass().add("dialog-surface");
+
+        Scene scene = new Scene(content, 460, 520);
+        applyStyles(scene);
+        dialog.setScene(scene);
+        dialog.showAndWait();
+        docNoField.requestFocus();
+    }
+
+    private void showDraftLinesEditorDialog(Receipt draftReceipt, TableView<Receipt> receiptTable) {
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.setTitle(I18n.format("receipts.dialog.draft_lines_title", draftReceipt.docNo()));
+
+        TableView<com.wmsdipl.desktop.model.ReceiptLine> lineTable = new TableView<>();
+        enableAutoColumnSizing(lineTable);
+        lineTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        lineTable.setPlaceholder(new Label(I18n.get("common.loading")));
+
+        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, Number> lineNoCol = new TableColumn<>(I18n.get("receipts.lines.line_no"));
+        lineNoCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().lineNo()));
+        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, Number> skuCol = new TableColumn<>(I18n.get("receipts.lines.sku_id"));
+        skuCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().skuId()));
+        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, String> uomCol = new TableColumn<>(I18n.get("receipts.lines.uom"));
+        uomCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().uom()));
+        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, Number> qtyCol = new TableColumn<>(I18n.get("receipts.lines.qty"));
+        qtyCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().qtyExpected()));
+        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, String> ssccCol = new TableColumn<>(I18n.get("receipts.lines.sscc"));
+        ssccCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().ssccExpected()));
+        lineTable.getColumns().addAll(lineNoCol, skuCol, uomCol, qtyCol, ssccCol);
+
+        Label statusLabel = new Label();
+        statusLabel.getStyleClass().add("form-hint");
+
+        Button addBtn = new Button(I18n.get("receipts.lines.add"));
+        addBtn.getStyleClass().add("refresh-btn");
+        Button editBtn = new Button(I18n.get("receipts.lines.edit"));
+        editBtn.getStyleClass().add("refresh-btn");
+        Button deleteBtn = new Button(I18n.get("receipts.lines.delete"));
+        deleteBtn.getStyleClass().add("refresh-btn");
+        Button closeBtn = new Button(I18n.get("common.close"));
+        closeBtn.getStyleClass().add("refresh-btn");
+
+        editBtn.setDisable(true);
+        deleteBtn.setDisable(true);
+        lineTable.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
+            boolean selected = newV != null;
+            editBtn.setDisable(!selected);
+            deleteBtn.setDisable(!selected);
+        });
+
+        final List<Sku>[] skusHolder = new List[]{List.of()};
+        addBtn.setDisable(true);
+        editBtn.setDisable(true);
+
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                return apiClient.listSkus();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }).whenComplete((skus, error) -> Platform.runLater(() -> {
+            if (error != null) {
+                statusLabel.setText(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
+                return;
+            }
+            skusHolder[0] = skus;
+            addBtn.setDisable(false);
+            editBtn.setDisable(lineTable.getSelectionModel().getSelectedItem() == null);
+        }));
+
+        Runnable reloadLines = () -> CompletableFuture.supplyAsync(() -> {
+            try {
+                return apiClient.getReceiptLines(draftReceipt.id());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }).whenComplete((lines, error) -> Platform.runLater(() -> {
+            if (error != null) {
+                lineTable.setPlaceholder(new Label(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage())));
+                return;
+            }
+            lineTable.setItems(FXCollections.observableArrayList(lines));
+            lineTable.setPlaceholder(new Label(I18n.get("common.no_data")));
+        }));
+
+        addBtn.setOnAction(e -> showDraftLineFormDialog(
+            draftReceipt,
+            null,
+            skusHolder[0],
+            reloadLines,
+            statusLabel
+        ));
+
+        editBtn.setOnAction(e -> {
+            com.wmsdipl.desktop.model.ReceiptLine selected = lineTable.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                showDraftLineFormDialog(
+                    draftReceipt,
+                    selected,
+                    skusHolder[0],
+                    reloadLines,
+                    statusLabel
+                );
+            }
+        });
+
+        deleteBtn.setOnAction(e -> {
+            com.wmsdipl.desktop.model.ReceiptLine selected = lineTable.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                return;
+            }
+            if (!showConfirm(I18n.get("receipts.lines.delete_title"), I18n.get("receipts.lines.delete_confirm"))) {
+                return;
+            }
+
+            CompletableFuture.runAsync(() -> {
+                try {
+                    apiClient.deleteReceiptLine(draftReceipt.id(), selected.id());
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((v, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    statusLabel.setText(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                    statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
+                    return;
+                }
+                statusLabel.setText(I18n.get("receipts.lines.deleted"));
+                statusLabel.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 12px;");
+                reloadLines.run();
+            }));
+        });
+
+        closeBtn.setOnAction(e -> {
+            dialog.close();
+            if (receiptTable != null) {
+                loadReceipts(receiptTable, "");
+            }
+        });
+
+        HBox actions = new HBox(10, addBtn, editBtn, deleteBtn, closeBtn);
+        VBox content = new VBox(12, actions, statusLabel, lineTable);
+        content.setPadding(new Insets(16));
+        content.getStyleClass().add("dialog-surface");
+
+        Scene scene = new Scene(content, 780, 520);
+        applyStyles(scene);
+        dialog.setScene(scene);
+        dialog.show();
+
+        reloadLines.run();
+    }
+
+    private void showDraftLineFormDialog(
+        Receipt draftReceipt,
+        com.wmsdipl.desktop.model.ReceiptLine existingLine,
+        List<Sku> availableSkus,
+        Runnable onSaved,
+        Label parentStatusLabel
+    ) {
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.setTitle(existingLine == null ? I18n.get("receipts.lines.add_title") : I18n.get("receipts.lines.edit_title"));
+
+        Label lineNoLabel = new Label(I18n.get("receipts.lines.line_no"));
+        lineNoLabel.getStyleClass().add("form-label");
+        TextField lineNoField = new TextField(existingLine != null && existingLine.lineNo() != null ? String.valueOf(existingLine.lineNo()) : "");
+        lineNoField.setPromptText(I18n.get("receipts.lines.line_no_prompt"));
+
+        Label skuLabel = new Label(I18n.get("receipts.lines.sku"));
+        skuLabel.getStyleClass().add("form-label");
+        ComboBox<Sku> skuCombo = new ComboBox<>(FXCollections.observableArrayList(availableSkus));
+        skuCombo.setPrefWidth(340);
+        skuCombo.setCellFactory(list -> new ListCell<>() {
+            @Override
+            protected void updateItem(Sku item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? "" : item.code() + " | " + item.name());
+            }
+        });
+        skuCombo.setButtonCell(new ListCell<>() {
+            @Override
+            protected void updateItem(Sku item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? "" : item.code() + " | " + item.name());
+            }
+        });
+
+        Label uomLabel = new Label(I18n.get("receipts.lines.uom"));
+        uomLabel.getStyleClass().add("form-label");
+        ComboBox<String> uomCombo = new ComboBox<>();
+        uomCombo.setPrefWidth(340);
+
+        Label qtyLabel = new Label(I18n.get("receipts.lines.qty"));
+        qtyLabel.getStyleClass().add("form-label");
+        TextField qtyField = new TextField(existingLine != null && existingLine.qtyExpected() != null ? existingLine.qtyExpected().toPlainString() : "");
+        qtyField.setPromptText(I18n.get("receipts.lines.qty_prompt"));
+
+        Label ssccLabel = new Label(I18n.get("receipts.lines.sscc"));
+        ssccLabel.getStyleClass().add("form-label");
+        TextField ssccField = new TextField(existingLine != null ? existingLine.ssccExpected() : "");
+        ssccField.setPromptText(I18n.get("receipts.lines.sscc_prompt"));
+
+        Label statusLabel = new Label();
+        statusLabel.getStyleClass().add("form-hint");
+
+        Button saveBtn = new Button(I18n.get("common.save"));
+        saveBtn.getStyleClass().add("refresh-btn");
+        Button cancelBtn = new Button(I18n.get("common.cancel"));
+        cancelBtn.getStyleClass().add("refresh-btn");
+        cancelBtn.setOnAction(e -> dialog.close());
+
+        Consumer<Sku> uomLoader = sku -> {
+            uomCombo.getItems().clear();
+            if (sku == null || sku.id() == null) {
+                return;
+            }
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.listSkuUnitConfigs(sku.id());
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((configs, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    statusLabel.setText(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                    statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
+                    return;
+                }
+                List<String> uoms = configs.stream()
+                    .filter(cfg -> Boolean.TRUE.equals(cfg.active()))
+                    .map(SkuUnitConfig::unitCode)
+                    .distinct()
+                    .toList();
+                uomCombo.setItems(FXCollections.observableArrayList(uoms));
+                if (existingLine != null && existingLine.uom() != null && uoms.contains(existingLine.uom())) {
+                    uomCombo.setValue(existingLine.uom());
+                } else if (!uoms.isEmpty()) {
+                    uomCombo.setValue(uoms.get(0));
+                }
+            }));
+        };
+        skuCombo.valueProperty().addListener((obs, oldSku, newSku) -> uomLoader.accept(newSku));
+
+        if (existingLine != null && existingLine.skuId() != null) {
+            Sku existingSku = availableSkus.stream()
+                .filter(s -> existingLine.skuId().equals(s.id()))
+                .findFirst()
+                .orElse(null);
+            skuCombo.setValue(existingSku);
+            if (existingSku != null) {
+                uomLoader.accept(existingSku);
+            }
+        }
+
+        saveBtn.setOnAction(e -> {
+            Sku selectedSku = skuCombo.getValue();
+            if (selectedSku == null) {
+                statusLabel.setText(I18n.get("receipts.error.sku_required"));
+                statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
+                return;
+            }
+            String selectedUom = uomCombo.getValue();
+            if (selectedUom == null || selectedUom.isBlank()) {
+                statusLabel.setText(I18n.get("receipts.error.uom_required"));
+                statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
+                return;
+            }
+            BigDecimal qtyExpected;
+            try {
+                qtyExpected = new BigDecimal(qtyField.getText().trim());
+            } catch (Exception ex) {
+                statusLabel.setText(I18n.get("receipts.error.qty_invalid"));
+                statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
+                return;
+            }
+            if (qtyExpected.compareTo(BigDecimal.ZERO) <= 0) {
+                statusLabel.setText(I18n.get("receipts.error.qty_invalid"));
+                statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
+                return;
+            }
+            Integer lineNo = null;
+            if (lineNoField.getText() != null && !lineNoField.getText().isBlank()) {
+                try {
+                    lineNo = Integer.parseInt(lineNoField.getText().trim());
+                    if (lineNo <= 0) {
+                        throw new NumberFormatException("lineNo must be positive");
+                    }
+                } catch (Exception ex) {
+                    statusLabel.setText(I18n.get("receipts.error.line_no_invalid"));
+                    statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
+                    return;
+                }
+            }
+
+            String sscc = ssccField.getText() != null ? ssccField.getText().trim() : null;
+            if (sscc != null && sscc.isBlank()) {
+                sscc = null;
+            }
+
+            saveBtn.setDisable(true);
+            statusLabel.setText(I18n.get("receipts.status.saving_line"));
+            statusLabel.setStyle("-fx-text-fill: #FFC107; -fx-font-size: 12px;");
+
+            Integer finalLineNo = lineNo;
+            String finalSscc = sscc;
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    if (existingLine == null) {
+                        return apiClient.addReceiptLine(
+                            draftReceipt.id(),
+                            finalLineNo,
+                            selectedSku.id(),
+                            selectedUom,
+                            qtyExpected,
+                            finalSscc
+                        );
+                    }
+                    return apiClient.updateReceiptLine(
+                        draftReceipt.id(),
+                        existingLine.id(),
+                        finalLineNo,
+                        selectedSku.id(),
+                        selectedUom,
+                        qtyExpected,
+                        finalSscc
+                    );
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((line, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    statusLabel.setText(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                    statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
+                    saveBtn.setDisable(false);
+                    return;
+                }
+                parentStatusLabel.setText(I18n.get("receipts.lines.saved"));
+                parentStatusLabel.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 12px;");
+                dialog.close();
+                onSaved.run();
+            }));
+        });
+
+        HBox buttonRow = new HBox(10, saveBtn, cancelBtn);
+        VBox content = new VBox(
+            10,
+            lineNoLabel, lineNoField,
+            skuLabel, skuCombo,
+            uomLabel, uomCombo,
+            qtyLabel, qtyField,
+            ssccLabel, ssccField,
+            statusLabel,
+            buttonRow
+        );
+        content.setPadding(new Insets(16));
+        content.getStyleClass().add("dialog-surface");
+
+        Scene scene = new Scene(content, 420, 560);
+        applyStyles(scene);
+        dialog.setScene(scene);
+        dialog.showAndWait();
     }
 
     private void loadReceipts(TableView<Receipt> table, String filter) {
@@ -1521,7 +2076,7 @@ public class DesktopClientApplication extends Application {
             row.setOnMouseClicked(event -> {
                 if (event.getClickCount() == 2 && !row.isEmpty()) {
                     com.wmsdipl.desktop.model.Task task = row.getItem();
-                    if ("RECEIVING".equals(task.taskType()) || "PLACEMENT".equals(task.taskType())) {
+                    if ("RECEIVING".equals(task.taskType()) || "PLACEMENT".equals(task.taskType()) || "SHIPPING".equals(task.taskType())) {
                         openTaskExecutionDialog(task);
                     }
                 }
@@ -1566,7 +2121,7 @@ public class DesktopClientApplication extends Application {
                 row.setOnMouseClicked(event -> {
                     if (event.getClickCount() == 2 && !row.isEmpty()) {
                         com.wmsdipl.desktop.model.Task task = row.getItem();
-                        if ("RECEIVING".equals(task.taskType()) || "PLACEMENT".equals(task.taskType())) {
+                        if ("RECEIVING".equals(task.taskType()) || "PLACEMENT".equals(task.taskType()) || "SHIPPING".equals(task.taskType())) {
                             openTaskExecutionDialog(task);
                         }
                     }
@@ -1589,7 +2144,7 @@ public class DesktopClientApplication extends Application {
                 CompletableFuture.supplyAsync(() -> {
                 try {
                     return apiClient.listTasksFiltered(currentUser, null, null, null, 0, 200, "priority,desc").stream()
-                        .filter(t -> "RECEIVING".equals(t.taskType()) || "PLACEMENT".equals(t.taskType()))
+                        .filter(t -> "RECEIVING".equals(t.taskType()) || "PLACEMENT".equals(t.taskType()) || "SHIPPING".equals(t.taskType()))
                         .collect(Collectors.toList());
                 } catch (Exception e) {
                     throw new RuntimeException(e);
@@ -1628,7 +2183,7 @@ public class DesktopClientApplication extends Application {
                             .toList();
                     }
                     return tasks.stream()
-                        .filter(t -> "RECEIVING".equals(t.taskType()) || "PLACEMENT".equals(t.taskType()))
+                        .filter(t -> "RECEIVING".equals(t.taskType()) || "PLACEMENT".equals(t.taskType()) || "SHIPPING".equals(t.taskType()))
                         .toList();
                 } catch (Exception e) {
                     throw new RuntimeException(e);
@@ -1705,9 +2260,16 @@ public class DesktopClientApplication extends Application {
         deleteSku.setPrefHeight(48);
         deleteSku.setPrefWidth(150);
         deleteSku.setDisable(true);
+
+        Button unitsSku = new Button(I18n.get("skus.btn.unit_configs"));
+        unitsSku.getStyleClass().add("refresh-btn");
+        unitsSku.setPrefHeight(48);
+        unitsSku.setPrefWidth(220);
+        unitsSku.setDisable(true);
         
         skuTable.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
             deleteSku.setDisable(newV == null);
+            unitsSku.setDisable(newV == null);
         });
         
         deleteSku.setOnAction(e -> {
@@ -1727,8 +2289,15 @@ public class DesktopClientApplication extends Application {
                 }));
             }
         });
+
+        unitsSku.setOnAction(e -> {
+            Sku selected = skuTable.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                showSkuUnitConfigsDialog(selected);
+            }
+        });
         
-        HBox buttons = new HBox(10, refreshSku, createSku, deleteSku);
+        HBox buttons = new HBox(10, refreshSku, createSku, unitsSku, deleteSku);
         buttons.setPadding(new Insets(10, 0, 10, 0));
         
         VBox layout = new VBox(15, header, buttons, skuTable);
@@ -1738,6 +2307,284 @@ public class DesktopClientApplication extends Application {
         
         setContent(layout);
         loadList(skuTable, () -> apiClient.listSkus());
+    }
+
+    private void showSkuUnitConfigsDialog(Sku sku) {
+        Stage dialog = new Stage();
+        dialog.setTitle(I18n.get("sku.units.title"));
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.initOwner(shell.getScene().getWindow());
+
+        Label header = new Label(I18n.format("sku.units.header", sku.code()));
+        header.getStyleClass().add("section-header");
+
+        javafx.collections.ObservableList<SkuUnitConfig> configs = FXCollections.observableArrayList();
+        ListView<SkuUnitConfig> listView = new ListView<>(configs);
+        listView.setPrefHeight(240);
+        listView.setCellFactory(v -> new ListCell<>() {
+            @Override
+            protected void updateItem(SkuUnitConfig item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : formatSkuUnitConfigLabel(item));
+            }
+        });
+
+        Label unitCodeLabel = new Label(I18n.get("sku.units.unit_code"));
+        unitCodeLabel.getStyleClass().add("form-label");
+        TextField unitCodeField = new TextField();
+        unitCodeField.setPromptText(I18n.get("sku.units.unit_code_prompt"));
+
+        Label factorLabel = new Label(I18n.get("sku.units.factor"));
+        factorLabel.getStyleClass().add("form-label");
+        TextField factorField = new TextField("1");
+        factorField.setPromptText(I18n.get("sku.units.factor_prompt"));
+
+        Label unitsPerPalletLabel = new Label(I18n.get("sku.units.units_per_pallet"));
+        unitsPerPalletLabel.getStyleClass().add("form-label");
+        TextField unitsPerPalletField = new TextField("1");
+        unitsPerPalletField.setPromptText(I18n.get("sku.units.units_per_pallet_prompt"));
+
+        CheckBox baseCheck = new CheckBox(I18n.get("sku.units.is_base"));
+        CheckBox activeCheck = new CheckBox(I18n.get("sku.units.active"));
+        activeCheck.setSelected(true);
+
+        Runnable clearForm = () -> {
+            unitCodeField.clear();
+            factorField.setText("1");
+            unitsPerPalletField.setText("1");
+            baseCheck.setSelected(false);
+            activeCheck.setSelected(true);
+            listView.getSelectionModel().clearSelection();
+        };
+
+        listView.getSelectionModel().selectedItemProperty().addListener((obs, oldV, selected) -> {
+            if (selected == null) {
+                return;
+            }
+            unitCodeField.setText(selected.unitCode());
+            factorField.setText(formatQuantity(selected.factorToBase()));
+            unitsPerPalletField.setText(formatQuantity(selected.unitsPerPallet()));
+            baseCheck.setSelected(Boolean.TRUE.equals(selected.isBase()));
+            activeCheck.setSelected(Boolean.TRUE.equals(selected.active()));
+        });
+
+        Button newBtn = new Button(I18n.get("sku.units.btn.new"));
+        newBtn.getStyleClass().add("refresh-btn");
+        newBtn.setOnAction(e -> clearForm.run());
+
+        Button applyBtn = new Button(I18n.get("sku.units.btn.apply"));
+        applyBtn.getStyleClass().add("refresh-btn");
+        applyBtn.setOnAction(e -> {
+            String unitCode = unitCodeField.getText() != null ? unitCodeField.getText().trim().toUpperCase() : "";
+            if (unitCode.isBlank()) {
+                showError(I18n.get("sku.units.error.unit_required"));
+                return;
+            }
+
+            BigDecimal factor;
+            BigDecimal unitsPerPallet;
+            try {
+                factor = new BigDecimal(factorField.getText().trim()).setScale(6, java.math.RoundingMode.HALF_UP);
+                unitsPerPallet = new BigDecimal(unitsPerPalletField.getText().trim()).setScale(3, java.math.RoundingMode.HALF_UP);
+            } catch (Exception ex) {
+                showError(I18n.get("sku.units.error.decimal"));
+                return;
+            }
+
+            if (factor.compareTo(BigDecimal.ZERO) <= 0 || unitsPerPallet.compareTo(BigDecimal.ZERO) <= 0) {
+                showError(I18n.get("sku.units.error.positive"));
+                return;
+            }
+
+            boolean isBase = baseCheck.isSelected();
+            boolean active = activeCheck.isSelected();
+            if (isBase && factor.compareTo(BigDecimal.ONE) != 0) {
+                showError(I18n.get("sku.units.error.base_factor"));
+                return;
+            }
+            if (isBase && !active) {
+                showError(I18n.get("sku.units.error.base_active"));
+                return;
+            }
+
+            int selectedIndex = listView.getSelectionModel().getSelectedIndex();
+            Long existingId = selectedIndex >= 0 ? configs.get(selectedIndex).id() : null;
+            SkuUnitConfig newConfig = new SkuUnitConfig(
+                existingId,
+                sku.id(),
+                unitCode,
+                factor,
+                unitsPerPallet,
+                isBase,
+                active
+            );
+
+            if (selectedIndex >= 0) {
+                configs.set(selectedIndex, newConfig);
+            } else {
+                configs.add(newConfig);
+                selectedIndex = configs.size() - 1;
+            }
+
+            if (isBase) {
+                for (int i = 0; i < configs.size(); i++) {
+                    if (i == selectedIndex) {
+                        continue;
+                    }
+                    SkuUnitConfig cfg = configs.get(i);
+                    if (Boolean.TRUE.equals(cfg.isBase())) {
+                        configs.set(i, new SkuUnitConfig(
+                            cfg.id(),
+                            cfg.skuId(),
+                            cfg.unitCode(),
+                            cfg.factorToBase(),
+                            cfg.unitsPerPallet(),
+                            false,
+                            cfg.active()
+                        ));
+                    }
+                }
+            }
+
+            listView.refresh();
+            listView.getSelectionModel().select(selectedIndex);
+        });
+
+        Button removeBtn = new Button(I18n.get("sku.units.btn.remove"));
+        removeBtn.getStyleClass().add("refresh-btn");
+        removeBtn.setOnAction(e -> {
+            int selectedIndex = listView.getSelectionModel().getSelectedIndex();
+            if (selectedIndex >= 0) {
+                configs.remove(selectedIndex);
+                clearForm.run();
+            }
+        });
+
+        Button saveBtn = new Button(I18n.get("btn.save"));
+        saveBtn.getStyleClass().add("refresh-btn");
+        saveBtn.setOnAction(e -> {
+            if (configs.isEmpty()) {
+                showError(I18n.get("sku.units.error.empty"));
+                return;
+            }
+            long baseCount = configs.stream().filter(cfg -> Boolean.TRUE.equals(cfg.isBase())).count();
+            if (baseCount != 1) {
+                showError(I18n.get("sku.units.error.single_base"));
+                return;
+            }
+
+            saveBtn.setDisable(true);
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.replaceSkuUnitConfigs(sku.id(), new ArrayList<>(configs));
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((saved, error) -> Platform.runLater(() -> {
+                saveBtn.setDisable(false);
+                if (error != null) {
+                    showError(I18n.format("common.error", error.getMessage()));
+                } else {
+                    configs.setAll(saved);
+                    listView.refresh();
+                    showInfo(I18n.get("sku.units.saved"));
+                }
+            }));
+        });
+
+        Button closeBtn = new Button(I18n.get("btn.close"));
+        closeBtn.getStyleClass().add("refresh-btn");
+        closeBtn.setOnAction(e -> dialog.close());
+
+        HBox editorActions = new HBox(10, newBtn, applyBtn, removeBtn);
+        HBox dialogActions = new HBox(10, saveBtn, closeBtn);
+
+        VBox root = new VBox(
+            12,
+            header,
+            listView,
+            unitCodeLabel,
+            unitCodeField,
+            factorLabel,
+            factorField,
+            unitsPerPalletLabel,
+            unitsPerPalletField,
+            new HBox(16, baseCheck, activeCheck),
+            editorActions,
+            dialogActions
+        );
+        root.setPadding(new Insets(16));
+        root.getStyleClass().add("dialog-surface");
+
+        Scene scene = new Scene(root, 640, 720);
+        applyStyles(scene);
+        dialog.setScene(scene);
+
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                return apiClient.listSkuUnitConfigs(sku.id());
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        }).whenComplete((loaded, error) -> Platform.runLater(() -> {
+            if (error != null) {
+                showError(I18n.format("common.error", error.getMessage()));
+            } else {
+                configs.setAll(loaded);
+            }
+        }));
+
+        dialog.showAndWait();
+    }
+
+    private String formatSkuUnitConfigLabel(SkuUnitConfig config) {
+        String basePrefix = Boolean.TRUE.equals(config.isBase()) ? "[BASE] " : "";
+        String activeSuffix = Boolean.TRUE.equals(config.active()) ? "" : " (" + I18n.get("sku.units.inactive") + ")";
+        return basePrefix
+            + config.unitCode()
+            + " | " + I18n.get("sku.units.factor_short") + ": " + formatQuantity(config.factorToBase())
+            + " | " + I18n.get("sku.units.units_per_pallet_short") + ": " + formatQuantity(config.unitsPerPallet())
+            + activeSuffix;
+    }
+
+    private String formatTaskAssignedQuantity(com.wmsdipl.desktop.model.Task task) {
+        BigDecimal qtyBase = task.qtyAssigned() == null ? BigDecimal.ZERO : task.qtyAssigned();
+        String baseUom = task.baseUom();
+        String lineUom = task.lineUom();
+        BigDecimal factor = task.unitFactorToBase();
+
+        if (lineUom != null && !lineUom.isBlank() && factor != null && factor.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal qtyLine = qtyBase.divide(factor, 3, java.math.RoundingMode.HALF_UP);
+            String linePart = formatQuantity(qtyLine) + " " + lineUom;
+            if (baseUom != null && !baseUom.isBlank() && !baseUom.equalsIgnoreCase(lineUom)) {
+                return linePart + " (" + formatQuantity(qtyBase) + " " + baseUom + ")";
+            }
+            return linePart;
+        }
+
+        String resolvedUom = (baseUom != null && !baseUom.isBlank())
+            ? baseUom
+            : (lineUom != null && !lineUom.isBlank() ? lineUom : "");
+        return resolvedUom.isBlank()
+            ? formatQuantity(qtyBase)
+            : formatQuantity(qtyBase) + " " + resolvedUom;
+    }
+
+    private String resolveTaskInputUom(com.wmsdipl.desktop.model.Task task) {
+        if (task.lineUom() != null && !task.lineUom().isBlank()) {
+            return task.lineUom();
+        }
+        if (task.baseUom() != null && !task.baseUom().isBlank()) {
+            return task.baseUom();
+        }
+        return "pcs";
+    }
+
+    private String formatQuantity(BigDecimal value) {
+        if (value == null) {
+            return "0";
+        }
+        return value.stripTrailingZeros().toPlainString();
     }
 
     private void showSettingsPane() {
@@ -2363,7 +3210,7 @@ public class DesktopClientApplication extends Application {
         Label receiptLabel = new Label(I18n.format("doc_tab.receipt", (task.receiptDocNo() != null ? task.receiptDocNo() : "N/A")));
         Label taskTypeLabel = new Label(I18n.format("doc_tab.task_type", task.taskType()));
         Label statusLabel = new Label(I18n.format("doc_tab.status", task.status()));
-        Label qtyLabel = new Label(I18n.format("doc_tab.qty", task.qtyAssigned()));
+        Label qtyLabel = new Label(I18n.format("doc_tab.qty", formatTaskAssignedQuantity(task)));
         
         Label skuCodeLabel = new Label(I18n.format("doc_tab.barcode", (task.skuCode() != null ? task.skuCode() : "N/A")));
         skuCodeLabel.getStyleClass().add("accent-label");
@@ -2424,10 +3271,11 @@ public class DesktopClientApplication extends Application {
         barcodeField.setPrefHeight(48);
 
         // Input fields (gray, 14px, with ✏️ icon)
-        Label qtyLabel = new Label(I18n.get("terminal.scan.qty"));
+        String inputUom = resolveTaskInputUom(task);
+        Label qtyLabel = new Label(I18n.format("terminal.scan.qty_uom", inputUom));
         qtyLabel.getStyleClass().add("muted-label");
         TextField qtyField = new TextField();
-        qtyField.setPromptText(I18n.get("fact_tab.prompt.qty"));
+        qtyField.setPromptText(I18n.format("fact_tab.prompt.qty_uom", inputUom));
         qtyField.getStyleClass().add("input-field");
         qtyField.setPrefHeight(40);
         
@@ -2489,6 +3337,7 @@ public class DesktopClientApplication extends Application {
         Label locationLabel = null;
         TextField locationField = null;
         boolean isPlacementTask = "PLACEMENT".equals(task.taskType());
+        boolean isShippingTask = "SHIPPING".equals(task.taskType());
         
         if (isPlacementTask) {
             locationLabel = new Label(I18n.get("fact_tab.location_label"));
@@ -2656,6 +3505,15 @@ public class DesktopClientApplication extends Application {
                 barcodeLabel, barcodeField,
                 qtyLabel, qtyField,
                 locationLabel, locationField,
+                commentLabel, commentField,
+                submitBtn,
+                statusLabel
+            );
+        } else if (isShippingTask) {
+            form = new VBox(8,
+                palletLabel, palletField,
+                barcodeLabel, barcodeField,
+                qtyLabel, qtyField,
                 commentLabel, commentField,
                 submitBtn,
                 statusLabel
@@ -3550,7 +4408,11 @@ public class DesktopClientApplication extends Application {
                 double damagedRate = extractDouble(dataMap.get("damagedPalletsRate"));
                 double avgTime = extractDouble(dataMap.get("avgReceivingTimeHours"));
                 double avgPlacingTime = extractDouble(dataMap.get("avgPlacingTimeHours"));
-                long stuckReceipts = extractLong(healthMap.get("stuckReceivingReceipts")) + extractLong(healthMap.get("stuckPlacingReceipts"));
+                long stuckReceipts =
+                    extractLong(healthMap.get("stuckReceivingReceipts"))
+                        + extractLong(healthMap.get("stuckPlacingReceipts"))
+                        + extractLong(healthMap.get("stuckReadyForShipmentReceipts"))
+                        + extractLong(healthMap.get("stuckShippingInProgressReceipts"));
                 long staleTasks = extractLong(healthMap.get("staleTasks"));
                 String fromDateValue = Objects.toString(dataMap.get("fromDate"), fromDate.toString());
                 String toDateValue = Objects.toString(dataMap.get("toDate"), toDate.toString());
