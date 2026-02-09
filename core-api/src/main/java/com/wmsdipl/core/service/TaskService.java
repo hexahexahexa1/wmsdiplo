@@ -14,6 +14,8 @@ import com.wmsdipl.core.repository.TaskRepository;
 import com.wmsdipl.core.service.workflow.PlacementWorkflowService;
 import com.wmsdipl.core.service.workflow.ReceivingWorkflowService;
 import com.wmsdipl.core.service.workflow.ShippingWorkflowService;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -22,7 +24,14 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.Comparator;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
 
@@ -41,6 +50,7 @@ public class TaskService {
     private final ReceivingWorkflowService receivingWorkflowService;
     private final PlacementWorkflowService placementWorkflowService;
     private final ShippingWorkflowService shippingWorkflowService;
+    private final AuditLogService auditLogService;
 
     public TaskService(
             TaskRepository taskRepository,
@@ -50,7 +60,8 @@ public class TaskService {
             TaskLifecycleService taskLifecycleService,
             ReceivingWorkflowService receivingWorkflowService,
             PlacementWorkflowService placementWorkflowService,
-            ShippingWorkflowService shippingWorkflowService
+            ShippingWorkflowService shippingWorkflowService,
+            AuditLogService auditLogService
     ) {
         this.taskRepository = taskRepository;
         this.receiptRepository = receiptRepository;
@@ -60,6 +71,7 @@ public class TaskService {
         this.receivingWorkflowService = receivingWorkflowService;
         this.placementWorkflowService = placementWorkflowService;
         this.shippingWorkflowService = shippingWorkflowService;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional(readOnly = true)
@@ -181,9 +193,130 @@ public class TaskService {
     public Discrepancy resolveDiscrepancy(Long id, String comment) {
         Discrepancy discrepancy = discrepancyRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Discrepancy not found: " + id));
+        String normalizedComment = comment == null ? null : comment.trim();
+        String oldComment = discrepancy.getDescription();
         discrepancy.setResolved(true);
-        discrepancy.setDescription(comment);
-        return discrepancyRepository.save(discrepancy);
+        discrepancy.setDescription(normalizedComment);
+        discrepancy.setResolvedBy(resolveCurrentUsername());
+        discrepancy.setResolvedAt(LocalDateTime.now());
+        Discrepancy saved = discrepancyRepository.save(discrepancy);
+        if (!Objects.equals(oldComment, normalizedComment)) {
+            auditLogService.logUpdate(
+                "DISCREPANCY",
+                saved.getId(),
+                resolveCurrentUsername(),
+                "comment",
+                oldComment,
+                normalizedComment
+            );
+        }
+        return saved;
+    }
+
+    @Transactional(readOnly = true)
+    public List<Discrepancy> findDiscrepancyJournal(
+        Long receiptId,
+        LocalDateTime from,
+        LocalDateTime to,
+        String type,
+        String docNo,
+        Long skuId,
+        String operator,
+        Boolean resolved
+    ) {
+        List<Discrepancy> discrepancies = discrepancyRepository.findAll();
+        Map<Long, String> taskAssignees = findTaskAssigneesByDiscrepancies(discrepancies);
+
+        String normalizedType = normalizeFilter(type);
+        String normalizedDocNo = normalizeFilter(docNo);
+        String normalizedOperator = normalizeFilter(operator);
+
+        return discrepancies.stream()
+            .filter(d -> receiptId == null || (d.getReceipt() != null && receiptId.equals(d.getReceipt().getId())))
+            .filter(d -> from == null || (d.getCreatedAt() != null && !d.getCreatedAt().isBefore(from)))
+            .filter(d -> to == null || (d.getCreatedAt() != null && !d.getCreatedAt().isAfter(to)))
+            .filter(d -> normalizedType == null || (d.getType() != null && d.getType().equalsIgnoreCase(normalizedType)))
+            .filter(d -> normalizedDocNo == null || (
+                d.getReceipt() != null
+                    && d.getReceipt().getDocNo() != null
+                    && d.getReceipt().getDocNo().toLowerCase().contains(normalizedDocNo.toLowerCase())
+            ))
+            .filter(d -> skuId == null || (d.getLine() != null && skuId.equals(d.getLine().getSkuId())))
+            .filter(d -> resolved == null || Objects.equals(resolved, d.getResolved()))
+            .filter(d -> normalizedOperator == null || normalizedOperator.equalsIgnoreCase(
+                resolveDiscrepancyOperator(d, taskAssignees)
+            ))
+            .sorted(Comparator.comparing(Discrepancy::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+            .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public Map<Long, String> findTaskAssigneesByDiscrepancies(List<Discrepancy> discrepancies) {
+        if (discrepancies == null || discrepancies.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Set<Long> taskIds = discrepancies.stream()
+            .map(Discrepancy::getTaskId)
+            .filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        if (taskIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return taskRepository.findAllById(taskIds).stream()
+            .filter(task -> task.getAssignee() != null && !task.getAssignee().isBlank())
+            .collect(Collectors.toMap(Task::getId, Task::getAssignee, (left, right) -> left));
+    }
+
+    @Transactional(readOnly = true)
+    public String resolveDiscrepancyOperator(Discrepancy discrepancy, Map<Long, String> taskAssignees) {
+        if (discrepancy == null) {
+            return null;
+        }
+        String operator = null;
+        if (discrepancy.getTaskId() != null && taskAssignees != null) {
+            operator = taskAssignees.get(discrepancy.getTaskId());
+        }
+        if (operator == null || operator.isBlank()) {
+            operator = discrepancy.getResolvedBy();
+        }
+        return (operator == null || operator.isBlank()) ? null : operator;
+    }
+
+    @Transactional
+    public Discrepancy updateDiscrepancyComment(Long id, String comment) {
+        Discrepancy discrepancy = discrepancyRepository.findById(id)
+            .orElseThrow(() -> new IllegalArgumentException("Discrepancy not found: " + id));
+        String oldComment = discrepancy.getDescription();
+        String newComment = comment == null ? null : comment.trim();
+        discrepancy.setDescription(newComment);
+        Discrepancy saved = discrepancyRepository.save(discrepancy);
+        if (!Objects.equals(oldComment, newComment)) {
+            auditLogService.logUpdate(
+                "DISCREPANCY",
+                saved.getId(),
+                resolveCurrentUsername(),
+                "comment",
+                oldComment,
+                newComment
+            );
+        }
+        return saved;
+    }
+
+    private String normalizeFilter(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private String resolveCurrentUsername() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getName() == null || authentication.getName().isBlank()
+            || "anonymousUser".equalsIgnoreCase(authentication.getName())) {
+            return "system";
+        }
+        return authentication.getName();
     }
 
     /**

@@ -14,9 +14,16 @@ import com.wmsdipl.core.domain.ReceiptStatus;
 import com.wmsdipl.core.domain.Sku;
 import com.wmsdipl.core.domain.SkuUnitConfig;
 import com.wmsdipl.core.domain.Pallet;
+import com.wmsdipl.core.domain.Task;
+import com.wmsdipl.core.domain.TaskStatus;
+import com.wmsdipl.core.domain.TaskType;
 import com.wmsdipl.core.mapper.ReceiptMapper;
+import com.wmsdipl.core.repository.DiscrepancyRepository;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.PalletRepository;
+import com.wmsdipl.core.repository.TaskRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -40,17 +47,24 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 @Service
 public class ReceiptService {
 
+    private static final Logger log = LoggerFactory.getLogger(ReceiptService.class);
+
     private final ReceiptRepository receiptRepository;
     private final ReceiptMapper receiptMapper;
     private final SkuService skuService;
     private final PalletRepository palletRepository;
+    private final TaskRepository taskRepository;
+    private final DiscrepancyRepository discrepancyRepository;
 
     public ReceiptService(ReceiptRepository receiptRepository, ReceiptMapper receiptMapper, 
-                         SkuService skuService, PalletRepository palletRepository) {
+                         SkuService skuService, PalletRepository palletRepository, TaskRepository taskRepository,
+                         DiscrepancyRepository discrepancyRepository) {
         this.receiptRepository = receiptRepository;
         this.receiptMapper = receiptMapper;
         this.skuService = skuService;
         this.palletRepository = palletRepository;
+        this.taskRepository = taskRepository;
+        this.discrepancyRepository = discrepancyRepository;
     }
 
     @Transactional(readOnly = true)
@@ -190,6 +204,28 @@ public class ReceiptService {
     }
 
     @Transactional
+    public void deleteReceipt(Long id) {
+        Receipt receipt = receiptRepository.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Receipt not found"));
+
+        if (receipt.getStatus() != ReceiptStatus.DRAFT) {
+            throw new ResponseStatusException(BAD_REQUEST, "Only draft receipts can be deleted");
+        }
+
+        if (!taskRepository.findByReceiptId(id).isEmpty()) {
+            throw new ResponseStatusException(CONFLICT, "Cannot delete receipt with tasks");
+        }
+        if (!palletRepository.findByReceipt(receipt).isEmpty()) {
+            throw new ResponseStatusException(CONFLICT, "Cannot delete receipt with pallets");
+        }
+        if (!discrepancyRepository.findByReceipt(receipt).isEmpty()) {
+            throw new ResponseStatusException(CONFLICT, "Cannot delete receipt with discrepancies");
+        }
+
+        receiptRepository.delete(receipt);
+    }
+
+    @Transactional
     public ReceiptDto createFromImport(ImportPayload payload) {
         if (payload.messageId() == null || payload.messageId().isBlank()) {
             throw new ResponseStatusException(BAD_REQUEST, "messageId is required for import");
@@ -232,7 +268,31 @@ public class ReceiptService {
         if (receipt.getStatus() != ReceiptStatus.CONFIRMED) {
             throw new ResponseStatusException(BAD_REQUEST, "Only confirmed can be accepted");
         }
-        // TODO: validate tasks closed and discrepancies resolved
+        List<ReceiptAcceptBlockedException.TaskBlocker> blockers = taskRepository.findByReceiptId(id).stream()
+            .filter(task -> task.getTaskType() == TaskType.RECEIVING
+                || task.getTaskType() == TaskType.PLACEMENT
+                || task.getTaskType() == TaskType.SHIPPING)
+            .filter(task -> task.getStatus() != TaskStatus.COMPLETED && task.getStatus() != TaskStatus.CANCELLED)
+            .map(task -> new ReceiptAcceptBlockedException.TaskBlocker(
+                task.getId(),
+                task.getTaskType() != null ? task.getTaskType().name() : null,
+                task.getStatus() != null ? task.getStatus().name() : null
+            ))
+            .toList();
+        if (!blockers.isEmpty()) {
+            throw new ReceiptAcceptBlockedException(id, blockers);
+        }
+
+        long unresolvedDiscrepancies = discrepancyRepository.findByReceipt(receipt).stream()
+            .filter(discrepancy -> !Boolean.TRUE.equals(discrepancy.getResolved()))
+            .count();
+        if (unresolvedDiscrepancies > 0) {
+            log.warn(
+                "Accepting receipt {} with {} unresolved discrepancies (soft control).",
+                id,
+                unresolvedDiscrepancies
+            );
+        }
         receipt.setStatus(ReceiptStatus.ACCEPTED);
     }
 
@@ -290,7 +350,9 @@ public class ReceiptService {
         line.setPackagingId(null);
         line.setUom(lineReq.uom());
         line.setQtyExpected(defaultZero(lineReq.qtyExpected()));
-        line.setSsccExpected(lineReq.sscc());
+        line.setSsccExpected(normalizeNullableText(lineReq.sscc()));
+        line.setLotNumberExpected(normalizeNullableText(lineReq.lotNumber()));
+        line.setExpiryDateExpected(lineReq.expiryDate());
         applyUnitSnapshots(line, skuId, lineReq.uom());
         return line;
     }

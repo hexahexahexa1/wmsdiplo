@@ -23,6 +23,8 @@ public record ImportPayload(
         String uom,
         BigDecimal qtyExpected,
         String packaging,
-        String sscc
+        String sscc,
+        String lotNumber,
+        LocalDate expiryDate
     ) {}
 }

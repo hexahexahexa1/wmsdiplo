@@ -1,18 +1,18 @@
 @echo off
+title WMSDIPL - Stop Environment
 echo ========================================
-echo WMS Terminal - Environment Shutdown
+echo WMSDIPL - Environment Shutdown
 echo ========================================
 echo.
 
-echo Stopping Docker containers...
+echo [1/2] Stopping application services...
+call stop-all.bat
+echo.
+
+echo [2/2] Stopping Docker containers...
 docker compose down
-
 echo.
-echo Killing Java processes (Core API, Desktop Client)...
-taskkill /F /FI "WINDOWTITLE eq Core API*" 2>nul
-taskkill /F /FI "WINDOWTITLE eq Desktop Client*" 2>nul
 
-echo.
 echo ========================================
 echo Environment stopped!
 echo ========================================

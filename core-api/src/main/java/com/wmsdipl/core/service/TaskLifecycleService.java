@@ -12,6 +12,8 @@ import com.wmsdipl.core.repository.DiscrepancyRepository;
 import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.TaskRepository;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -55,7 +57,9 @@ public class TaskLifecycleService {
     }
 
     /**
-     * Assigns a task to a user.
+     * Assigns or reassigns a task to a user.
+     * NEW task -> ASSIGNED.
+     * ASSIGNED task -> assignee/assignedBy updated, status remains ASSIGNED.
      *
      * @param id task ID
      * @param assignee username of the assignee
@@ -65,14 +69,25 @@ public class TaskLifecycleService {
     @Transactional
     public Task assign(Long id, String assignee, String assignedBy) {
         Task task = getTask(id);
-        if (task.getStatus() != TaskStatus.NEW) {
+        if (task.getStatus() == TaskStatus.IN_PROGRESS) {
+            throw new IllegalStateException("Task in IN_PROGRESS status cannot be reassigned");
+        }
+        if (task.getStatus() == TaskStatus.COMPLETED) {
+            throw new IllegalStateException("Completed task cannot be reassigned");
+        }
+        if (task.getStatus() == TaskStatus.CANCELLED) {
+            throw new IllegalStateException("Cancelled task cannot be assigned");
+        }
+        if (task.getStatus() != TaskStatus.NEW && task.getStatus() != TaskStatus.ASSIGNED) {
             throw new IllegalStateException(
-                "Task can only be assigned from NEW status. Current status: " + task.getStatus()
+                "Task can only be assigned from NEW or ASSIGNED status. Current status: " + task.getStatus()
             );
         }
         task.setAssignee(assignee);
         task.setAssignedBy(assignedBy);
-        task.setStatus(TaskStatus.ASSIGNED);
+        if (task.getStatus() == TaskStatus.NEW) {
+            task.setStatus(TaskStatus.ASSIGNED);
+        }
         return taskRepository.save(task);
     }
 
@@ -146,12 +161,15 @@ public class TaskLifecycleService {
                 Discrepancy discrepancy = new Discrepancy();
                 discrepancy.setReceipt(receipt);
                 discrepancy.setLine(line);
+                discrepancy.setTaskId(task.getId());
                 discrepancy.setType(DiscrepancyType.UNDER_QTY.name());
                 discrepancy.setQtyExpected(qtyAssigned);
                 discrepancy.setQtyActual(qtyDone);
 
                 // Auto-resolve: user confirmed completion despite shortage
                 discrepancy.setResolved(true);
+                discrepancy.setResolvedBy(resolveCurrentUsername(task));
+                discrepancy.setResolvedAt(LocalDateTime.now());
                 discrepancy.setDescription("Shortage confirmed by operator during task completion. " +
                     "Expected: " + qtyAssigned + ", Received: " + qtyDone);
 
@@ -202,5 +220,19 @@ public class TaskLifecycleService {
             task.setStartedAt(LocalDateTime.now());
             taskRepository.save(task);
         }
+    }
+
+    private String resolveCurrentUsername(Task task) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null
+            && authentication.getName() != null
+            && !authentication.getName().isBlank()
+            && !"anonymousUser".equalsIgnoreCase(authentication.getName())) {
+            return authentication.getName();
+        }
+        if (task != null && task.getAssignee() != null && !task.getAssignee().isBlank()) {
+            return task.getAssignee();
+        }
+        return "system";
     }
 }

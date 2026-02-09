@@ -1,6 +1,10 @@
 package com.wmsdipl.desktop;
 
 import com.wmsdipl.desktop.ImportServiceClient;
+import com.wmsdipl.desktop.model.AutoAssignPreviewItem;
+import com.wmsdipl.desktop.model.AutoAssignResult;
+import com.wmsdipl.desktop.model.Discrepancy;
+import com.wmsdipl.desktop.model.DiscrepancyRetentionConfig;
 import com.wmsdipl.desktop.model.Location;
 import com.wmsdipl.desktop.model.Pallet;
 import com.wmsdipl.desktop.model.PutawayRule;
@@ -10,6 +14,8 @@ import com.wmsdipl.desktop.model.Sku;
 import com.wmsdipl.desktop.model.SkuUnitConfig;
 import com.wmsdipl.desktop.model.StockItem;
 import com.wmsdipl.desktop.model.StockMovement;
+import com.wmsdipl.desktop.model.ShippingWave;
+import com.wmsdipl.desktop.model.ShippingWaveActionResult;
 import com.wmsdipl.desktop.model.User;
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -41,9 +47,11 @@ import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextFormatter;
+import javafx.scene.control.TextInputDialog;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
@@ -73,14 +81,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.Comparator;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class DesktopClientApplication extends Application {
     private static final String AUTO_SIZE_TABLE_KEY = "auto.size.columns.enabled";
+    private static final Pattern SHORTAGE_COMMENT_PATTERN = Pattern.compile(
+        "^Shortage confirmed by operator during task completion\\.\\s*Expected:\\s*([^,]+),\\s*Received:\\s*(.+)$"
+    );
 
     private String coreApiBase = System.getenv().getOrDefault("WMS_CORE_API_BASE", "http://localhost:8080");
     private String importApiBase = System.getenv().getOrDefault("WMS_IMPORT_BASE", "http://localhost:8090");
@@ -99,6 +113,7 @@ public class DesktopClientApplication extends Application {
     private Timeline topStatusTimeline;
     private final DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private final DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private final DateTimeFormatter dateTimeFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private String activeModule = "receipts";
 
     public static void main(String[] args) {
@@ -338,12 +353,20 @@ public class DesktopClientApplication extends Application {
         String role = apiClient.getCurrentUser() != null ? apiClient.getCurrentUser().role() : "OPERATOR";
         boolean canCreateManual = "ADMIN".equalsIgnoreCase(role) || "SUPERVISOR".equalsIgnoreCase(role);
         Button createBtn = null;
+        Button createFromSelectedBtn = null;
         if (canCreateManual) {
             createBtn = new Button(I18n.get("receipts.btn.create_manual"));
             createBtn.getStyleClass().add("refresh-btn");
             createBtn.setPrefWidth(200);
             createBtn.setPrefHeight(48);
             createBtn.setMinWidth(200);
+
+            createFromSelectedBtn = new Button(I18n.get("receipts.btn.create_from_selected"));
+            createFromSelectedBtn.getStyleClass().add("refresh-btn");
+            createFromSelectedBtn.setPrefWidth(220);
+            createFromSelectedBtn.setPrefHeight(48);
+            createFromSelectedBtn.setMinWidth(220);
+            createFromSelectedBtn.setDisable(true);
         }
         Button refreshBtn = new Button(I18n.get("btn.refresh"));
         refreshBtn.getStyleClass().add("refresh-btn");
@@ -359,26 +382,30 @@ public class DesktopClientApplication extends Application {
         Button startShippingBtn = new Button(I18n.get("receipts.btn.start_shipping"));
         Button completeShippingBtn = new Button(I18n.get("receipts.btn.complete_shipping"));
         Button tasksBtn = new Button(I18n.get("receipts.btn.tasks"));
+        Button wavesBtn = new Button(I18n.get("receipts.btn.shipping_waves"));
+        Button deleteReceiptBtn = null;
+        if (canCreateManual) {
+            deleteReceiptBtn = new Button(I18n.get("receipts.btn.delete"));
+        }
 
-        confirmBtn.getStyleClass().add("refresh-btn");
-        startReceivingBtn.getStyleClass().add("refresh-btn");
-        completeReceivingBtn.getStyleClass().add("refresh-btn");
-        acceptBtn.getStyleClass().add("refresh-btn");
-        startPlacementBtn.getStyleClass().add("refresh-btn");
-        startShippingBtn.getStyleClass().add("refresh-btn");
-        completeShippingBtn.getStyleClass().add("refresh-btn");
-        tasksBtn.getStyleClass().add("refresh-btn");
-
-        confirmBtn.setPrefHeight(48);
-        startReceivingBtn.setPrefHeight(48);
-        completeReceivingBtn.setPrefHeight(48);
-        acceptBtn.setPrefHeight(48);
-        startPlacementBtn.setPrefHeight(48);
-        startShippingBtn.setPrefHeight(48);
-        completeShippingBtn.setPrefHeight(48);
-        tasksBtn.setPrefHeight(48);
+        configureReceiptActionButton(confirmBtn);
+        configureReceiptActionButton(startReceivingBtn);
+        configureReceiptActionButton(completeReceivingBtn);
+        configureReceiptActionButton(acceptBtn);
+        configureReceiptActionButton(startPlacementBtn);
+        configureReceiptActionButton(startShippingBtn);
+        configureReceiptActionButton(completeShippingBtn);
+        configureReceiptActionButton(tasksBtn);
+        configureReceiptActionButton(wavesBtn);
+        if (deleteReceiptBtn != null) {
+            configureReceiptActionButton(deleteReceiptBtn);
+            deleteReceiptBtn.getStyleClass().add("btn-danger");
+        }
+        final Button deleteReceiptActionBtn = deleteReceiptBtn;
 
         TableView<Receipt> table = buildReceiptTable();
+        table.setMinHeight(0);
+        table.setMaxHeight(Double.MAX_VALUE);
         Runnable updateReceiptActions = () -> {
             Receipt selected = table.getSelectionModel().getSelectedItem();
             boolean hasSelection = selected != null;
@@ -390,6 +417,9 @@ public class DesktopClientApplication extends Application {
             startShippingBtn.setDisable(!hasSelection);
             completeShippingBtn.setDisable(!hasSelection);
             tasksBtn.setDisable(!hasSelection);
+            if (deleteReceiptActionBtn != null) {
+                deleteReceiptActionBtn.setDisable(!hasSelection);
+            }
             if (!hasSelection) {
                 return;
             }
@@ -404,8 +434,14 @@ public class DesktopClientApplication extends Application {
             startShippingBtn.setDisable(!(crossDock && "READY_FOR_SHIPMENT".equals(status)));
             completeShippingBtn.setDisable(!(crossDock && "SHIPPING_IN_PROGRESS".equals(status)));
             tasksBtn.setDisable(false);
+            if (deleteReceiptActionBtn != null) {
+                deleteReceiptActionBtn.setDisable(!"DRAFT".equals(status));
+            }
         };
         table.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> updateReceiptActions.run());
+        if (createFromSelectedBtn != null) {
+            createFromSelectedBtn.disableProperty().bind(table.getSelectionModel().selectedItemProperty().isNull());
+        }
         confirmBtn.setDisable(true);
         startReceivingBtn.setDisable(true);
         completeReceivingBtn.setDisable(true);
@@ -414,6 +450,9 @@ public class DesktopClientApplication extends Application {
         startShippingBtn.setDisable(true);
         completeShippingBtn.setDisable(true);
         tasksBtn.setDisable(true);
+        if (deleteReceiptActionBtn != null) {
+            deleteReceiptActionBtn.setDisable(true);
+        }
 
         confirmBtn.setOnAction(e -> withSelectedReceipt(table, r -> asyncAction(() -> apiClient.confirm(r.id()), table)));
         
@@ -470,17 +509,27 @@ public class DesktopClientApplication extends Application {
 
         completeShippingBtn.setOnAction(e -> withSelectedReceipt(table,
             r -> asyncAction(() -> apiClient.completeShipping(r.id()), table)));
+
+        if (deleteReceiptActionBtn != null) {
+            deleteReceiptActionBtn.setOnAction(e -> withSelectedReceipt(table, r -> {
+                if (!showConfirm(I18n.get("receipts.delete.title"), I18n.format("receipts.delete.confirm", r.docNo()))) {
+                    return;
+                }
+                asyncAction(() -> apiClient.deleteReceipt(r.id()), table);
+            }));
+        }
         
         tasksBtn.setOnAction(e -> withSelectedReceipt(table, this::showTasksDialog));
+        wavesBtn.setOnAction(e -> showShippingWavesDialog());
 
         HBox filterRow = createBtn == null
             ? new HBox(14, filterField, refreshBtn)
-            : new HBox(14, filterField, createBtn, refreshBtn);
+            : new HBox(14, filterField, createBtn, createFromSelectedBtn, refreshBtn);
         HBox.setHgrow(filterField, Priority.ALWAYS);
         filterRow.setAlignment(Pos.CENTER_LEFT);
 
-        HBox actionsRow = new HBox(
-            10,
+        FlowPane actionsRow = new FlowPane(10, 10);
+        actionsRow.getChildren().addAll(
             confirmBtn,
             startReceivingBtn,
             completeReceivingBtn,
@@ -488,21 +537,318 @@ public class DesktopClientApplication extends Application {
             startPlacementBtn,
             startShippingBtn,
             completeShippingBtn,
-            tasksBtn
+            tasksBtn,
+            wavesBtn
         );
+        if (deleteReceiptActionBtn != null) {
+            actionsRow.getChildren().add(deleteReceiptActionBtn);
+        }
+        actionsRow.setAlignment(Pos.CENTER_LEFT);
+        actionsRow.getStyleClass().add("actions-flow");
+
         VBox card = new VBox(16, filterRow, actionsRow, table);
         card.setPadding(new Insets(24));
+        card.setMinHeight(0);
+        card.setMaxHeight(Double.MAX_VALUE);
         card.setId("main-card");
+        VBox.setVgrow(table, Priority.ALWAYS);
+        actionsRow.prefWrapLengthProperty().bind(card.widthProperty().subtract(48));
 
         refreshBtn.setOnAction(e -> loadReceipts(table, filterField.getText()));
         if (createBtn != null) {
             createBtn.setOnAction(e -> showCreateReceiptDraftDialog(table));
         }
+        if (createFromSelectedBtn != null) {
+            createFromSelectedBtn.setOnAction(e -> {
+                Receipt source = table.getSelectionModel().getSelectedItem();
+                if (source == null) {
+                    showError(I18n.get("receipts.copy.error.no_selection"));
+                    return;
+                }
+                cloneReceiptAsDraft(source, table);
+            });
+        }
         filterField.setOnAction(e -> loadReceipts(table, filterField.getText()));
         table.itemsProperty().addListener((obs, oldItems, newItems) -> updateReceiptActions.run());
 
-        setContent(new VBox(card));
+        VBox receiptsRoot = new VBox(card);
+        receiptsRoot.setFillWidth(true);
+        receiptsRoot.setMinHeight(0);
+        receiptsRoot.setMaxHeight(Double.MAX_VALUE);
+        VBox.setVgrow(card, Priority.ALWAYS);
+        VBox.setVgrow(receiptsRoot, Priority.ALWAYS);
+
+        setContent(receiptsRoot);
         loadReceipts(table, "");
+    }
+
+    private void configureReceiptActionButton(Button button) {
+        button.getStyleClass().add("refresh-btn");
+        button.setPrefHeight(48);
+        button.setMinHeight(48);
+        button.setMaxHeight(48);
+        button.setMinWidth(Region.USE_PREF_SIZE);
+        button.setPrefWidth(Region.USE_COMPUTED_SIZE);
+        button.setMaxWidth(Region.USE_PREF_SIZE);
+        button.setWrapText(false);
+    }
+
+    private void cloneReceiptAsDraft(Receipt sourceReceipt, TableView<Receipt> receiptTable) {
+        if (sourceReceipt == null || sourceReceipt.id() == null) {
+            showError(I18n.get("receipts.copy.error.no_selection"));
+            return;
+        }
+        showNotification(I18n.get("receipts.copy.status.in_progress"));
+
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                String suffix = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+                String clonedDocNo = sourceReceipt.docNo() + "-COPY-" + suffix;
+                Receipt draft = apiClient.createDraft(
+                    clonedDocNo,
+                    LocalDate.now(),
+                    sourceReceipt.supplier(),
+                    Boolean.TRUE.equals(sourceReceipt.crossDock()),
+                    sourceReceipt.outboundRef()
+                );
+
+                List<com.wmsdipl.desktop.model.ReceiptLine> sourceLines = apiClient.getReceiptLines(sourceReceipt.id());
+                for (com.wmsdipl.desktop.model.ReceiptLine line : sourceLines) {
+                    if (line.skuId() == null || line.uom() == null || line.uom().isBlank() || line.qtyExpected() == null) {
+                        continue;
+                    }
+                    apiClient.addReceiptLine(
+                        draft.id(),
+                        line.lineNo(),
+                        line.skuId(),
+                        line.uom(),
+                        line.qtyExpected(),
+                        line.ssccExpected()
+                    );
+                }
+                return draft;
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        }).whenComplete((draft, error) -> Platform.runLater(() -> {
+            if (error != null) {
+                markSyncFailure();
+                Throwable cause = error.getCause() != null ? error.getCause() : error;
+                showError(I18n.format("common.error", cause.getMessage()));
+                return;
+            }
+            markSyncSuccess();
+            showNotification(I18n.format("receipts.copy.status.success", sourceReceipt.docNo(), draft.docNo()));
+            loadReceipts(receiptTable, "");
+            showDraftLinesEditorDialog(draft, receiptTable);
+        }));
+    }
+
+    private void showShippingWavesDialog() {
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.setTitle(I18n.get("receipts.waves.dialog.title"));
+
+        TableView<ShippingWave> wavesTable = new TableView<>();
+        enableAutoColumnSizing(wavesTable);
+        wavesTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        wavesTable.setPlaceholder(new Label(I18n.get("common.loading")));
+
+        TableColumn<ShippingWave, String> outboundCol = new TableColumn<>(I18n.get("receipts.waves.table.outbound"));
+        outboundCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().outboundRef()));
+
+        TableColumn<ShippingWave, String> statusCol = new TableColumn<>(I18n.get("receipts.waves.table.status"));
+        statusCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(translateWaveStatus(cell.getValue().status())));
+
+        TableColumn<ShippingWave, Number> totalCol = new TableColumn<>(I18n.get("receipts.waves.table.total"));
+        totalCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().totalReceipts()));
+
+        TableColumn<ShippingWave, Number> readyCol = new TableColumn<>(I18n.get("receipts.waves.table.ready"));
+        readyCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().readyForShipmentCount()));
+
+        TableColumn<ShippingWave, Number> progressCol = new TableColumn<>(I18n.get("receipts.waves.table.in_progress"));
+        progressCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().shippingInProgressCount()));
+
+        TableColumn<ShippingWave, Number> shippedCol = new TableColumn<>(I18n.get("receipts.waves.table.shipped"));
+        shippedCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().shippedCount()));
+
+        TableColumn<ShippingWave, Number> openTasksCol = new TableColumn<>(I18n.get("receipts.waves.table.open_tasks"));
+        openTasksCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().openShippingTasks()));
+
+        wavesTable.getColumns().addAll(outboundCol, statusCol, totalCol, readyCol, progressCol, shippedCol, openTasksCol);
+
+        Label statusLabel = new Label();
+        statusLabel.getStyleClass().add("form-hint");
+
+        Button refreshBtn = new Button(I18n.get("btn.refresh"));
+        refreshBtn.getStyleClass().add("refresh-btn");
+        Button startBtn = new Button(I18n.get("receipts.waves.btn.start"));
+        startBtn.getStyleClass().add("refresh-btn");
+        Button completeBtn = new Button(I18n.get("receipts.waves.btn.complete"));
+        completeBtn.getStyleClass().add("refresh-btn");
+        Button closeBtn = new Button(I18n.get("common.close"));
+        closeBtn.getStyleClass().add("refresh-btn");
+        closeBtn.setOnAction(e -> dialog.close());
+
+        startBtn.setDisable(true);
+        completeBtn.setDisable(true);
+
+        wavesTable.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, selected) -> {
+            startBtn.setDisable(!canStartWave(selected));
+            completeBtn.setDisable(!canCompleteWave(selected));
+        });
+
+        Consumer<Boolean> loadWaves = showLoadedMessage -> {
+            String selectedOutboundRef = Optional.ofNullable(wavesTable.getSelectionModel().getSelectedItem())
+                .map(ShippingWave::outboundRef)
+                .orElse(null);
+
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.listShippingWaves();
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((waves, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    statusLabel.setText(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                    statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
+                    wavesTable.setItems(FXCollections.observableArrayList());
+                    startBtn.setDisable(true);
+                    completeBtn.setDisable(true);
+                    return;
+                }
+
+                List<ShippingWave> items = waves != null ? waves : List.of();
+                wavesTable.setItems(FXCollections.observableArrayList(items));
+
+                if (selectedOutboundRef != null) {
+                    items.stream()
+                        .filter(wave -> selectedOutboundRef.equals(wave.outboundRef()))
+                        .findFirst()
+                        .ifPresent(wave -> wavesTable.getSelectionModel().select(wave));
+                }
+
+                ShippingWave selected = wavesTable.getSelectionModel().getSelectedItem();
+                startBtn.setDisable(!canStartWave(selected));
+                completeBtn.setDisable(!canCompleteWave(selected));
+
+                if (showLoadedMessage) {
+                    statusLabel.setText(I18n.format("receipts.waves.status.loaded", items.size()));
+                    statusLabel.setStyle("-fx-text-fill: #7ac8ff; -fx-font-size: 12px;");
+                }
+            }));
+        };
+
+        startBtn.setOnAction(e -> {
+            ShippingWave selected = wavesTable.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                return;
+            }
+            startBtn.setDisable(true);
+            completeBtn.setDisable(true);
+            statusLabel.setText(I18n.get("receipts.waves.status.starting"));
+            statusLabel.setStyle("-fx-text-fill: #FFC107; -fx-font-size: 12px;");
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.startShippingWave(selected.outboundRef());
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((result, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    statusLabel.setText(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                    statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
+                    startBtn.setDisable(false);
+                    completeBtn.setDisable(false);
+                    return;
+                }
+                statusLabel.setText(formatWaveActionResult(I18n.get("receipts.waves.status.started"), result));
+                statusLabel.setStyle(result != null && result.affectedReceipts() != null && result.affectedReceipts() > 0
+                    ? "-fx-text-fill: #4CAF50; -fx-font-size: 12px;"
+                    : "-fx-text-fill: #FFC107; -fx-font-size: 12px;");
+                loadWaves.accept(false);
+            }));
+        });
+
+        completeBtn.setOnAction(e -> {
+            ShippingWave selected = wavesTable.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                return;
+            }
+            startBtn.setDisable(true);
+            completeBtn.setDisable(true);
+            statusLabel.setText(I18n.get("receipts.waves.status.completing"));
+            statusLabel.setStyle("-fx-text-fill: #FFC107; -fx-font-size: 12px;");
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.completeShippingWave(selected.outboundRef());
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((result, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    statusLabel.setText(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                    statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
+                    startBtn.setDisable(false);
+                    completeBtn.setDisable(false);
+                    return;
+                }
+                statusLabel.setText(formatWaveActionResult(I18n.get("receipts.waves.status.completed"), result));
+                statusLabel.setStyle(result != null && result.affectedReceipts() != null && result.affectedReceipts() > 0
+                    ? "-fx-text-fill: #4CAF50; -fx-font-size: 12px;"
+                    : "-fx-text-fill: #FFC107; -fx-font-size: 12px;");
+                loadWaves.accept(false);
+            }));
+        });
+
+        refreshBtn.setOnAction(e -> loadWaves.accept(true));
+
+        HBox actions = new HBox(10, refreshBtn, startBtn, completeBtn, closeBtn);
+        VBox content = new VBox(12, actions, statusLabel, wavesTable);
+        content.setPadding(new Insets(16));
+        content.getStyleClass().add("dialog-surface");
+
+        Scene scene = new Scene(content, 980, 520);
+        applyStyles(scene);
+        dialog.setScene(scene);
+        dialog.show();
+
+        loadWaves.accept(true);
+    }
+
+    private String formatWaveActionResult(String prefix, ShippingWaveActionResult result) {
+        if (result == null) {
+            return prefix;
+        }
+        int blocked = result.blockedReceiptIds() != null ? result.blockedReceiptIds().size() : 0;
+        int affected = result.affectedReceipts() != null ? result.affectedReceipts() : 0;
+        int targeted = result.targetedReceipts() != null ? result.targetedReceipts() : 0;
+        int created = result.tasksCreated() != null ? result.tasksCreated() : 0;
+        String base = I18n.format(
+            "receipts.waves.status.result",
+            prefix,
+            affected,
+            targeted,
+            created,
+            blocked
+        );
+        String firstWarning = result.warnings() != null
+            ? result.warnings().stream().filter(w -> w != null && !w.isBlank()).findFirst().orElse(null)
+            : null;
+        return firstWarning == null ? base : base + " | " + firstWarning;
+    }
+
+    private boolean canStartWave(ShippingWave wave) {
+        return wave != null && wave.readyForShipmentCount() != null && wave.readyForShipmentCount() > 0;
+    }
+
+    private boolean canCompleteWave(ShippingWave wave) {
+        return wave != null
+            && wave.shippingInProgressCount() != null
+            && wave.shippingInProgressCount() > 0
+            && wave.openShippingTasks() != null
+            && wave.openShippingTasks() == 0;
     }
 
     private TableView<Receipt> buildReceiptTable() {
@@ -580,20 +926,28 @@ public class DesktopClientApplication extends Application {
         lineTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         lineTable.setPlaceholder(new Label(I18n.get("common.loading")));
 
-        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, Number> lineNoCol = new TableColumn<>("lineNo");
+        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, Number> lineNoCol = new TableColumn<>(I18n.get("receipts.lines.line_no"));
         lineNoCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().lineNo()));
-        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, Number> skuCol = new TableColumn<>("skuId");
+        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, Number> skuCol = new TableColumn<>(I18n.get("receipts.lines.sku_id"));
         skuCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().skuId()));
         TableColumn<com.wmsdipl.desktop.model.ReceiptLine, Number> packCol = new TableColumn<>("packagingId");
         packCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().packagingId()));
-        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, String> uomCol = new TableColumn<>("uom");
+        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, String> uomCol = new TableColumn<>(I18n.get("receipts.lines.uom"));
         uomCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().uom()));
-        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, Number> qtyCol = new TableColumn<>("qtyExpected");
+        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, Number> qtyCol = new TableColumn<>(I18n.get("receipts.lines.qty"));
         qtyCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().qtyExpected()));
-        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, String> ssccCol = new TableColumn<>("ssccExpected");
+        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, String> ssccCol = new TableColumn<>(I18n.get("receipts.lines.sscc"));
         ssccCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().ssccExpected()));
+        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, String> lotCol = new TableColumn<>(I18n.get("receipts.lines.lot_expected"));
+        lotCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(
+            cell.getValue().lotNumberExpected() != null ? cell.getValue().lotNumberExpected() : ""
+        ));
+        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, String> expiryCol = new TableColumn<>(I18n.get("receipts.lines.expiry_expected"));
+        expiryCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(
+            cell.getValue().expiryDateExpected() != null ? cell.getValue().expiryDateExpected().toString() : ""
+        ));
 
-        lineTable.getColumns().addAll(lineNoCol, skuCol, packCol, uomCol, qtyCol, ssccCol);
+        lineTable.getColumns().addAll(lineNoCol, skuCol, packCol, uomCol, qtyCol, ssccCol, lotCol, expiryCol);
 
         VBox box = new VBox(lineTable);
         box.setPadding(new Insets(12));
@@ -756,7 +1110,15 @@ public class DesktopClientApplication extends Application {
         qtyCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().qtyExpected()));
         TableColumn<com.wmsdipl.desktop.model.ReceiptLine, String> ssccCol = new TableColumn<>(I18n.get("receipts.lines.sscc"));
         ssccCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(cell.getValue().ssccExpected()));
-        lineTable.getColumns().addAll(lineNoCol, skuCol, uomCol, qtyCol, ssccCol);
+        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, String> lotCol = new TableColumn<>(I18n.get("receipts.lines.lot_expected"));
+        lotCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(
+            cell.getValue().lotNumberExpected() != null ? cell.getValue().lotNumberExpected() : ""
+        ));
+        TableColumn<com.wmsdipl.desktop.model.ReceiptLine, String> expiryCol = new TableColumn<>(I18n.get("receipts.lines.expiry_expected"));
+        expiryCol.setCellValueFactory(cell -> new SimpleObjectProperty<>(
+            cell.getValue().expiryDateExpected() != null ? cell.getValue().expiryDateExpected().toString() : ""
+        ));
+        lineTable.getColumns().addAll(lineNoCol, skuCol, uomCol, qtyCol, ssccCol, lotCol, expiryCol);
 
         Label statusLabel = new Label();
         statusLabel.getStyleClass().add("form-hint");
@@ -935,7 +1297,7 @@ public class DesktopClientApplication extends Application {
         Label statusLabel = new Label();
         statusLabel.getStyleClass().add("form-hint");
 
-        Button saveBtn = new Button(I18n.get("common.save"));
+        Button saveBtn = new Button(I18n.get("btn.save"));
         saveBtn.getStyleClass().add("refresh-btn");
         Button cancelBtn = new Button(I18n.get("common.cancel"));
         cancelBtn.getStyleClass().add("refresh-btn");
@@ -1126,6 +1488,15 @@ public class DesktopClientApplication extends Application {
         String key = "status." + status;
         String val = I18n.get(key);
         return val.startsWith("!") ? status : val;
+    }
+
+    private String translateWaveStatus(String status) {
+        if (status == null) {
+            return "";
+        }
+        String key = "shipping_wave.status." + status;
+        String val = I18n.get(key);
+        return val.startsWith("!") ? translateStatus(status) : val;
     }
 
     private void showTopologyPane() {
@@ -1689,10 +2060,21 @@ public class DesktopClientApplication extends Application {
         Button bulkOpsBtn = new Button(I18n.get("tasks.btn.bulk"));
         bulkOpsBtn.getStyleClass().add("btn-primary");
         bulkOpsBtn.setDisable(true);
+
+        Button autoAssignBtn = new Button(I18n.get("tasks.btn.auto_assign"));
+        autoAssignBtn.getStyleClass().add("btn-primary");
+        autoAssignBtn.setDisable(true);
+
+        Button discrepancyJournalBtn = new Button(I18n.get("tasks.btn.discrepancy_journal"));
+        discrepancyJournalBtn.getStyleClass().add("refresh-btn");
         
         if (!canBulk) {
             bulkOpsBtn.setVisible(false);
             bulkOpsBtn.setManaged(false);
+            autoAssignBtn.setVisible(false);
+            autoAssignBtn.setManaged(false);
+            discrepancyJournalBtn.setVisible(false);
+            discrepancyJournalBtn.setManaged(false);
         }
 
         TableView<com.wmsdipl.desktop.model.Task> table = new TableView<>();
@@ -1704,11 +2086,14 @@ public class DesktopClientApplication extends Application {
         table.getSelectionModel().selectedItemProperty().addListener((obs, o, n) -> {
             if (canBulk) {
                 bulkOpsBtn.setDisable(table.getSelectionModel().getSelectedItems().isEmpty());
+                autoAssignBtn.setDisable(table.getSelectionModel().getSelectedItems().isEmpty());
             }
         });
         
         if (canBulk) {
             bulkOpsBtn.setOnAction(e -> showBulkOperationsDialog(table));
+            autoAssignBtn.setOnAction(e -> showAutoAssignDialog(table));
+            discrepancyJournalBtn.setOnAction(e -> showDiscrepancyJournalDialog());
         }
         
         TableColumn<com.wmsdipl.desktop.model.Task, Object> taskIdCol = column(I18n.get("tasks.table.id"), com.wmsdipl.desktop.model.Task::id);
@@ -1735,13 +2120,315 @@ public class DesktopClientApplication extends Application {
 
         HBox controls = new HBox(10, receiptFilter, refresh);
         if (canBulk) {
-            controls.getChildren().add(bulkOpsBtn);
+            controls.getChildren().addAll(bulkOpsBtn, autoAssignBtn, discrepancyJournalBtn);
         }
         controls.setAlignment(Pos.CENTER_LEFT);
         VBox layout = new VBox(12, header, controls, table);
         layout.setPadding(new Insets(24));
         layout.getStyleClass().add("page-root");
         setContent(layout);
+    }
+
+    private void showAutoAssignDialog(TableView<com.wmsdipl.desktop.model.Task> taskTable) {
+        List<com.wmsdipl.desktop.model.Task> selectedTasks = new ArrayList<>(taskTable.getSelectionModel().getSelectedItems());
+        if (selectedTasks.isEmpty()) {
+            showError(I18n.get("tasks.auto_assign.error.no_selection"));
+            return;
+        }
+        List<Long> taskIds = selectedTasks.stream()
+            .map(com.wmsdipl.desktop.model.Task::id)
+            .filter(Objects::nonNull)
+            .toList();
+
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.setTitle(I18n.get("tasks.auto_assign.title"));
+
+        CheckBox reassignAssigned = new CheckBox(I18n.get("tasks.auto_assign.reassign"));
+        reassignAssigned.setSelected(false);
+
+        Label summaryLabel = new Label(I18n.format("tasks.auto_assign.summary.selected", taskIds.size()));
+        summaryLabel.getStyleClass().add("form-hint");
+
+        TableView<AutoAssignPreviewItem> previewTable = new TableView<>();
+        enableAutoColumnSizing(previewTable);
+        previewTable.setPlaceholder(new Label(I18n.get("common.no_data")));
+        previewTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        previewTable.getColumns().addAll(
+            column(I18n.get("tasks.auto_assign.col.task_id"), AutoAssignPreviewItem::taskId),
+            column(I18n.get("tasks.auto_assign.col.current"), p -> p.currentAssignee() != null ? p.currentAssignee() : ""),
+            column(I18n.get("tasks.auto_assign.col.suggested"), p -> p.suggestedAssignee() != null ? p.suggestedAssignee() : ""),
+            column(I18n.get("tasks.auto_assign.col.load_before"), p -> p.suggestedAssigneeLoadBeforeAssign() != null ? p.suggestedAssigneeLoadBeforeAssign() : ""),
+            column(I18n.get("tasks.auto_assign.col.decision"), p -> translateAutoAssignDecision(p.decision()))
+        );
+
+        Button dryRunBtn = new Button(I18n.get("tasks.auto_assign.btn.preview"));
+        dryRunBtn.getStyleClass().add("refresh-btn");
+        Button applyBtn = new Button(I18n.get("tasks.auto_assign.btn.apply"));
+        applyBtn.getStyleClass().add("refresh-btn");
+        Button closeBtn = new Button(I18n.get("common.close"));
+        closeBtn.getStyleClass().add("refresh-btn");
+        closeBtn.setOnAction(e -> dialog.close());
+
+        Runnable refreshPreview = () -> {
+            summaryLabel.setText(I18n.get("tasks.auto_assign.status.previewing"));
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.autoAssignDryRun(taskIds, reassignAssigned.isSelected());
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((result, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    summaryLabel.setText(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                    previewTable.setItems(FXCollections.observableArrayList());
+                    return;
+                }
+                previewTable.setItems(FXCollections.observableArrayList(result.items()));
+                summaryLabel.setText(I18n.format(
+                    "tasks.auto_assign.summary.result",
+                    result.totalCandidates(),
+                    result.assignedCount(),
+                    result.skippedCount()
+                ));
+            }));
+        };
+
+        dryRunBtn.setOnAction(e -> refreshPreview.run());
+        applyBtn.setOnAction(e -> {
+            summaryLabel.setText(I18n.get("tasks.auto_assign.status.applying"));
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.autoAssignApply(taskIds, reassignAssigned.isSelected());
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((result, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    summaryLabel.setText(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                    return;
+                }
+                previewTable.setItems(FXCollections.observableArrayList(result.items()));
+                summaryLabel.setText(I18n.format(
+                    "tasks.auto_assign.summary.applied",
+                    result.assignedCount(),
+                    result.skippedCount()
+                ));
+                loadTasks(taskTable, null);
+            }));
+        });
+
+        VBox root = new VBox(
+            12,
+            new HBox(12, reassignAssigned, dryRunBtn, applyBtn, closeBtn),
+            summaryLabel,
+            previewTable
+        );
+        root.setPadding(new Insets(16));
+        root.getStyleClass().add("dialog-surface");
+
+        Scene scene = new Scene(root, 920, 520);
+        applyStyles(scene);
+        dialog.setScene(scene);
+        dialog.show();
+
+        refreshPreview.run();
+    }
+
+    private void showDiscrepancyJournalDialog() {
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.setTitle(I18n.get("discrepancy.journal.title"));
+
+        TextField docNoField = new TextField();
+        docNoField.setPromptText(I18n.get("discrepancy.journal.filter.doc"));
+        TextField operatorField = new TextField();
+        operatorField.setPromptText(I18n.get("discrepancy.journal.filter.operator"));
+        TextField skuField = new TextField();
+        skuField.setPromptText(I18n.get("discrepancy.journal.filter.sku"));
+
+        ComboBox<String> typeCombo = new ComboBox<>();
+        typeCombo.getItems().addAll(
+            "",
+            "UNDER_QTY",
+            "OVER_QTY",
+            "BARCODE_MISMATCH",
+            "SSCC_MISMATCH",
+            "DAMAGE",
+            "EXPIRED_PRODUCT",
+            "LOT_MISMATCH"
+        );
+        typeCombo.setPromptText(I18n.get("discrepancy.journal.filter.type"));
+
+        ComboBox<String> resolvedCombo = new ComboBox<>();
+        resolvedCombo.getItems().addAll(
+            I18n.get("discrepancy.journal.filter.resolved.all"),
+            I18n.get("discrepancy.journal.filter.resolved.open"),
+            I18n.get("discrepancy.journal.filter.resolved.done")
+        );
+        resolvedCombo.setValue(I18n.get("discrepancy.journal.filter.resolved.all"));
+
+        DatePicker fromDate = new DatePicker(LocalDate.now().minusDays(30));
+        DatePicker toDate = new DatePicker(LocalDate.now());
+
+        Label statusLabel = new Label();
+        statusLabel.getStyleClass().add("form-hint");
+
+        TableView<Discrepancy> table = new TableView<>();
+        enableAutoColumnSizing(table);
+        table.setPlaceholder(new Label(I18n.get("common.loading")));
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        table.getColumns().addAll(
+            column(I18n.get("discrepancy.journal.col.id"), Discrepancy::id),
+            column(I18n.get("discrepancy.journal.col.doc"), d -> d.receiptDocNo() != null ? d.receiptDocNo() : ""),
+            column(I18n.get("discrepancy.journal.col.type"), d -> d.type() != null ? d.type() : ""),
+            column(I18n.get("discrepancy.journal.col.operator"), d -> d.operator() != null ? d.operator() : ""),
+            column(I18n.get("discrepancy.journal.col.qty_expected"), d -> d.qtyExpected() != null ? d.qtyExpected().stripTrailingZeros().toPlainString() : ""),
+            column(I18n.get("discrepancy.journal.col.qty_actual"), d -> d.qtyActual() != null ? d.qtyActual().stripTrailingZeros().toPlainString() : ""),
+            column(I18n.get("discrepancy.journal.col.comment"), d -> localizeSystemDiscrepancyComment(d.comment())),
+            column(I18n.get("discrepancy.journal.col.resolved"), d -> Boolean.TRUE.equals(d.resolved()) ? I18n.get("common.yes") : I18n.get("common.no")),
+            column(I18n.get("discrepancy.journal.col.created_at"), d -> d.createdAt() != null ? d.createdAt().format(dateTimeFmt) : "")
+        );
+
+        Button refreshBtn = new Button(I18n.get("btn.refresh"));
+        refreshBtn.getStyleClass().add("refresh-btn");
+        Button editCommentBtn = new Button(I18n.get("discrepancy.journal.btn.edit_comment"));
+        editCommentBtn.getStyleClass().add("refresh-btn");
+        editCommentBtn.setDisable(true);
+        Button closeBtn = new Button(I18n.get("common.close"));
+        closeBtn.getStyleClass().add("refresh-btn");
+        closeBtn.setOnAction(e -> dialog.close());
+
+        table.getSelectionModel().selectedItemProperty().addListener((obs, oldV, selected) ->
+            editCommentBtn.setDisable(selected == null));
+
+        Runnable loadJournal = () -> {
+            Long skuId = null;
+            if (skuField.getText() != null && !skuField.getText().isBlank()) {
+                try {
+                    skuId = Long.parseLong(skuField.getText().trim());
+                } catch (NumberFormatException ex) {
+                    statusLabel.setText(I18n.get("discrepancy.journal.error.sku"));
+                    return;
+                }
+            }
+            Boolean resolved = null;
+            if (I18n.get("discrepancy.journal.filter.resolved.open").equals(resolvedCombo.getValue())) {
+                resolved = Boolean.FALSE;
+            } else if (I18n.get("discrepancy.journal.filter.resolved.done").equals(resolvedCombo.getValue())) {
+                resolved = Boolean.TRUE;
+            }
+            Long finalSkuId = skuId;
+            Boolean finalResolved = resolved;
+            statusLabel.setText(I18n.get("common.loading"));
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.listDiscrepancies(
+                        null,
+                        typeCombo.getValue(),
+                        docNoField.getText(),
+                        finalSkuId,
+                        operatorField.getText(),
+                        finalResolved,
+                        fromDate.getValue(),
+                        toDate.getValue()
+                    );
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((items, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    statusLabel.setText(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                    table.setItems(FXCollections.observableArrayList());
+                    return;
+                }
+                table.setItems(FXCollections.observableArrayList(items));
+                statusLabel.setText(I18n.format("discrepancy.journal.status.loaded", items.size()));
+            }));
+        };
+
+        refreshBtn.setOnAction(e -> loadJournal.run());
+        editCommentBtn.setOnAction(e -> {
+            Discrepancy selected = table.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                return;
+            }
+            TextInputDialog inputDialog = new TextInputDialog(selected.comment() == null ? "" : selected.comment());
+            styleDialog(inputDialog);
+            inputDialog.setTitle(I18n.get("discrepancy.journal.edit.title"));
+            inputDialog.setHeaderText(I18n.format("discrepancy.journal.edit.header", selected.id()));
+            inputDialog.setContentText(I18n.get("discrepancy.journal.edit.content"));
+            Optional<String> result = inputDialog.showAndWait();
+            if (result.isEmpty()) {
+                return;
+            }
+            statusLabel.setText(I18n.get("discrepancy.journal.status.saving"));
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.updateDiscrepancyComment(selected.id(), result.get());
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((updated, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    statusLabel.setText(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                    return;
+                }
+                String currentUser = apiClient.getCurrentUsername();
+                String author = (currentUser == null || currentUser.isBlank()) ? "system" : currentUser;
+                if (updated != null && updated.id() != null) {
+                    var items = table.getItems();
+                    int index = items.indexOf(selected);
+                    if (index >= 0) {
+                        items.set(index, updated);
+                        table.getSelectionModel().select(index);
+                    }
+                }
+                statusLabel.setText(I18n.format("discrepancy.journal.status.saved_by", author));
+            }));
+        });
+
+        HBox filterRow = new HBox(10, docNoField, operatorField, skuField, typeCombo, resolvedCombo, fromDate, toDate, refreshBtn);
+        HBox actionRow = new HBox(10, editCommentBtn, closeBtn);
+        VBox root = new VBox(12, filterRow, statusLabel, table, actionRow);
+        root.setPadding(new Insets(16));
+        root.getStyleClass().add("dialog-surface");
+
+        Scene scene = new Scene(root, 1280, 620);
+        applyStyles(scene);
+        dialog.setScene(scene);
+        dialog.show();
+
+        loadJournal.run();
+    }
+
+    private String translateAutoAssignDecision(String decision) {
+        if (decision == null || decision.isBlank()) {
+            return "";
+        }
+        String value = I18n.get("tasks.auto_assign.decision." + decision);
+        return value.startsWith("!") ? decision : value;
+    }
+
+    private String localizeSystemDiscrepancyComment(String comment) {
+        if (comment == null || comment.isBlank()) {
+            return "";
+        }
+
+        Matcher shortageMatcher = SHORTAGE_COMMENT_PATTERN.matcher(comment.trim());
+        if (shortageMatcher.matches()) {
+            return I18n.format(
+                "discrepancy.journal.comment.shortage_confirmed",
+                shortageMatcher.group(1).trim(),
+                shortageMatcher.group(2).trim()
+            );
+        }
+
+        if ("Shortage confirmed by operator during task completion.".equals(comment.trim())) {
+            return I18n.get("discrepancy.journal.comment.shortage_confirmed_short");
+        }
+
+        return comment;
     }
 
     private void showUsersPane() {
@@ -2629,6 +3316,8 @@ public class DesktopClientApplication extends Application {
             TextField coreApiField = new TextField(coreApiBase);
             TextField importApiField = new TextField(importApiBase);
             TextField importFolderField = new TextField();
+            TextField discrepancyRetentionField = new TextField();
+            discrepancyRetentionField.setPromptText(I18n.get("settings.discrepancy_retention_prompt"));
             Label statusLabel = new Label(I18n.get("settings.status_default"));
             statusLabel.getStyleClass().add("muted-label");
 
@@ -2648,6 +3337,15 @@ public class DesktopClientApplication extends Application {
                 }
             });
 
+            CompletableFuture.runAsync(() -> {
+                try {
+                    DiscrepancyRetentionConfig config = apiClient.getDiscrepancyRetentionConfig();
+                    Platform.runLater(() -> discrepancyRetentionField.setText(String.valueOf(config.retentionDays())));
+                } catch (Exception e) {
+                    Platform.runLater(() -> statusLabel.setText(I18n.format("settings.discrepancy_retention_error", e.getMessage())));
+                }
+            });
+
             Button saveApi = new Button(I18n.get("settings.save_api"));
             saveApi.setOnAction(e -> {
                 coreApiBase = coreApiField.getText();
@@ -2658,6 +3356,36 @@ public class DesktopClientApplication extends Application {
 
             Button saveFolder = new Button(I18n.get("settings.save_folder"));
             saveFolder.setOnAction(e -> updateImportFolder(importApiField.getText(), importFolderField.getText(), statusLabel));
+
+            Button saveDiscrepancyRetention = new Button(I18n.get("settings.save_discrepancy_retention"));
+            saveDiscrepancyRetention.getStyleClass().add("refresh-btn");
+            saveDiscrepancyRetention.setOnAction(e -> {
+                int retentionDays;
+                try {
+                    retentionDays = Integer.parseInt(discrepancyRetentionField.getText().trim());
+                } catch (Exception ex) {
+                    statusLabel.setText(I18n.get("settings.discrepancy_retention_invalid"));
+                    return;
+                }
+                if (retentionDays <= 0) {
+                    statusLabel.setText(I18n.get("settings.discrepancy_retention_invalid"));
+                    return;
+                }
+                statusLabel.setText(I18n.get("settings.discrepancy_retention_saving"));
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        apiClient.updateDiscrepancyRetentionDays(retentionDays);
+                    } catch (Exception ex) {
+                        throw new RuntimeException(ex);
+                    }
+                }).whenComplete((v, error) -> Platform.runLater(() -> {
+                    if (error != null) {
+                        statusLabel.setText(I18n.format("settings.discrepancy_retention_error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                    } else {
+                        statusLabel.setText(I18n.format("settings.discrepancy_retention_saved", retentionDays));
+                    }
+                }));
+            });
 
             // Putaway rules list
             Label rulesHeader = new Label(I18n.get("settings.rules_header"));
@@ -2685,6 +3413,8 @@ public class DesktopClientApplication extends Application {
                 new Label(I18n.get("settings.import_api")), importApiField,
                 new Label(I18n.get("settings.import_folder")), importFolderField,
                 new HBox(8, saveApi, saveFolder),
+                new Label(I18n.get("settings.discrepancy_retention")), discrepancyRetentionField,
+                saveDiscrepancyRetention,
                 statusLabel,
                 rulesHeader,
                 refreshRules,
@@ -2970,8 +3700,7 @@ public class DesktopClientApplication extends Application {
 
         // Tab 1: Document (expected data)
         Tab docTab = new Tab(I18n.get("task_exec.tab.document"));
-        VBox docContent = buildDocumentTab(currentTask[0]);
-        docTab.setContent(docContent);
+        refreshTaskDocumentTab(docTab, currentTask[0]);
 
         // Tab 2: Fact (scan form)
         Tab factTab = new Tab(I18n.get("task_exec.tab.fact"));
@@ -3059,7 +3788,7 @@ public class DesktopClientApplication extends Application {
                     actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
                     updateButtons.run();
                     updateTitle.run();
-                    docTab.setContent(buildDocumentTab(currentTask[0]));
+                    refreshTaskDocumentTab(docTab, currentTask[0]);
                     factTab.setContent(buildFactTab(currentTask[0], dialog));
                 }
             }));
@@ -3150,7 +3879,7 @@ public class DesktopClientApplication extends Application {
                             actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
                             updateButtons.run();
                             updateTitle.run();
-                            docTab.setContent(buildDocumentTab(currentTask[0]));
+                            refreshTaskDocumentTab(docTab, currentTask[0]);
                             // Rebuild Fact tab to refresh scan table with updated discrepancy flags
                             factTab.setContent(buildFactTab(currentTask[0], dialog));
                         }
@@ -3180,7 +3909,7 @@ public class DesktopClientApplication extends Application {
                     actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
                     updateButtons.run();
                     updateTitle.run();
-                    docTab.setContent(buildDocumentTab(currentTask[0]));
+                    refreshTaskDocumentTab(docTab, currentTask[0]);
                 }
             }));
         });
@@ -3199,7 +3928,36 @@ public class DesktopClientApplication extends Application {
         dialog.show();
     }
 
+    private void refreshTaskDocumentTab(Tab docTab, com.wmsdipl.desktop.model.Task task) {
+        docTab.setContent(buildDocumentTab(task, null));
+        if (task == null || task.receiptId() == null || task.lineId() == null) {
+            return;
+        }
+        final Long receiptId = task.receiptId();
+        final Long lineId = task.lineId();
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                return apiClient.getReceiptLines(receiptId);
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        }).whenComplete((lines, error) -> Platform.runLater(() -> {
+            if (error != null || lines == null) {
+                return;
+            }
+            com.wmsdipl.desktop.model.ReceiptLine expectedLine = lines.stream()
+                .filter(line -> lineId.equals(line.id()))
+                .findFirst()
+                .orElse(null);
+            docTab.setContent(buildDocumentTab(task, expectedLine));
+        }));
+    }
+
     private VBox buildDocumentTab(com.wmsdipl.desktop.model.Task task) {
+        return buildDocumentTab(task, null);
+    }
+
+    private VBox buildDocumentTab(com.wmsdipl.desktop.model.Task task, com.wmsdipl.desktop.model.ReceiptLine expectedLine) {
         VBox content = new VBox(12);
         content.setPadding(new Insets(0, 16, 16, 16));
         content.getStyleClass().add("dialog-surface");
@@ -3211,13 +3969,23 @@ public class DesktopClientApplication extends Application {
         Label taskTypeLabel = new Label(I18n.format("doc_tab.task_type", task.taskType()));
         Label statusLabel = new Label(I18n.format("doc_tab.status", task.status()));
         Label qtyLabel = new Label(I18n.format("doc_tab.qty", formatTaskAssignedQuantity(task)));
+        String expectedLot = expectedLine != null
+            && expectedLine.lotNumberExpected() != null
+            && !expectedLine.lotNumberExpected().isBlank()
+            ? expectedLine.lotNumberExpected()
+            : I18n.get("common.no_data");
+        String expectedExpiry = expectedLine != null && expectedLine.expiryDateExpected() != null
+            ? expectedLine.expiryDateExpected().toString()
+            : I18n.get("common.no_data");
+        Label expectedLotLabel = new Label(I18n.format("doc_tab.lot_expected", expectedLot));
+        Label expectedExpiryLabel = new Label(I18n.format("doc_tab.expiry_expected", expectedExpiry));
         
         Label skuCodeLabel = new Label(I18n.format("doc_tab.barcode", (task.skuCode() != null ? task.skuCode() : "N/A")));
         skuCodeLabel.getStyleClass().add("accent-label");
 
         Label palletCodeLabel = null;
-        if ("PLACEMENT".equals(task.taskType())) {
-            palletCodeLabel = new Label(I18n.format("doc_tab.pallet", (task.palletCode() != null ? task.palletCode() : "N/A")));
+        if ("PLACEMENT".equals(task.taskType()) || "SHIPPING".equals(task.taskType())) {
+            palletCodeLabel = new Label(I18n.format("doc_tab.pallet_expected", resolveExpectedPalletDisplay(task)));
             palletCodeLabel.getStyleClass().add("accent-label");
         }
 
@@ -3227,14 +3995,38 @@ public class DesktopClientApplication extends Application {
         taskTypeLabel.getStyleClass().add("form-label");
         statusLabel.getStyleClass().add("form-label");
         qtyLabel.getStyleClass().add("form-label");
+        expectedLotLabel.getStyleClass().add("form-label");
+        expectedExpiryLabel.getStyleClass().add("form-label");
         assigneeLabel.getStyleClass().add("form-label");
 
-        content.getChildren().addAll(header, receiptLabel, taskTypeLabel, statusLabel, qtyLabel, skuCodeLabel);
+        content.getChildren().addAll(
+            header,
+            receiptLabel,
+            taskTypeLabel,
+            statusLabel,
+            qtyLabel,
+            expectedLotLabel,
+            expectedExpiryLabel,
+            skuCodeLabel
+        );
         if (palletCodeLabel != null) {
             content.getChildren().add(palletCodeLabel);
         }
         content.getChildren().add(assigneeLabel);
         return content;
+    }
+
+    private String resolveExpectedPalletDisplay(com.wmsdipl.desktop.model.Task task) {
+        if (task == null) {
+            return I18n.get("common.no_data");
+        }
+        if (task.palletCode() != null && !task.palletCode().isBlank()) {
+            return task.palletCode();
+        }
+        if (task.palletId() != null) {
+            return "ID " + task.palletId();
+        }
+        return I18n.get("common.no_data");
     }
 
     private VBox buildFactTab(com.wmsdipl.desktop.model.Task task, Stage dialog) {
@@ -4672,7 +5464,7 @@ public class DesktopClientApplication extends Application {
                     actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
                     updateButtons.run();
                     updateTitle.run();
-                    docTab.setContent(buildDocumentTab(updatedTask));
+                    refreshTaskDocumentTab(docTab, updatedTask);
                     factTab.setContent(buildFactTab(updatedTask, parentDialog));
                 }
             }));
@@ -4706,7 +5498,7 @@ public class DesktopClientApplication extends Application {
                 actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
                 updateButtons.run();
                 updateTitle.run();
-                docTab.setContent(buildDocumentTab(updatedTask));
+                refreshTaskDocumentTab(docTab, updatedTask);
                 factTab.setContent(buildFactTab(updatedTask, dialog));
             }
         }));

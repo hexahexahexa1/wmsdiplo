@@ -1,6 +1,7 @@
 package com.wmsdipl.core.service.workflow;
 
 import com.wmsdipl.contracts.dto.RecordScanRequest;
+import com.wmsdipl.contracts.dto.DamageType;
 import com.wmsdipl.core.domain.*;
 import com.wmsdipl.core.repository.*;
 import com.wmsdipl.core.service.DuplicateScanDetectionService;
@@ -16,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -25,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+import org.mockito.ArgumentCaptor;
 
 @ExtendWith(MockitoExtension.class)
 class ReceivingWorkflowServiceTest {
@@ -193,5 +196,152 @@ class ReceivingWorkflowServiceTest {
 
         assertThrows(org.springframework.web.server.ResponseStatusException.class,
             () -> receivingWorkflowService.recordScan(1L, request));
+    }
+
+    @Test
+    void shouldUseTaskAssignedQtyAsExpected_WhenCreatingDamageDiscrepancyForSplitTask() {
+        // Given
+        testReceipt.setStatus(ReceiptStatus.IN_PROGRESS);
+
+        ReceiptLine line = new ReceiptLine();
+        line.setSkuId(1L);
+        line.setQtyExpected(BigDecimal.valueOf(4)); // Full line quantity (split across tasks)
+        line.setUom("PCS");
+
+        Task task = new Task();
+        task.setTaskType(TaskType.RECEIVING);
+        task.setStatus(TaskStatus.IN_PROGRESS);
+        task.setReceipt(testReceipt);
+        task.setLine(line);
+        task.setQtyAssigned(BigDecimal.ONE); // This конкретная task expects 1
+        task.setQtyDone(BigDecimal.ZERO);
+        task.setAssignee("operator");
+        try {
+            Field taskIdField = Task.class.getDeclaredField("id");
+            taskIdField.setAccessible(true);
+            taskIdField.set(task, 415L);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+        Pallet pallet = new Pallet();
+        pallet.setCode("PLT-00002");
+        pallet.setQuantity(BigDecimal.ZERO);
+
+        Location receivingLocation = new Location();
+        receivingLocation.setLocationType(LocationType.RECEIVING);
+        receivingLocation.setStatus(LocationStatus.AVAILABLE);
+
+        when(taskLifecycleService.getTask(415L)).thenReturn(task);
+        when(duplicateScanDetectionService.checkScan("PLT-00002"))
+            .thenReturn(DuplicateScanDetectionService.ScanResult.valid("PLT-00002"));
+        when(palletRepository.findByCode("PLT-00002")).thenReturn(Optional.of(pallet));
+        when(locationRepository.findFirstByLocationTypeAndStatusAndActiveTrueOrderByIdAsc(
+            LocationType.RECEIVING, LocationStatus.AVAILABLE
+        )).thenReturn(Optional.of(receivingLocation));
+        when(palletRepository.save(any(Pallet.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(taskRepository.save(any(Task.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        RecordScanRequest request = new RecordScanRequest(
+            null,
+            "PLT-00002",
+            1,
+            null,
+            null,
+            null,
+            null,
+            null,
+            true,
+            DamageType.PHYSICAL_DAMAGE,
+            null,
+            null,
+            null
+        );
+
+        // When
+        receivingWorkflowService.recordScan(415L, request);
+
+        // Then
+        ArgumentCaptor<Discrepancy> discrepancyCaptor = ArgumentCaptor.forClass(Discrepancy.class);
+        verify(discrepancyRepository).save(discrepancyCaptor.capture());
+        Discrepancy discrepancy = discrepancyCaptor.getValue();
+        assertEquals("DAMAGE", discrepancy.getType());
+        assertEquals(0, discrepancy.getQtyExpected().compareTo(BigDecimal.ONE));
+        assertEquals(0, discrepancy.getQtyActual().compareTo(BigDecimal.ONE));
+    }
+
+    @Test
+    void shouldUseTaskAssignedQtyAsExpected_WhenCreatingLotMismatchDiscrepancyForSplitTask() {
+        // Given
+        testReceipt.setStatus(ReceiptStatus.IN_PROGRESS);
+
+        ReceiptLine line = new ReceiptLine();
+        line.setSkuId(1L);
+        line.setQtyExpected(BigDecimal.valueOf(3)); // Full line quantity
+        line.setUom("BOX");
+        line.setLotNumberExpected("LOT-EXPECTED-001");
+
+        Task task = new Task();
+        task.setTaskType(TaskType.RECEIVING);
+        task.setStatus(TaskStatus.IN_PROGRESS);
+        task.setReceipt(testReceipt);
+        task.setLine(line);
+        task.setQtyAssigned(BigDecimal.ONE); // This concrete task expects 1
+        task.setQtyDone(BigDecimal.ZERO);
+        task.setAssignee("admin");
+        try {
+            Field taskIdField = Task.class.getDeclaredField("id");
+            taskIdField.setAccessible(true);
+            taskIdField.set(task, 437L);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+        Pallet pallet = new Pallet();
+        pallet.setCode("PLT-LOT-001");
+        pallet.setQuantity(BigDecimal.ZERO);
+
+        Location receivingLocation = new Location();
+        receivingLocation.setLocationType(LocationType.RECEIVING);
+        receivingLocation.setStatus(LocationStatus.AVAILABLE);
+
+        when(taskLifecycleService.getTask(437L)).thenReturn(task);
+        when(duplicateScanDetectionService.checkScan("PLT-LOT-001"))
+            .thenReturn(DuplicateScanDetectionService.ScanResult.valid("PLT-LOT-001"));
+        when(palletRepository.findByCode("PLT-LOT-001")).thenReturn(Optional.of(pallet));
+        when(locationRepository.findFirstByLocationTypeAndStatusAndActiveTrueOrderByIdAsc(
+            LocationType.RECEIVING, LocationStatus.AVAILABLE
+        )).thenReturn(Optional.of(receivingLocation));
+        when(palletRepository.save(any(Pallet.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(taskRepository.save(any(Task.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        RecordScanRequest request = new RecordScanRequest(
+            null,
+            "PLT-LOT-001",
+            1,
+            null,
+            null,
+            null,
+            null,
+            null,
+            false,
+            null,
+            null,
+            "LOT-ACTUAL-002",
+            LocalDate.now().plusDays(30)
+        );
+
+        // When
+        receivingWorkflowService.recordScan(437L, request);
+
+        // Then
+        ArgumentCaptor<Discrepancy> discrepancyCaptor = ArgumentCaptor.forClass(Discrepancy.class);
+        verify(discrepancyRepository).save(discrepancyCaptor.capture());
+        Discrepancy discrepancy = discrepancyCaptor.getValue();
+        assertEquals("LOT_MISMATCH", discrepancy.getType());
+        assertEquals(0, discrepancy.getQtyExpected().compareTo(BigDecimal.ONE));
+        assertEquals(0, discrepancy.getQtyActual().compareTo(BigDecimal.ONE));
     }
 }

@@ -1,39 +1,32 @@
 @echo off
+setlocal
 title WMSDIPL - Stop All Services
 echo ========================================
 echo    WMSDIPL - Stopping All Services
 echo ========================================
 echo.
 
-REM Stop Core API (port 8080)
-echo [1/3] Stopping Core API (port 8080)...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8080 ^| findstr LISTENING') do (
-    echo Found process: %%a
-    taskkill /F /PID %%a >nul 2>&1
-    if %errorlevel% equ 0 (
-        echo Core API stopped ✓
-    )
+echo [1/4] Stopping listeners on API ports...
+for %%P in (8080 8090) do (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+        "$port=%%P; $owning=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique; foreach($procId in $owning){ try { Stop-Process -Id $procId -Force -ErrorAction Stop; Write-Output ('Stopped PID ' + $procId + ' on port ' + $port) } catch {} }"
 )
 echo.
 
-REM Stop Import Service (port 8090)
-echo [2/3] Stopping Import Service (port 8090)...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8090 ^| findstr LISTENING') do (
-    echo Found process: %%a
-    taskkill /F /PID %%a >nul 2>&1
-    if %errorlevel% equ 0 (
-        echo Import Service stopped ✓
-    )
-)
+echo [2/4] Stopping WMSDIPL Java/cmd processes...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$targets=Get-CimInstance Win32_Process | Where-Object { $null -ne $_.CommandLine -and $_.Name -match '^(java|javaw|cmd)\.exe$' -and ($_.CommandLine -like '*:core-api:bootRun*' -or $_.CommandLine -like '*:import-service:bootRun*' -or $_.CommandLine -like '*:desktop-client:run*' -or $_.CommandLine -like '*CoreApiApplication*' -or $_.CommandLine -like '*ImportServiceApplication*' -or $_.CommandLine -like '*DesktopClientApplication*') };" ^
+    "foreach($t in $targets){ try { Stop-Process -Id $t.ProcessId -Force -ErrorAction Stop; Write-Output ('Stopped PID ' + $t.ProcessId + ' (' + $t.Name + ')') } catch {} }"
 echo.
 
-REM Stop Desktop Client (Java processes with "desktop-client" in command line)
-echo [3/3] Stopping Desktop Client...
-for /f "tokens=2" %%a in ('tasklist /FI "IMAGENAME eq java.exe" /FO LIST ^| findstr "PID:"') do (
-    taskkill /F /PID %%a >nul 2>&1
-)
-echo Desktop Client stopped ✓
+echo [3/4] Stopping Gradle daemons...
+call gradlew.bat --stop >nul 2>&1
+echo Gradle daemons stopped.
 echo.
+
+echo [4/4] Checking for remaining shared-contracts lock holders...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$left=Get-CimInstance Win32_Process | Where-Object { $null -ne $_.CommandLine -and $_.Name -match '^(java|javaw|cmd)\.exe$' -and $_.CommandLine -like '*shared-contracts-0.1.0-SNAPSHOT.jar*' }; if($left){ Write-Output 'Warning: potential lock holders still running:'; $left | Select-Object ProcessId,Name,CommandLine | Format-Table -AutoSize } else { Write-Output 'No shared-contracts lock holders found.' }"
 
 echo ========================================
 echo    All services stopped!

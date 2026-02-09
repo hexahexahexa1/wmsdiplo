@@ -16,9 +16,12 @@ import com.wmsdipl.core.domain.SkuUnitConfig;
 import com.wmsdipl.core.mapper.ReceiptMapper;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.PalletRepository;
+import com.wmsdipl.core.repository.TaskRepository;
+import com.wmsdipl.core.repository.DiscrepancyRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -50,6 +53,12 @@ class ReceiptServiceTest {
 
     @Mock
     private PalletRepository palletRepository;
+
+    @Mock
+    private TaskRepository taskRepository;
+
+    @Mock
+    private DiscrepancyRepository discrepancyRepository;
 
     @InjectMocks
     private ReceiptService receiptService;
@@ -357,7 +366,15 @@ class ReceiptServiceTest {
         // Given
         stubActiveSkuUnitConfig("PCS", new BigDecimal("10"));
         ImportPayload.Line importLine = new ImportPayload.Line(
-            1, "SKU001", "Product Name", "PCS", BigDecimal.TEN, "PKG001", "SSCC001"
+            1,
+            "SKU001",
+            "Product Name",
+            "PCS",
+            BigDecimal.TEN,
+            "PKG001",
+            "SSCC001",
+            "LOT-001",
+            LocalDate.of(2026, 1, 31)
         );
         ImportPayload payload = new ImportPayload(
             "MSG001",
@@ -383,14 +400,21 @@ class ReceiptServiceTest {
 
         // Then
         assertNotNull(result);
-        verify(receiptRepository, times(1)).save(any(Receipt.class));
+        ArgumentCaptor<Receipt> receiptCaptor = ArgumentCaptor.forClass(Receipt.class);
+        verify(receiptRepository, times(1)).save(receiptCaptor.capture());
+        Receipt savedReceipt = receiptCaptor.getValue();
+        assertNotNull(savedReceipt);
+        assertEquals(1, savedReceipt.getLines().size());
+        ReceiptLine savedLine = savedReceipt.getLines().get(0);
+        assertEquals("LOT-001", savedLine.getLotNumberExpected());
+        assertEquals(LocalDate.of(2026, 1, 31), savedLine.getExpiryDateExpected());
     }
 
     @Test
     void shouldReturnExisting_WhenImportWithDuplicateMessageId() {
         // Given
         ImportPayload.Line importLine = new ImportPayload.Line(
-            1, "SKU001", "Product Name", "PCS", BigDecimal.TEN, "PKG001", "SSCC001"
+            1, "SKU001", "Product Name", "PCS", BigDecimal.TEN, "PKG001", "SSCC001", null, null
         );
         ImportPayload payload = new ImportPayload(
             "MSG001",
@@ -417,7 +441,7 @@ class ReceiptServiceTest {
     void shouldThrowException_WhenImportWithoutMessageId() {
         // Given
         ImportPayload.Line importLine = new ImportPayload.Line(
-            1, "SKU001", "Product Name", "PCS", BigDecimal.TEN, "PKG001", "SSCC001"
+            1, "SKU001", "Product Name", "PCS", BigDecimal.TEN, "PKG001", "SSCC001", null, null
         );
         ImportPayload payload = new ImportPayload(
             null,
@@ -468,6 +492,8 @@ class ReceiptServiceTest {
         // Given
         testReceipt.setStatus(ReceiptStatus.CONFIRMED);
         when(receiptRepository.findById(1L)).thenReturn(Optional.of(testReceipt));
+        when(taskRepository.findByReceiptId(1L)).thenReturn(List.of());
+        when(discrepancyRepository.findByReceipt(testReceipt)).thenReturn(List.of());
 
         // When
         receiptService.accept(1L);
@@ -484,6 +510,59 @@ class ReceiptServiceTest {
 
         // When & Then
         assertThrows(ResponseStatusException.class, () -> receiptService.accept(1L));
+    }
+
+    @Test
+    void shouldRejectAccept_WhenOpenTasksExist() throws Exception {
+        // Given
+        testReceipt.setStatus(ReceiptStatus.CONFIRMED);
+        when(receiptRepository.findById(1L)).thenReturn(Optional.of(testReceipt));
+
+        com.wmsdipl.core.domain.Task openTask = new com.wmsdipl.core.domain.Task();
+        setEntityId(openTask, 10L);
+        openTask.setTaskType(com.wmsdipl.core.domain.TaskType.RECEIVING);
+        openTask.setStatus(com.wmsdipl.core.domain.TaskStatus.IN_PROGRESS);
+        when(taskRepository.findByReceiptId(1L)).thenReturn(List.of(openTask));
+
+        // When
+        ReceiptAcceptBlockedException ex = assertThrows(ReceiptAcceptBlockedException.class, () -> receiptService.accept(1L));
+
+        // Then
+        assertEquals(1L, ex.getReceiptId());
+        assertEquals(1, ex.getBlockers().size());
+        assertEquals(10L, ex.getBlockers().get(0).taskId());
+    }
+
+    @Test
+    void shouldDeleteDraftReceipt_WhenNoLinkedArtifacts() {
+        testReceipt.setStatus(ReceiptStatus.DRAFT);
+        when(receiptRepository.findById(1L)).thenReturn(Optional.of(testReceipt));
+        when(taskRepository.findByReceiptId(1L)).thenReturn(List.of());
+        when(palletRepository.findByReceipt(testReceipt)).thenReturn(List.of());
+        when(discrepancyRepository.findByReceipt(testReceipt)).thenReturn(List.of());
+
+        receiptService.deleteReceipt(1L);
+
+        verify(receiptRepository).delete(testReceipt);
+    }
+
+    @Test
+    void shouldRejectDeleteReceipt_WhenNotDraft() {
+        testReceipt.setStatus(ReceiptStatus.ACCEPTED);
+        when(receiptRepository.findById(1L)).thenReturn(Optional.of(testReceipt));
+
+        assertThrows(ResponseStatusException.class, () -> receiptService.deleteReceipt(1L));
+        verify(receiptRepository, never()).delete(any(Receipt.class));
+    }
+
+    @Test
+    void shouldRejectDeleteReceipt_WhenTasksExist() {
+        testReceipt.setStatus(ReceiptStatus.DRAFT);
+        when(receiptRepository.findById(1L)).thenReturn(Optional.of(testReceipt));
+        when(taskRepository.findByReceiptId(1L)).thenReturn(List.of(new com.wmsdipl.core.domain.Task()));
+
+        assertThrows(ResponseStatusException.class, () -> receiptService.deleteReceipt(1L));
+        verify(receiptRepository, never()).delete(any(Receipt.class));
     }
 
     @Test

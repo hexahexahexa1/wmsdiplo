@@ -19,6 +19,8 @@ import com.wmsdipl.core.repository.PalletRepository;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.TaskRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -59,15 +61,14 @@ public class BulkOperationsService {
      * @param request bulk assign request with task IDs and assignee info
      * @return result with success/failure counts and failure details
      */
-    @Transactional
     public BulkOperationResult<Long> bulkAssignTasks(BulkAssignRequest request) {
         List<Long> successes = new ArrayList<>();
         List<BulkOperationFailure> failures = new ArrayList<>();
+        String assignedBy = resolveCurrentUsername();
 
         for (Long taskId : request.taskIds()) {
             try {
-                // Use "system" as assignedBy since request doesn't have this field
-                taskLifecycleService.assign(taskId, request.assignee(), "system");
+                taskLifecycleService.assign(taskId, request.assignee(), assignedBy);
                 successes.add(taskId);
             } catch (Exception e) {
                 failures.add(new BulkOperationFailure(
@@ -81,6 +82,15 @@ public class BulkOperationsService {
             successes,
             failures
         );
+    }
+
+    private String resolveCurrentUsername() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getName() == null || authentication.getName().isBlank()
+            || "anonymousUser".equalsIgnoreCase(authentication.getName())) {
+            return "system";
+        }
+        return authentication.getName();
     }
 
     /**

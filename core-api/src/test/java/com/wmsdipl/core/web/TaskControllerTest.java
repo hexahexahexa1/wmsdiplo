@@ -5,7 +5,6 @@ import com.wmsdipl.contracts.dto.RecordScanRequest;
 import com.wmsdipl.contracts.dto.ScanDto;
 import com.wmsdipl.contracts.dto.TaskDto;
 import com.wmsdipl.core.domain.*;
-import com.wmsdipl.core.mapper.DiscrepancyMapper;
 import com.wmsdipl.core.mapper.ScanMapper;
 import com.wmsdipl.core.mapper.TaskMapper;
 import com.wmsdipl.core.repository.ScanRepository;
@@ -67,9 +66,6 @@ class TaskControllerTest {
 
     @MockBean
     private TaskMapper taskMapper;
-
-    @MockBean
-    private DiscrepancyMapper discrepancyMapper;
 
     @Test
     void shouldListAllTasks_WhenCalled() throws Exception {
@@ -163,6 +159,31 @@ class TaskControllerTest {
                 .andExpect(jsonPath("$.id").value(1));
 
         verify(taskService).assign(1L, "operator1", "supervisor1");
+    }
+
+    @Test
+    @WithMockUser(username = "operator1", roles = {"OPERATOR"})
+    void shouldRejectReassign_WhenOperatorAssignsNonNewTask() throws Exception {
+        // Given
+        Task assignedTask = createMockTask(1L, TaskType.RECEIVING);
+        when(assignedTask.getStatus()).thenReturn(TaskStatus.ASSIGNED);
+        when(taskService.get(1L)).thenReturn(assignedTask);
+
+        String requestBody = """
+                {
+                    "assignee": "operator1",
+                    "assignedBy": "operator1"
+                }
+                """;
+
+        // When & Then
+        mockMvc.perform(post("/api/tasks/1/assign")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isBadRequest());
+
+        verify(taskService).get(1L);
+        verify(taskService, never()).assign(anyLong(), anyString(), anyString());
     }
 
     @Test
@@ -455,40 +476,6 @@ class TaskControllerTest {
                 .andExpect(status().isBadRequest());
 
         verify(taskService, never()).createReceivingTasks(anyLong(), any(), anyInt());
-    }
-
-    @Test
-    void shouldListOpenDiscrepancies_WhenCalled() throws Exception {
-        // Given
-        Discrepancy discrepancy = new Discrepancy();
-        when(taskService.findOpenDiscrepancies()).thenReturn(List.of(discrepancy));
-
-        // When & Then
-        mockMvc.perform(get("/api/tasks/discrepancies/open"))
-                .andExpect(status().isOk());
-
-        verify(taskService).findOpenDiscrepancies();
-    }
-
-    @Test
-    void shouldResolveDiscrepancy_WhenValidRequest() throws Exception {
-        // Given
-        Discrepancy resolved = new Discrepancy();
-        when(taskService.resolveDiscrepancy(1L, "Fixed")).thenReturn(resolved);
-
-        String requestBody = """
-                {
-                    "comment": "Fixed"
-                }
-                """;
-
-        // When & Then
-        mockMvc.perform(post("/api/tasks/discrepancies/1/resolve")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(requestBody))
-                .andExpect(status().isOk());
-
-        verify(taskService).resolveDiscrepancy(1L, "Fixed");
     }
 
     @Test

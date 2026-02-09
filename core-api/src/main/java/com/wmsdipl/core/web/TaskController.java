@@ -1,6 +1,5 @@
 package com.wmsdipl.core.web;
 
-import com.wmsdipl.contracts.dto.DiscrepancyDto;
 import com.wmsdipl.contracts.dto.RecordScanRequest;
 import com.wmsdipl.contracts.dto.ScanDto;
 import com.wmsdipl.contracts.dto.TaskDto;
@@ -8,7 +7,6 @@ import com.wmsdipl.core.domain.Scan;
 import com.wmsdipl.core.domain.Task;
 import com.wmsdipl.core.domain.TaskStatus;
 import com.wmsdipl.core.domain.TaskType;
-import com.wmsdipl.core.mapper.DiscrepancyMapper;
 import com.wmsdipl.core.mapper.ScanMapper;
 import com.wmsdipl.core.mapper.TaskMapper;
 import com.wmsdipl.core.repository.ScanRepository;
@@ -47,7 +45,6 @@ public class TaskController {
     private final ScanRepository scanRepository;
     private final ScanMapper scanMapper;
     private final TaskMapper taskMapper;
-    private final DiscrepancyMapper discrepancyMapper;
 
     public TaskController(
             TaskService taskService, 
@@ -56,8 +53,7 @@ public class TaskController {
             ShippingWorkflowService shippingWorkflowService,
             ScanRepository scanRepository,
             ScanMapper scanMapper,
-            TaskMapper taskMapper,
-            DiscrepancyMapper discrepancyMapper
+            TaskMapper taskMapper
     ) {
         this.taskService = taskService;
         this.receivingWorkflowService = receivingWorkflowService;
@@ -66,7 +62,6 @@ public class TaskController {
         this.scanRepository = scanRepository;
         this.scanMapper = scanMapper;
         this.taskMapper = taskMapper;
-        this.discrepancyMapper = discrepancyMapper;
     }
 
     @GetMapping
@@ -112,7 +107,13 @@ public class TaskController {
 
     @PostMapping("/{id}/assign")
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR', 'OPERATOR')")
-    @Operation(summary = "Assign task", description = "Assigns a task to a warehouse worker. Operators can only assign NEW tasks to themselves.")
+    @Operation(
+        summary = "Assign task",
+        description = "Assigns a task to a warehouse worker. "
+            + "ADMIN/SUPERVISOR can reassign ASSIGNED tasks. "
+            + "Reassignment is not allowed for IN_PROGRESS/COMPLETED/CANCELLED tasks. "
+            + "Operators can only assign NEW tasks to themselves."
+    )
     public TaskDto assign(@PathVariable Long id, @RequestBody AssignRequest req, java.security.Principal principal) {
         var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
         if (auth == null) {
@@ -230,22 +231,6 @@ public class TaskController {
         }
     }
 
-    @GetMapping("/discrepancies/open")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
-    @Operation(summary = "List open discrepancies", description = "Retrieves all unresolved discrepancies from warehouse tasks")
-    public List<DiscrepancyDto> openDiscrepancies() {
-        return taskService.findOpenDiscrepancies().stream()
-                .map(discrepancyMapper::toDto)
-                .collect(Collectors.toList());
-    }
-
-    @PostMapping("/discrepancies/{id}/resolve")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
-    @Operation(summary = "Resolve discrepancy", description = "Marks a discrepancy as resolved with a comment")
-    public DiscrepancyDto resolve(@PathVariable Long id, @RequestBody ResolveRequest req) {
-        return discrepancyMapper.toDto(taskService.resolveDiscrepancy(id, req.comment));
-    }
-
     @GetMapping("/{id}/has-discrepancies")
     @Operation(summary = "Check task discrepancies", description = "Returns true if the task has any scans with discrepancies")
     public boolean hasDiscrepancies(@PathVariable Long id) {
@@ -273,10 +258,6 @@ public class TaskController {
         public Long receiptId;
         public Integer count;
         public TaskType taskType;
-    }
-
-    private static class ResolveRequest {
-        public String comment;
     }
 
     private static class SetPriorityRequest {

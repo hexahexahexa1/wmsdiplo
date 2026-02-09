@@ -452,6 +452,10 @@ INSERT INTO import_config (config_key, config_value, updated_at)
 VALUES ('api_url', 'http://localhost:8080', CURRENT_TIMESTAMP)
 ON CONFLICT (config_key) DO NOTHING;
 
+INSERT INTO import_config (config_key, config_value, updated_at)
+VALUES ('discrepancy_retention_days', '180', CURRENT_TIMESTAMP)
+ON CONFLICT (config_key) DO NOTHING;
+
 -- Insert a dummy record into schema_version to prevent Flyway from running
 INSERT INTO schema_version (installed_rank, version, description, type, script, checksum, installed_by, installed_on, execution_time, success)
 VALUES (1, '999', 'Manual schema - migrations disabled', 'SQL', 'manual_schema.sql', 0, 'manual', CURRENT_TIMESTAMP, 0, true);

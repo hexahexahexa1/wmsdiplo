@@ -12,5 +12,11 @@ echo.
 set WMS_IMPORT_FOLDER=testinput
 set WMS_CORE_API_USERNAME=testuser
 set WMS_CORE_API_PASSWORD=password
-gradle :import-service:bootRun
+call gradlew.bat :shared-contracts:jar --no-daemon
+if %errorlevel% neq 0 (
+  echo Failed to build shared-contracts.
+  pause
+  exit /b 1
+)
+gradlew.bat :import-service:bootRun -x :shared-contracts:jar --no-daemon
 pause

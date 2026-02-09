@@ -9,7 +9,9 @@ import com.wmsdipl.core.domain.TaskType;
 import com.wmsdipl.core.repository.DiscrepancyRepository;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.TaskRepository;
+import com.wmsdipl.core.service.workflow.PlacementWorkflowService;
 import com.wmsdipl.core.service.workflow.ReceivingWorkflowService;
+import com.wmsdipl.core.service.workflow.ShippingWorkflowService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,10 +21,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -46,6 +50,15 @@ class TaskServiceTest {
     @Mock
     private ReceivingWorkflowService receivingWorkflowService;
 
+    @Mock
+    private PlacementWorkflowService placementWorkflowService;
+
+    @Mock
+    private ShippingWorkflowService shippingWorkflowService;
+
+    @Mock
+    private AuditLogService auditLogService;
+
     @InjectMocks
     private TaskService taskService;
 
@@ -68,6 +81,9 @@ class TaskServiceTest {
         testTask.setStatus(TaskStatus.NEW);
 
         testDiscrepancy = new Discrepancy();
+        java.lang.reflect.Field discrepancyIdField = Discrepancy.class.getDeclaredField("id");
+        discrepancyIdField.setAccessible(true);
+        discrepancyIdField.set(testDiscrepancy, 1L);
         testDiscrepancy.setResolved(false);
     }
 
@@ -250,6 +266,91 @@ class TaskServiceTest {
         assertThrows(IllegalArgumentException.class, 
             () -> taskService.resolveDiscrepancy(999L, "Comment"));
         verify(discrepancyRepository, never()).save(any(Discrepancy.class));
+    }
+
+    @Test
+    void shouldFilterDiscrepancyJournal_ByOperator() throws Exception {
+        Discrepancy discrepancy = new Discrepancy();
+        discrepancy.setTaskId(55L);
+        discrepancy.setCreatedAt(LocalDateTime.now());
+
+        Task task = new Task();
+        java.lang.reflect.Field idField = Task.class.getDeclaredField("id");
+        idField.setAccessible(true);
+        idField.set(task, 55L);
+        task.setAssignee("operator1");
+
+        when(discrepancyRepository.findAll()).thenReturn(List.of(discrepancy));
+        when(taskRepository.findAllById(any())).thenReturn(List.of(task));
+
+        List<Discrepancy> result = taskService.findDiscrepancyJournal(
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "operator1",
+            null
+        );
+
+        assertEquals(1, result.size());
+    }
+
+    @Test
+    void shouldFilterDiscrepancyJournal_ByResolvedBy_WhenTaskAssigneeUnavailable() {
+        Discrepancy discrepancy = new Discrepancy();
+        discrepancy.setTaskId(null);
+        discrepancy.setResolvedBy("operator2");
+        discrepancy.setCreatedAt(LocalDateTime.now());
+
+        when(discrepancyRepository.findAll()).thenReturn(List.of(discrepancy));
+
+        List<Discrepancy> result = taskService.findDiscrepancyJournal(
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "operator2",
+            null
+        );
+
+        assertEquals(1, result.size());
+        verify(taskRepository, never()).findAllById(any());
+    }
+
+    @Test
+    void shouldReturnSafeEmptyAssigneeMap_WhenDiscrepanciesHaveNoTaskIds() {
+        Discrepancy discrepancy = new Discrepancy();
+        discrepancy.setTaskId(null);
+
+        Map<Long, String> result = taskService.findTaskAssigneesByDiscrepancies(List.of(discrepancy));
+
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
+        assertDoesNotThrow(() -> result.get(null));
+        verify(taskRepository, never()).findAllById(any());
+    }
+
+    @Test
+    void shouldUpdateDiscrepancyComment() {
+        when(discrepancyRepository.findById(1L)).thenReturn(Optional.of(testDiscrepancy));
+        when(discrepancyRepository.save(any(Discrepancy.class))).thenReturn(testDiscrepancy);
+
+        Discrepancy updated = taskService.updateDiscrepancyComment(1L, "new comment");
+
+        assertEquals("new comment", updated.getDescription());
+        verify(discrepancyRepository).save(testDiscrepancy);
+        verify(auditLogService).logUpdate(
+            eq("DISCREPANCY"),
+            eq(1L),
+            eq("system"),
+            eq("comment"),
+            eq(null),
+            eq("new comment")
+        );
     }
 
     @Test

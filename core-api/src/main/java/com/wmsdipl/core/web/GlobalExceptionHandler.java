@@ -1,5 +1,6 @@
 package com.wmsdipl.core.web;
 
+import com.wmsdipl.core.service.ReceiptAcceptBlockedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -25,6 +26,19 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleResponseStatusException(ResponseStatusException ex) {
         log.warn("ResponseStatusException: {} - {}", ex.getStatusCode(), ex.getReason());
         return buildErrorResponse(ex.getStatusCode().value(), ex.getReason());
+    }
+
+    @ExceptionHandler(ReceiptAcceptBlockedException.class)
+    public ResponseEntity<Map<String, Object>> handleReceiptAcceptBlocked(ReceiptAcceptBlockedException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now().toString());
+        response.put("status", HttpStatus.CONFLICT.value());
+        response.put("code", "RECEIPT_ACCEPT_BLOCKED");
+        response.put("error", HttpStatus.CONFLICT.getReasonPhrase());
+        response.put("message", ex.getMessage());
+        response.put("receiptId", ex.getReceiptId());
+        response.put("blockers", ex.getBlockers());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

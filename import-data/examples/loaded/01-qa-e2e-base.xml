@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<receipt messageId="qa-e2e-20260209-01" docNo="QA-E2E-01-BASE-20260209" docDate="2026-02-09" supplier="QA Supplier A">
+  <line lineNo="1" sku="QA-SKU-BASE-001" name="QA Base Item 1" uom="PCS" qtyExpected="4" packaging="BOX" sscc="QA010001"/>
+  <line lineNo="2" sku="QA-SKU-BASE-002" name="QA Base Item 2" uom="PCS" qtyExpected="3" packaging="BOX" sscc="QA010002"/>
+</receipt>

@@ -9,6 +9,7 @@ import com.wmsdipl.contracts.dto.ReceiptSummaryDto;
 import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.service.CsvExportService;
+import com.wmsdipl.core.service.ReceiptAcceptBlockedException;
 import com.wmsdipl.core.service.ReceiptService;
 import com.wmsdipl.core.service.workflow.PlacementWorkflowService;
 import com.wmsdipl.core.service.workflow.ReceivingWorkflowService;
@@ -215,6 +216,16 @@ class ReceiptControllerTest {
     }
 
     @Test
+    void shouldDeleteReceipt_WhenValidId() throws Exception {
+        doNothing().when(receiptService).deleteReceipt(1L);
+
+        mockMvc.perform(delete("/api/receipts/1"))
+            .andExpect(status().isNoContent());
+
+        verify(receiptService).deleteReceipt(1L);
+    }
+
+    @Test
     void shouldConfirmReceipt_WhenValidId() throws Exception {
         // Given
         doNothing().when(receiptService).confirm(1L);
@@ -262,6 +273,22 @@ class ReceiptControllerTest {
                 .andExpect(status().isAccepted());
 
         verify(receiptService).accept(1L);
+    }
+
+    @Test
+    void shouldReturnStructuredConflict_WhenAcceptBlockedByOpenTasks() throws Exception {
+        doThrow(new ReceiptAcceptBlockedException(
+            1L,
+            List.of(new ReceiptAcceptBlockedException.TaskBlocker(10L, "RECEIVING", "IN_PROGRESS"))
+        )).when(receiptService).accept(1L);
+
+        mockMvc.perform(post("/api/receipts/1/accept"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("RECEIPT_ACCEPT_BLOCKED"))
+            .andExpect(jsonPath("$.receiptId").value(1))
+            .andExpect(jsonPath("$.blockers[0].taskId").value(10))
+            .andExpect(jsonPath("$.blockers[0].taskType").value("RECEIVING"))
+            .andExpect(jsonPath("$.blockers[0].status").value("IN_PROGRESS"));
     }
 
 

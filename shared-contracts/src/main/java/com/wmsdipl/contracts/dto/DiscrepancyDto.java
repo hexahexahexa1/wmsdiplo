@@ -12,11 +12,17 @@ public record DiscrepancyDto(
     String receiptDocNo,
     Long lineId,
     Integer lineNo,
+    Long taskId,
+    Long palletId,
+    Long skuId,
+    String operator,
     String type,
     BigDecimal qtyExpected,
     BigDecimal qtyActual,
     String comment,
     Boolean resolved,
+    String resolvedBy,
+    LocalDateTime resolvedAt,
     LocalDateTime createdAt
 ) {
 }

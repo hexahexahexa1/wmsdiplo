@@ -96,6 +96,24 @@ class TaskLifecycleServiceTest {
     }
 
     @Test
+    void shouldReassignTask_WhenCurrentStatusAssigned() {
+        // Given
+        when(testTask.getStatus()).thenReturn(TaskStatus.ASSIGNED);
+        when(taskRepository.findById(1L)).thenReturn(Optional.of(testTask));
+        when(taskRepository.save(any(Task.class))).thenReturn(testTask);
+
+        // When
+        Task result = taskLifecycleService.assign(1L, "operator2", "supervisor1");
+
+        // Then
+        assertNotNull(result);
+        verify(testTask, times(1)).setAssignee("operator2");
+        verify(testTask, times(1)).setAssignedBy("supervisor1");
+        verify(testTask, never()).setStatus(TaskStatus.ASSIGNED);
+        verify(taskRepository, times(1)).save(testTask);
+    }
+
+    @Test
     void shouldStartTask_WhenValidId() {
         // Given
         when(taskRepository.findById(1L)).thenReturn(Optional.of(testTask));
@@ -159,9 +177,11 @@ class TaskLifecycleServiceTest {
         
         Discrepancy savedDiscrepancy = discrepancyCaptor.getValue();
         assertEquals("UNDER_QTY", savedDiscrepancy.getType());
+        assertEquals(1L, savedDiscrepancy.getTaskId());
         assertEquals(BigDecimal.TEN, savedDiscrepancy.getQtyExpected());
         assertEquals(BigDecimal.valueOf(8), savedDiscrepancy.getQtyActual());
         assertTrue(savedDiscrepancy.getResolved());
+        assertEquals("system", savedDiscrepancy.getResolvedBy());
         
         verify(scanRepository, times(1)).save(scan);
         verify(scan, times(1)).setDiscrepancy(true);

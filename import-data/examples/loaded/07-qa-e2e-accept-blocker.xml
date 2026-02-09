@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<receipt messageId="qa-e2e-20260209-07" docNo="QA-E2E-07-ACCEPTBLOCK-20260209" docDate="2026-02-09" supplier="QA Supplier C">
+  <line lineNo="1" sku="QA-SKU-AB-001" name="QA Accept Block Item" uom="PCS" qtyExpected="3" packaging="BOX" sscc="QA070001"/>
+</receipt>

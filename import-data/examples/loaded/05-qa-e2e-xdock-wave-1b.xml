@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<receipt messageId="qa-e2e-20260209-05" docNo="QA-E2E-05-XDOCK-B-20260209" docDate="2026-02-09" supplier="QA XDock Supplier" crossDock="true" outboundRef="QA-OUT-20260209-WAVE-001">
+  <line lineNo="1" sku="QA-SKU-XD-002" name="QA XDock Item B1" uom="PCS" qtyExpected="3" packaging="PALLET" sscc="QA050001"/>
+</receipt>

@@ -21,6 +21,10 @@ public class DiscrepancyMapper {
      * @return DTO с данными расхождения
      */
     public DiscrepancyDto toDto(Discrepancy discrepancy) {
+        return toDto(discrepancy, null);
+    }
+
+    public DiscrepancyDto toDto(Discrepancy discrepancy, String operator) {
         if (discrepancy == null) {
             return null;
         }
@@ -31,11 +35,17 @@ public class DiscrepancyMapper {
             discrepancy.getReceipt() != null ? discrepancy.getReceipt().getDocNo() : null,
             discrepancy.getLine() != null ? discrepancy.getLine().getId() : null,
             discrepancy.getLine() != null ? discrepancy.getLine().getLineNo() : null,
+            discrepancy.getTaskId(),
+            discrepancy.getPalletId(),
+            discrepancy.getLine() != null ? discrepancy.getLine().getSkuId() : null,
+            operator,
             discrepancy.getType(),
             discrepancy.getQtyExpected(),
             discrepancy.getQtyActual(),
             discrepancy.getDescription(),
             discrepancy.getResolved(),
+            discrepancy.getResolvedBy(),
+            discrepancy.getResolvedAt(),
             discrepancy.getCreatedAt()
         );
     }

@@ -20,4 +20,6 @@ public interface ReceiptRepository extends JpaRepository<Receipt, Long>, JpaSpec
         Collection<ReceiptStatus> statuses
     );
     List<Receipt> findByStatusAndUpdatedAtBefore(ReceiptStatus status, LocalDateTime updatedAtBefore);
+    List<Receipt> findByCrossDockTrueAndOutboundRef(String outboundRef);
+    List<Receipt> findByCrossDockTrueAndOutboundRefIsNotNull();
 }

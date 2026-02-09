@@ -6,6 +6,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.wmsdipl.desktop.model.Location;
+import com.wmsdipl.desktop.model.AutoAssignResult;
+import com.wmsdipl.desktop.model.Discrepancy;
+import com.wmsdipl.desktop.model.DiscrepancyRetentionConfig;
 import com.wmsdipl.desktop.model.Pallet;
 import com.wmsdipl.desktop.model.PutawayRule;
 import com.wmsdipl.desktop.model.Receipt;
@@ -15,6 +18,8 @@ import com.wmsdipl.desktop.model.Sku;
 import com.wmsdipl.desktop.model.SkuUnitConfig;
 import com.wmsdipl.desktop.model.StockItem;
 import com.wmsdipl.desktop.model.StockMovement;
+import com.wmsdipl.desktop.model.ShippingWave;
+import com.wmsdipl.desktop.model.ShippingWaveActionResult;
 import com.wmsdipl.desktop.model.Task;
 import com.wmsdipl.desktop.model.User;
 import com.wmsdipl.desktop.model.Zone;
@@ -26,6 +31,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Base64;
@@ -231,6 +237,19 @@ public class ApiClient {
         postNoBody("/api/receipts/" + id + "/accept");
     }
 
+    public void deleteReceipt(long id) throws IOException, InterruptedException {
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/receipts/" + id))
+            .DELETE()
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return;
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/receipts/" + id, response.body()));
+    }
+
     public Integer startReceiving(long id) throws IOException, InterruptedException {
         Map<String, Integer> res = postForObject("/api/receipts/" + id + "/start-receiving", null, new TypeReference<Map<String, Integer>>(){});
         return res.get("count");
@@ -256,6 +275,106 @@ public class ApiClient {
 
     public void completeShipping(long id) throws IOException, InterruptedException {
         postNoBody("/api/receipts/" + id + "/complete-shipping");
+    }
+
+    public List<ShippingWave> listShippingWaves() throws IOException, InterruptedException {
+        return getForList("/api/shipping/waves", new TypeReference<>() {});
+    }
+
+    public ShippingWaveActionResult startShippingWave(String outboundRef) throws IOException, InterruptedException {
+        return postForObject("/api/shipping/waves/" + encode(outboundRef) + "/start", null, ShippingWaveActionResult.class);
+    }
+
+    public ShippingWaveActionResult completeShippingWave(String outboundRef) throws IOException, InterruptedException {
+        return postForObject("/api/shipping/waves/" + encode(outboundRef) + "/complete", null, ShippingWaveActionResult.class);
+    }
+
+    public List<Discrepancy> listDiscrepancies(
+        Long receiptId,
+        String type,
+        String docNo,
+        Long skuId,
+        String operator,
+        Boolean resolved,
+        LocalDate fromDate,
+        LocalDate toDate
+    ) throws IOException, InterruptedException {
+        List<String> params = new ArrayList<>();
+        if (receiptId != null) {
+            params.add("receiptId=" + receiptId);
+        }
+        if (type != null && !type.isBlank()) {
+            params.add("type=" + encode(type));
+        }
+        if (docNo != null && !docNo.isBlank()) {
+            params.add("docNo=" + encode(docNo));
+        }
+        if (skuId != null) {
+            params.add("skuId=" + skuId);
+        }
+        if (operator != null && !operator.isBlank()) {
+            params.add("operator=" + encode(operator));
+        }
+        if (resolved != null) {
+            params.add("resolved=" + resolved);
+        }
+        if (fromDate != null) {
+            params.add("fromDate=" + fromDate);
+        }
+        if (toDate != null) {
+            params.add("toDate=" + toDate);
+        }
+        String query = params.isEmpty() ? "" : "?" + String.join("&", params);
+        return getForList("/api/discrepancies" + query, new TypeReference<>() {});
+    }
+
+    public Discrepancy updateDiscrepancyComment(Long discrepancyId, String comment) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        payload.put("comment", comment == null ? "" : comment);
+        return patchForObject("/api/discrepancies/" + discrepancyId + "/comment", payload, Discrepancy.class);
+    }
+
+    public DiscrepancyRetentionConfig getDiscrepancyRetentionConfig() throws IOException, InterruptedException {
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + "/api/discrepancies/retention"))
+            .GET()
+            .header("Accept", "application/json")
+            .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), DiscrepancyRetentionConfig.class);
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), "/api/discrepancies/retention", response.body()));
+    }
+
+    public DiscrepancyRetentionConfig updateDiscrepancyRetentionDays(int retentionDays) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        payload.put("retentionDays", retentionDays);
+        return putForObject("/api/discrepancies/retention", payload, DiscrepancyRetentionConfig.class);
+    }
+
+    public AutoAssignResult autoAssignDryRun(List<Long> taskIds, boolean reassignAssigned)
+        throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        var idArray = mapper.createArrayNode();
+        for (Long taskId : taskIds) {
+            idArray.add(taskId);
+        }
+        payload.set("taskIds", idArray);
+        payload.put("reassignAssigned", reassignAssigned);
+        return postForObject("/api/tasks/auto-assign/dry-run", payload, AutoAssignResult.class);
+    }
+
+    public AutoAssignResult autoAssignApply(List<Long> taskIds, boolean reassignAssigned)
+        throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        var idArray = mapper.createArrayNode();
+        for (Long taskId : taskIds) {
+            idArray.add(taskId);
+        }
+        payload.set("taskIds", idArray);
+        payload.put("reassignAssigned", reassignAssigned);
+        return postForObject("/api/tasks/auto-assign/apply", payload, AutoAssignResult.class);
     }
 
     public List<ReceiptLine> getReceiptLines(long receiptId) throws IOException, InterruptedException {
@@ -711,6 +830,22 @@ public class ApiClient {
         HttpRequest request = builder.build();
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return mapper.readValue(response.body(), responseType);
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), path, response.body()));
+    }
+
+    private <T> T patchForObject(String path, Object payload, Class<T> responseType) throws IOException, InterruptedException {
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + path))
+            .header("Content-Type", "application/json")
+            .method("PATCH", payload == null
+                ? HttpRequest.BodyPublishers.noBody()
+                : HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload)))
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
             return mapper.readValue(response.body(), responseType);
         }

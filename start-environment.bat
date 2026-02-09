@@ -9,11 +9,11 @@ start "PostgreSQL" cmd /k "docker compose up postgres"
 timeout /t 5 /nobreak >nul
 
 echo [2/3] Starting Core API (will take ~40 seconds)...
-start "Core API" cmd /k "gradle :core-api:bootRun"
+start "Core API" cmd /k "cd /d E:\WMSDIPL && gradlew.bat :shared-contracts:jar --no-daemon && gradlew.bat :core-api:bootRun -x :shared-contracts:jar --no-daemon"
 timeout /t 45 /nobreak >nul
 
 echo [3/3] Starting Desktop Client...
-start "Desktop Client" cmd /k "gradle :desktop-client:run"
+start "Desktop Client" cmd /k "cd /d E:\WMSDIPL && gradlew.bat :shared-contracts:jar --no-daemon && gradlew.bat :desktop-client:run -x :shared-contracts:jar --no-daemon"
 
 echo.
 echo ========================================

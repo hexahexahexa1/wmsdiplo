@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<receipt messageId="qa-e2e-20260209-03" docNo="QA-E2E-03-LOTEXP-20260209" docDate="2026-02-09" supplier="QA Pharma Supplier">
+  <line lineNo="1" sku="QA-SKU-LOT-001" name="QA Lot Exp Item A" uom="BOX" qtyExpected="3" packaging="BOX" sscc="QA030001" lotNumber="LOT-QA-2026-001" expiryDate="2026-12-31"/>
+  <line lineNo="2" sku="QA-SKU-LOT-002" name="QA Lot Exp Item B" uom="BOX" qtyExpected="2" packaging="BOX" sscc="QA030002" lotNumber="LOT-QA-2026-002" expiryDate="2027-03-15"/>
+</receipt>

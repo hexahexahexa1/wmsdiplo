@@ -302,7 +302,10 @@ public class ReceivingWorkflowService {
         BigDecimal newTotal = currentDone.add(qtyBase);
         task.setQtyDone(newTotal);
 
-        BigDecimal expectedQty = resolveQtyExpectedBase(line);
+        BigDecimal expectedQty = task.getQtyAssigned();
+        if (expectedQty == null || expectedQty.compareTo(BigDecimal.ZERO) <= 0) {
+            expectedQty = resolveQtyExpectedBase(line);
+        }
 
         // === 9. DETECT DISCREPANCIES ===
         boolean hasDiscrepancy = false;
@@ -388,7 +391,7 @@ public class ReceivingWorkflowService {
 
         // === 12. CREATE DISCREPANCY RECORD ===
         if (hasDiscrepancy) {
-            createDiscrepancyRecord(receipt, line, discrepancyType, 
+            createDiscrepancyRecord(receipt, line, task.getId(), discrepancyType,
                 expectedQty, newTotal, request.comment());
         }
 
@@ -603,11 +606,12 @@ public class ReceivingWorkflowService {
         return value == null ? BigDecimal.ZERO : value;
     }
 
-    private void createDiscrepancyRecord(Receipt receipt, ReceiptLine line, DiscrepancyType type,
+    private void createDiscrepancyRecord(Receipt receipt, ReceiptLine line, Long taskId, DiscrepancyType type,
                                         BigDecimal expectedQty, BigDecimal actualQty, String comment) {
         Discrepancy d = new Discrepancy();
         d.setReceipt(receipt);
         d.setLine(line);
+        d.setTaskId(taskId);
         d.setType(type.name());
         d.setQtyExpected(expectedQty);
         d.setQtyActual(actualQty);

@@ -66,7 +66,9 @@ public class XmlParser {
                 lineEl.getAttribute("uom"),
                 parseDecimal(lineEl.getAttribute("qtyExpected")),
                 lineEl.getAttribute("packaging"),
-                lineEl.getAttribute("sscc")
+                lineEl.getAttribute("sscc"),
+                parseText(lineEl.getAttribute("lotNumber")),
+                parseDate(lineEl.getAttribute("expiryDate"))
             );
             lines.add(line);
         }
@@ -94,5 +96,19 @@ public class XmlParser {
             return null;
         }
         return new BigDecimal(value);
+    }
+
+    private String parseText(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value;
+    }
+
+    private LocalDate parseDate(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return LocalDate.parse(value);
     }
 }

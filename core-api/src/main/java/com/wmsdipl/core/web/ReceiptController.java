@@ -133,6 +133,14 @@ public class ReceiptController {
         return ResponseEntity.noContent().build();
     }
 
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPERVISOR')")
+    @Operation(summary = "Delete receipt", description = "Deletes a draft receipt without operational artifacts")
+    public ResponseEntity<Void> deleteReceipt(@PathVariable Long id) {
+        receiptService.deleteReceipt(id);
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/{id}/confirm")
     @Operation(summary = "Confirm receipt", description = "Transitions receipt from DRAFT to CONFIRMED status")
     public ResponseEntity<Void> confirm(@PathVariable Long id) {

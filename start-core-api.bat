@@ -8,5 +8,12 @@ echo Starting Core API with minimal memory settings...
 echo JAVA_HOME: %JAVA_HOME%
 echo.
 
-gradlew.bat :core-api:bootRun --no-daemon -Dorg.gradle.jvmargs="-Xmx768m -XX:MaxMetaspaceSize=256m"
+call gradlew.bat :shared-contracts:jar --no-daemon
+if %errorlevel% neq 0 (
+  echo Failed to build shared-contracts.
+  pause
+  exit /b 1
+)
+
+gradlew.bat :core-api:bootRun -x :shared-contracts:jar --no-daemon -Dorg.gradle.jvmargs="-Xmx768m -XX:MaxMetaspaceSize=256m"
 pause
