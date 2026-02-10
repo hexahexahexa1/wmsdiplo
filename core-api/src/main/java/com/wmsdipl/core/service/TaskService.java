@@ -1,5 +1,6 @@
 package com.wmsdipl.core.service;
 
+import com.wmsdipl.contracts.dto.UndoLastScanResultDto;
 import com.wmsdipl.core.domain.Discrepancy;
 import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.domain.ReceiptLine;
@@ -14,6 +15,8 @@ import com.wmsdipl.core.repository.TaskRepository;
 import com.wmsdipl.core.service.workflow.PlacementWorkflowService;
 import com.wmsdipl.core.service.workflow.ReceivingWorkflowService;
 import com.wmsdipl.core.service.workflow.ShippingWorkflowService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.data.domain.Page;
@@ -22,8 +25,11 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import jakarta.persistence.criteria.Predicate;
 
+import java.math.BigInteger;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.Collections;
@@ -42,11 +48,14 @@ import static org.springframework.http.HttpStatus.BAD_REQUEST;
 @Service
 public class TaskService {
 
+    private static final Logger log = LoggerFactory.getLogger(TaskService.class);
+
     private final TaskRepository taskRepository;
     private final ReceiptRepository receiptRepository;
     private final DiscrepancyRepository discrepancyRepository;
     private final ScanRepository scanRepository;
     private final TaskLifecycleService taskLifecycleService;
+    private final TaskScanUndoService taskScanUndoService;
     private final ReceivingWorkflowService receivingWorkflowService;
     private final PlacementWorkflowService placementWorkflowService;
     private final ShippingWorkflowService shippingWorkflowService;
@@ -58,6 +67,7 @@ public class TaskService {
             DiscrepancyRepository discrepancyRepository,
             ScanRepository scanRepository,
             TaskLifecycleService taskLifecycleService,
+            TaskScanUndoService taskScanUndoService,
             ReceivingWorkflowService receivingWorkflowService,
             PlacementWorkflowService placementWorkflowService,
             ShippingWorkflowService shippingWorkflowService,
@@ -68,6 +78,7 @@ public class TaskService {
         this.discrepancyRepository = discrepancyRepository;
         this.scanRepository = scanRepository;
         this.taskLifecycleService = taskLifecycleService;
+        this.taskScanUndoService = taskScanUndoService;
         this.receivingWorkflowService = receivingWorkflowService;
         this.placementWorkflowService = placementWorkflowService;
         this.shippingWorkflowService = shippingWorkflowService;
@@ -85,6 +96,7 @@ public class TaskService {
             TaskStatus status,
             TaskType taskType,
             Long receiptId,
+            Long taskId,
             Pageable pageable
     ) {
         Specification<Task> spec = Specification.where(null);
@@ -100,7 +112,54 @@ public class TaskService {
         if (receiptId != null) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("receipt").get("id"), receiptId));
         }
+        if (taskId != null) {
+            List<long[]> prefixRanges = buildTaskIdPrefixRanges(taskId);
+            spec = spec.and((root, query, cb) -> {
+                if (prefixRanges.isEmpty()) {
+                    return cb.disjunction();
+                }
+                List<Predicate> predicates = new ArrayList<>();
+                for (long[] range : prefixRanges) {
+                    predicates.add(cb.between(root.get("id"), range[0], range[1]));
+                }
+                return cb.or(predicates.toArray(new Predicate[0]));
+            });
+        }
         return taskRepository.findAll(spec, pageable);
+    }
+
+    private List<long[]> buildTaskIdPrefixRanges(Long taskIdPrefix) {
+        if (taskIdPrefix == null || taskIdPrefix <= 0) {
+            return List.of();
+        }
+
+        String prefixText = taskIdPrefix.toString();
+        int maxDigits = Long.toString(Long.MAX_VALUE).length();
+        int maxSuffixDigits = maxDigits - prefixText.length();
+
+        BigInteger prefix = BigInteger.valueOf(taskIdPrefix);
+        BigInteger nextPrefix = prefix.add(BigInteger.ONE);
+        BigInteger maxLong = BigInteger.valueOf(Long.MAX_VALUE);
+
+        List<long[]> ranges = new ArrayList<>();
+        for (int suffixDigits = 0; suffixDigits <= maxSuffixDigits; suffixDigits++) {
+            BigInteger multiplier = BigInteger.TEN.pow(suffixDigits);
+            BigInteger lowerBound = prefix.multiply(multiplier);
+            if (lowerBound.compareTo(maxLong) > 0) {
+                break;
+            }
+
+            BigInteger upperBound = nextPrefix.multiply(multiplier).subtract(BigInteger.ONE);
+            if (upperBound.compareTo(maxLong) > 0) {
+                upperBound = maxLong;
+            }
+            if (upperBound.compareTo(lowerBound) < 0) {
+                continue;
+            }
+
+            ranges.add(new long[] { lowerBound.longValueExact(), upperBound.longValueExact() });
+        }
+        return ranges;
     }
 
     @Transactional(readOnly = true)
@@ -138,7 +197,16 @@ public class TaskService {
         // Auto-complete receipt based on task type
         if (completedTask.getReceipt() != null) {
             if (completedTask.getTaskType() == TaskType.RECEIVING) {
-                receivingWorkflowService.checkAndCompleteReceipt(completedTask.getReceipt().getId());
+                try {
+                    receivingWorkflowService.checkAndCompleteReceipt(completedTask.getReceipt().getId());
+                } catch (ReceiptWorkflowBlockedException ex) {
+                    log.info(
+                        "Task {} completed, receipt {} was not advanced due to workflow blockers: {}",
+                        completedTask.getId(),
+                        completedTask.getReceipt().getId(),
+                        ex.getBlockers() != null ? ex.getBlockers().size() : 0
+                    );
+                }
             } else if (completedTask.getTaskType() == TaskType.PLACEMENT) {
                 placementWorkflowService.autoCompleteReceiptIfAllTasksCompleted(completedTask.getReceipt().getId());
             } else if (completedTask.getTaskType() == TaskType.SHIPPING) {
@@ -172,16 +240,22 @@ public class TaskService {
                 "Only ASSIGNED or IN_PROGRESS tasks can be released. Current status: " + task.getStatus());
         }
         
+        while (scanRepository.findFirstByTaskOrderByScannedAtDescIdDesc(task).isPresent()) {
+            taskScanUndoService.undoLastScan(task.getId(), resolveCurrentUsername());
+        }
+
         // Reset to initial state
         task.setStatus(TaskStatus.NEW);
         task.setAssignee(null);
         task.setStartedAt(null);
         task.setQtyDone(BigDecimal.ZERO);
-        
-        // Delete all associated scans for a fresh start
-        scanRepository.deleteByTask(task);
-        
+
         return taskRepository.save(task);
+    }
+
+    @Transactional
+    public UndoLastScanResultDto undoLastScan(Long taskId) {
+        return taskScanUndoService.undoLastScan(taskId, resolveCurrentUsername());
     }
 
     @Transactional(readOnly = true)
@@ -394,8 +468,17 @@ public class TaskService {
                 ": receipt has no lines");
         }
         
-        // VALIDATION: Check that all lines have SKU assigned
-        for (ReceiptLine line : lines) {
+        List<ReceiptLine> activeLines = lines.stream()
+            .filter(line -> !Boolean.TRUE.equals(line.getExcludedFromWorkflow()))
+            .toList();
+        if (activeLines.isEmpty()) {
+            throw new IllegalStateException(
+                "Cannot create tasks for receipt " + receipt.getDocNo() +
+                ": all lines are excluded from workflow");
+        }
+
+        // VALIDATION: Check that all active lines have SKU assigned
+        for (ReceiptLine line : activeLines) {
             if (line.getSkuId() == null) {
                 throw new IllegalStateException(
                     "Cannot create tasks for receipt " + receipt.getDocNo() + 
@@ -406,7 +489,7 @@ public class TaskService {
         
         // Create tasks and distribute them across lines in round-robin fashion
         for (int i = 0; i < count; i++) {
-            ReceiptLine line = lines.get(i % lines.size());
+            ReceiptLine line = activeLines.get(i % activeLines.size());
             
             Task t = new Task();
             t.setReceipt(receipt);

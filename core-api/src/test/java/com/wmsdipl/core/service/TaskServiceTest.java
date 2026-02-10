@@ -3,6 +3,7 @@ package com.wmsdipl.core.service;
 import com.wmsdipl.core.domain.Discrepancy;
 import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.domain.ReceiptLine;
+import com.wmsdipl.core.domain.Scan;
 import com.wmsdipl.core.domain.Task;
 import com.wmsdipl.core.domain.TaskStatus;
 import com.wmsdipl.core.domain.TaskType;
@@ -19,6 +20,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +48,9 @@ class TaskServiceTest {
 
     @Mock
     private TaskLifecycleService taskLifecycleService;
+
+    @Mock
+    private TaskScanUndoService taskScanUndoService;
 
     @Mock
     private ReceivingWorkflowService receivingWorkflowService;
@@ -209,6 +214,26 @@ class TaskServiceTest {
     }
 
     @Test
+    void shouldCompleteTask_WhenReceivingReceiptAutoTransitionBlocked() {
+        when(taskLifecycleService.complete(1L)).thenReturn(testTask);
+        testTask.setStatus(TaskStatus.COMPLETED);
+        testTask.setClosedAt(LocalDateTime.now());
+
+        doThrow(new ReceiptWorkflowBlockedException(
+            1L,
+            "completeReceiving",
+            List.of()
+        )).when(receivingWorkflowService).checkAndCompleteReceipt(1L);
+
+        Task result = taskService.complete(1L);
+
+        assertNotNull(result);
+        assertEquals(TaskStatus.COMPLETED, result.getStatus());
+        verify(taskLifecycleService).complete(1L);
+        verify(receivingWorkflowService).checkAndCompleteReceipt(1L);
+    }
+
+    @Test
     void shouldCancelTask_WhenValidId() {
         // Given
         when(taskLifecycleService.cancel(1L)).thenReturn(testTask);
@@ -223,6 +248,61 @@ class TaskServiceTest {
         assertEquals(TaskStatus.CANCELLED, result.getStatus());
         assertNotNull(result.getClosedAt());
         verify(taskLifecycleService, times(1)).cancel(1L);
+    }
+
+    @Test
+    void shouldReleaseTaskWithScans_WhenRollbackRequired() {
+        Task task = new Task();
+        task.setStatus(TaskStatus.IN_PROGRESS);
+        task.setQtyDone(new BigDecimal("5.000"));
+        task.setAssignee("operator1");
+        java.lang.reflect.Field taskIdField;
+        try {
+            taskIdField = Task.class.getDeclaredField("id");
+            taskIdField.setAccessible(true);
+            taskIdField.set(task, 1L);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+        when(taskLifecycleService.getTask(1L)).thenReturn(task);
+        when(scanRepository.findFirstByTaskOrderByScannedAtDescIdDesc(task))
+            .thenReturn(Optional.of(new Scan()), Optional.empty());
+        when(taskRepository.save(task)).thenReturn(task);
+
+        Task released = taskService.release(1L);
+
+        assertEquals(TaskStatus.NEW, released.getStatus());
+        assertNull(released.getAssignee());
+        assertEquals(BigDecimal.ZERO, released.getQtyDone());
+        verify(taskScanUndoService).undoLastScan(1L, "system");
+        verify(scanRepository, never()).deleteByTask(any());
+    }
+
+    @Test
+    void shouldReleaseTaskWithoutScans_WhenRollbackNotRequired() {
+        Task task = new Task();
+        task.setStatus(TaskStatus.ASSIGNED);
+        task.setQtyDone(new BigDecimal("2.000"));
+        java.lang.reflect.Field taskIdField;
+        try {
+            taskIdField = Task.class.getDeclaredField("id");
+            taskIdField.setAccessible(true);
+            taskIdField.set(task, 2L);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+        when(taskLifecycleService.getTask(2L)).thenReturn(task);
+        when(scanRepository.findFirstByTaskOrderByScannedAtDescIdDesc(task))
+            .thenReturn(Optional.empty());
+        when(taskRepository.save(task)).thenReturn(task);
+
+        Task released = taskService.release(2L);
+
+        assertEquals(TaskStatus.NEW, released.getStatus());
+        assertEquals(BigDecimal.ZERO, released.getQtyDone());
+        verify(taskScanUndoService, never()).undoLastScan(anyLong(), anyString());
     }
 
     @Test

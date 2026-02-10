@@ -499,7 +499,8 @@ class ReceivingImprovementsIT {
     @Test
     void shouldBulkCreatePallets_WithSequentialCodes() {
         // When: Create 50 pallets
-        BulkCreatePalletsRequest request = new BulkCreatePalletsRequest(100, 50);
+        int startNumber = 900000 + (int) (System.currentTimeMillis() % 10000);
+        BulkCreatePalletsRequest request = new BulkCreatePalletsRequest(startNumber, 50);
         PalletCreationResult result = bulkOperationsService.bulkCreatePallets(request);
 
         // Then: Verify 50 pallets created
@@ -507,8 +508,15 @@ class ReceivingImprovementsIT {
 
         // Verify sequential codes
         List<Pallet> pallets = palletRepository.findAll();
-        assertTrue(pallets.stream().anyMatch(p -> p.getCode().equals("PLT-00100")));
-        assertTrue(pallets.stream().anyMatch(p -> p.getCode().equals("PLT-00149")));
+        String firstCode = String.format("PLT-%05d", startNumber);
+        String lastCode = String.format("PLT-%05d", startNumber + 49);
+        assertTrue(pallets.stream().anyMatch(p -> p.getCode().equals(firstCode)));
+        assertTrue(pallets.stream().anyMatch(p -> p.getCode().equals(lastCode)));
+        assertTrue(
+            pallets.stream()
+                .filter(p -> p.getCode().equals(firstCode) || p.getCode().equals(lastCode))
+                .allMatch(p -> p.getStatus() == PalletStatus.EMPTY)
+        );
     }
 
     @Test

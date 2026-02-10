@@ -6,6 +6,7 @@ import com.wmsdipl.core.domain.Discrepancy;
 import com.wmsdipl.core.mapper.DiscrepancyMapper;
 import com.wmsdipl.core.repository.UserRepository;
 import com.wmsdipl.core.service.DiscrepancyJournalConfigService;
+import com.wmsdipl.core.service.DiscrepancySkuResolutionService;
 import com.wmsdipl.core.service.TaskService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +28,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -48,6 +50,9 @@ class DiscrepancyControllerTest {
 
     @MockBean
     private DiscrepancyJournalConfigService discrepancyJournalConfigService;
+
+    @MockBean
+    private DiscrepancySkuResolutionService discrepancySkuResolutionService;
 
     @MockBean
     private UserRepository userRepository;
@@ -72,6 +77,9 @@ class DiscrepancyControllerTest {
             new BigDecimal("10.00"),
             new BigDecimal("8.00"),
             "comment",
+            null,
+            null,
+            null,
             false,
             null,
             null,
@@ -117,6 +125,9 @@ class DiscrepancyControllerTest {
             new BigDecimal("10.00"),
             new BigDecimal("8.00"),
             "updated",
+            null,
+            null,
+            null,
             false,
             null,
             null,
@@ -166,5 +177,47 @@ class DiscrepancyControllerTest {
     void shouldReturnForbidden_WhenOperatorRequestsJournal() throws Exception {
         mockMvc.perform(get("/api/discrepancies"))
             .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(roles = {"SUPERVISOR"})
+    void shouldRemapDiscrepancySku_WhenValidRequest() throws Exception {
+        Discrepancy discrepancy = new Discrepancy();
+        discrepancy.setId(10L);
+
+        DiscrepancyDto dto = new DiscrepancyDto(
+            10L,
+            100L,
+            "RCP-001",
+            200L,
+            1,
+            300L,
+            400L,
+            500L,
+            "supervisor1",
+            "BARCODE_MISMATCH",
+            new BigDecimal("1.00"),
+            new BigDecimal("1.00"),
+            null,
+            "discrepancy.journal.comment.system.barcode_mismatch",
+            "OLD|NEW",
+            null,
+            false,
+            null,
+            null,
+            LocalDateTime.now()
+        );
+
+        when(discrepancySkuResolutionService.remapDiscrepancySku(10L, 777L)).thenReturn(discrepancy);
+        when(discrepancyMapper.toDto(discrepancy)).thenReturn(dto);
+
+        mockMvc.perform(post("/api/discrepancies/10/remap-sku")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"targetSkuId\":777}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(10));
+
+        verify(discrepancySkuResolutionService).remapDiscrepancySku(10L, 777L);
     }
 }

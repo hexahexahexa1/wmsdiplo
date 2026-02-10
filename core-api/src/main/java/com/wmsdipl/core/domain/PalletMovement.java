@@ -46,6 +46,9 @@ public class PalletMovement {
     @Column(name = "task_id")
     private Long taskId;
 
+    @Column(name = "scan_id")
+    private Long scanId;
+
     @Column(name = "moved_by", length = 128)
     private String movedBy;
 
@@ -109,6 +112,14 @@ public class PalletMovement {
 
     public void setTaskId(Long taskId) {
         this.taskId = taskId;
+    }
+
+    public Long getScanId() {
+        return scanId;
+    }
+
+    public void setScanId(Long scanId) {
+        this.scanId = scanId;
     }
 
     public String getMovedBy() {

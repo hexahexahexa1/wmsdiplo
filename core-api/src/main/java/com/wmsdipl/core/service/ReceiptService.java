@@ -17,10 +17,12 @@ import com.wmsdipl.core.domain.Pallet;
 import com.wmsdipl.core.domain.Task;
 import com.wmsdipl.core.domain.TaskStatus;
 import com.wmsdipl.core.domain.TaskType;
+import com.wmsdipl.core.domain.SkuStatus;
 import com.wmsdipl.core.mapper.ReceiptMapper;
 import com.wmsdipl.core.repository.DiscrepancyRepository;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.PalletRepository;
+import com.wmsdipl.core.repository.SkuRepository;
 import com.wmsdipl.core.repository.TaskRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,19 +54,24 @@ public class ReceiptService {
     private final ReceiptRepository receiptRepository;
     private final ReceiptMapper receiptMapper;
     private final SkuService skuService;
+    private final SkuRepository skuRepository;
     private final PalletRepository palletRepository;
     private final TaskRepository taskRepository;
     private final DiscrepancyRepository discrepancyRepository;
+    private final ReceiptWorkflowBlockerService receiptWorkflowBlockerService;
 
     public ReceiptService(ReceiptRepository receiptRepository, ReceiptMapper receiptMapper, 
-                         SkuService skuService, PalletRepository palletRepository, TaskRepository taskRepository,
-                         DiscrepancyRepository discrepancyRepository) {
+                         SkuService skuService, SkuRepository skuRepository, PalletRepository palletRepository, TaskRepository taskRepository,
+                         DiscrepancyRepository discrepancyRepository,
+                         ReceiptWorkflowBlockerService receiptWorkflowBlockerService) {
         this.receiptRepository = receiptRepository;
         this.receiptMapper = receiptMapper;
         this.skuService = skuService;
+        this.skuRepository = skuRepository;
         this.palletRepository = palletRepository;
         this.taskRepository = taskRepository;
         this.discrepancyRepository = discrepancyRepository;
+        this.receiptWorkflowBlockerService = receiptWorkflowBlockerService;
     }
 
     @Transactional(readOnly = true)
@@ -283,6 +290,8 @@ public class ReceiptService {
             throw new ReceiptAcceptBlockedException(id, blockers);
         }
 
+        receiptWorkflowBlockerService.assertNoSkuStatusBlockers(receipt, "accept");
+
         long unresolvedDiscrepancies = discrepancyRepository.findByReceipt(receipt).stream()
             .filter(discrepancy -> !Boolean.TRUE.equals(discrepancy.getResolved()))
             .count();
@@ -319,9 +328,25 @@ public class ReceiptService {
             throw new ResponseStatusException(BAD_REQUEST, "At least one receipt line is required");
         }
 
+        int activeLines = 0;
         for (ReceiptLine line : receipt.getLines()) {
+            if (Boolean.TRUE.equals(line.getExcludedFromWorkflow())) {
+                continue;
+            }
+            activeLines++;
             if (line.getSkuId() == null) {
                 throw new ResponseStatusException(BAD_REQUEST, "skuId is required for receipt lines");
+            }
+            Sku sku = skuRepository.findById(line.getSkuId())
+                .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "SKU not found for line #" + line.getLineNo()));
+            if (sku.getStatus() == null) {
+                sku.setStatus(SkuStatus.ACTIVE);
+                skuRepository.save(sku);
+            } else if (sku.getStatus() != SkuStatus.ACTIVE) {
+                throw new ResponseStatusException(
+                    BAD_REQUEST,
+                    "Receipt line #" + line.getLineNo() + " references SKU with non-active status: " + sku.getStatus()
+                );
             }
             if (line.getUom() == null || line.getUom().isBlank()) {
                 throw new ResponseStatusException(BAD_REQUEST, "uom is required for receipt lines");
@@ -331,16 +356,19 @@ public class ReceiptService {
             }
             applyUnitSnapshots(line, line.getSkuId(), line.getUom());
         }
+        if (activeLines == 0) {
+            throw new ResponseStatusException(BAD_REQUEST, "All receipt lines are excluded from workflow");
+        }
     }
 
     private ReceiptLine toLineFromImport(ImportPayload.Line lineReq) {
         ReceiptLine line = new ReceiptLine();
         line.setLineNo(lineReq.lineNo());
         
-        // Auto-create SKU if not exists to avoid rejecting receipts with new SKUs
+        // Auto-create ACTIVE SKU if not exists to avoid rejecting receipts with new SKUs
         Long skuId = null;
         if (lineReq.sku() != null && !lineReq.sku().isBlank()) {
-            Sku sku = skuService.findOrCreate(lineReq.sku(), lineReq.name(), lineReq.uom());
+            Sku sku = skuService.findOrCreateActive(lineReq.sku(), lineReq.name(), lineReq.uom());
             skuId = sku.getId();
             line.setSkuId(skuId);
         } else {

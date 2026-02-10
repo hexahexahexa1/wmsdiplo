@@ -2,12 +2,20 @@ package com.wmsdipl.core.service;
 
 import com.wmsdipl.contracts.dto.CreateSkuRequest;
 import com.wmsdipl.contracts.dto.SkuDto;
+import com.wmsdipl.core.domain.Discrepancy;
+import com.wmsdipl.core.domain.Receipt;
+import com.wmsdipl.core.domain.ReceiptLine;
 import com.wmsdipl.core.domain.Sku;
+import com.wmsdipl.core.domain.SkuStatus;
 import com.wmsdipl.core.domain.SkuUnitConfig;
 import com.wmsdipl.core.mapper.SkuMapper;
+import com.wmsdipl.core.repository.PalletRepository;
+import com.wmsdipl.core.repository.DiscrepancyRepository;
 import com.wmsdipl.core.repository.ReceiptLineRepository;
+import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.SkuRepository;
 import com.wmsdipl.core.repository.SkuUnitConfigRepository;
+import com.wmsdipl.core.repository.TaskRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -26,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -48,6 +57,21 @@ class SkuServiceTest {
     @Mock
     private ReceiptLineRepository receiptLineRepository;
 
+    @Mock
+    private TaskRepository taskRepository;
+
+    @Mock
+    private PalletRepository palletRepository;
+
+    @Mock
+    private ScanRepository scanRepository;
+
+    @Mock
+    private DiscrepancyRepository discrepancyRepository;
+
+    @Mock
+    private AuditLogService auditLogService;
+
     @InjectMocks
     private SkuService skuService;
 
@@ -62,8 +86,9 @@ class SkuServiceTest {
         testSku.setCode("SKU001");
         testSku.setName("Test SKU");
         testSku.setUom("PCS");
+        testSku.setStatus(SkuStatus.ACTIVE);
 
-        testSkuDto = new SkuDto(1L, "SKU001", "Test SKU", "PCS");
+        testSkuDto = new SkuDto(1L, "SKU001", "Test SKU", "PCS", "ACTIVE");
         createRequest = new CreateSkuRequest("SKU001", "Test SKU", "PCS");
 
         org.mockito.Mockito.lenient().when(skuUnitConfigRepository.findBySkuIdAndIsBaseTrue(anyLong())).thenReturn(Optional.empty());
@@ -161,18 +186,67 @@ class SkuServiceTest {
 
     @Test
     void shouldDeleteSku_WhenValidId() {
-        when(skuRepository.existsById(1L)).thenReturn(true);
+        when(skuRepository.findById(1L)).thenReturn(Optional.of(testSku));
 
         skuService.delete(1L);
 
+        verify(skuUnitConfigRepository, times(1)).deleteAll(any());
         verify(skuRepository, times(1)).deleteById(1L);
+    }
+
+    @Test
+    void shouldFailDelete_WhenCurrentStockExists() {
+        when(skuRepository.findById(1L)).thenReturn(Optional.of(testSku));
+        when(palletRepository.existsBySkuIdAndQuantityGreaterThan(1L, java.math.BigDecimal.ZERO)).thenReturn(true);
+
+        ResponseStatusException exception = assertThrows(ResponseStatusException.class, () -> skuService.delete(1L));
+
+        assertEquals(CONFLICT, exception.getStatusCode());
+        assertTrue(exception.getReason().contains("current stock quantity is greater than zero"));
+        verify(skuRepository, never()).deleteById(anyLong());
+    }
+
+    @Test
+    void shouldFailDelete_WhenOpenReceiptLinesExist() {
+        when(skuRepository.findById(1L)).thenReturn(Optional.of(testSku));
+        when(receiptLineRepository.existsActiveBySkuIdAndReceiptStatusIn(eq(1L), any())).thenReturn(true);
+
+        ResponseStatusException exception = assertThrows(ResponseStatusException.class, () -> skuService.delete(1L));
+
+        assertEquals(CONFLICT, exception.getStatusCode());
+        assertTrue(exception.getReason().contains("open receipt lines"));
+        verify(skuRepository, never()).deleteById(anyLong());
+    }
+
+    @Test
+    void shouldFailDelete_WhenOpenTasksExist() {
+        when(skuRepository.findById(1L)).thenReturn(Optional.of(testSku));
+        when(taskRepository.existsByLine_SkuIdAndStatusIn(eq(1L), any())).thenReturn(true);
+
+        ResponseStatusException exception = assertThrows(ResponseStatusException.class, () -> skuService.delete(1L));
+
+        assertEquals(CONFLICT, exception.getStatusCode());
+        assertTrue(exception.getReason().contains("open tasks"));
+        verify(skuRepository, never()).deleteById(anyLong());
+    }
+
+    @Test
+    void shouldFailDelete_WhenUnresolvedDiscrepanciesExist() {
+        when(skuRepository.findById(1L)).thenReturn(Optional.of(testSku));
+        when(discrepancyRepository.existsByLine_SkuIdAndResolvedFalseAndReceipt_StatusIn(eq(1L), any())).thenReturn(true);
+
+        ResponseStatusException exception = assertThrows(ResponseStatusException.class, () -> skuService.delete(1L));
+
+        assertEquals(CONFLICT, exception.getStatusCode());
+        assertTrue(exception.getReason().contains("unresolved discrepancies"));
+        verify(skuRepository, never()).deleteById(anyLong());
     }
 
     @Test
     void shouldFindOrCreateExistingSku_WhenSkuExists() {
         when(skuRepository.findByCode("SKU001")).thenReturn(Optional.of(testSku));
 
-        Sku result = skuService.findOrCreate("SKU001", "Test", "PCS");
+        Sku result = skuService.findOrCreateActive("SKU001", "Test", "PCS");
 
         assertNotNull(result);
         assertEquals("SKU001", result.getCode());
@@ -188,12 +262,78 @@ class SkuServiceTest {
             return sku;
         });
 
-        Sku result = skuService.findOrCreate("SKU002", "New SKU", "KG");
+        Sku result = skuService.findOrCreateActive("SKU002", "New SKU", "KG");
 
         assertNotNull(result);
         assertEquals("SKU002", result.getCode());
         assertEquals("New SKU", result.getName());
         assertEquals("KG", result.getUom());
         verify(skuRepository, times(1)).save(any(Sku.class));
+    }
+
+    @Test
+    void shouldApproveDraft_WhenSkuIsDraft() {
+        testSku.setStatus(SkuStatus.DRAFT);
+        when(skuRepository.findById(1L)).thenReturn(Optional.of(testSku));
+        when(skuRepository.save(testSku)).thenReturn(testSku);
+        when(skuMapper.toDto(testSku)).thenReturn(new SkuDto(1L, "SKU001", "Test SKU", "PCS", "ACTIVE"));
+
+        SkuDto result = skuService.approveDraft(1L);
+
+        assertEquals("ACTIVE", result.status());
+        verify(auditLogService).logStatusChange("SKU", 1L, "system", "DRAFT", "ACTIVE");
+    }
+
+    @Test
+    void shouldRejectDraftAndExcludeLines_WhenNoOperationalFacts() {
+        testSku.setStatus(SkuStatus.DRAFT);
+        Receipt receipt = new Receipt();
+        receipt.setId(11L);
+        ReceiptLine line = new ReceiptLine();
+        line.setId(22L);
+        line.setSkuId(1L);
+        line.setReceipt(receipt);
+
+        Discrepancy discrepancy = new Discrepancy();
+        discrepancy.setReceipt(receipt);
+        discrepancy.setLine(line);
+        discrepancy.setDraftSkuId(1L);
+
+        when(skuRepository.findById(1L)).thenReturn(Optional.of(testSku));
+        when(skuRepository.save(testSku)).thenReturn(testSku);
+        when(receiptLineRepository.findBySkuId(1L)).thenReturn(List.of(line));
+        when(discrepancyRepository.findByDraftSkuId(1L)).thenReturn(List.of(discrepancy));
+        when(taskRepository.existsByReceiptIdAndLine_SkuId(11L, 1L)).thenReturn(false);
+        when(palletRepository.existsByReceipt_IdAndSkuId(11L, 1L)).thenReturn(false);
+        when(scanRepository.existsByTask_Receipt_IdAndBarcodeIgnoreCase(11L, "SKU001")).thenReturn(false);
+        when(receiptLineRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(skuMapper.toDto(testSku)).thenReturn(new SkuDto(1L, "SKU001", "Test SKU", "PCS", "REJECTED"));
+
+        SkuDto result = skuService.rejectDraft(1L);
+
+        assertEquals("REJECTED", result.status());
+        assertEquals(Boolean.TRUE, line.getExcludedFromWorkflow());
+        assertEquals("REJECTED_LINE", line.getExclusionReason());
+        verify(auditLogService).logStatusChange("SKU", 1L, "system", "DRAFT", "REJECTED");
+    }
+
+    @Test
+    void shouldRejectDraftFail_WhenOperationalFactsExistInReceipt() {
+        testSku.setStatus(SkuStatus.DRAFT);
+        testSku.setCode("SKU001");
+
+        Receipt receipt = new Receipt();
+        receipt.setId(77L);
+        ReceiptLine line = new ReceiptLine();
+        line.setSkuId(1L);
+        line.setReceipt(receipt);
+
+        when(skuRepository.findById(1L)).thenReturn(Optional.of(testSku));
+        when(receiptLineRepository.findBySkuId(1L)).thenReturn(List.of(line));
+        when(discrepancyRepository.findByDraftSkuId(1L)).thenReturn(List.of());
+        when(taskRepository.existsByReceiptIdAndLine_SkuId(77L, 1L)).thenReturn(true);
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () -> skuService.rejectDraft(1L));
+        assertEquals(CONFLICT, ex.getStatusCode());
     }
 }

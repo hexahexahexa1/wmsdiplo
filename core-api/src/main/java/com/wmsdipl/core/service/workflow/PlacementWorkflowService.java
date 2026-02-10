@@ -17,6 +17,7 @@ import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.TaskRepository;
 import com.wmsdipl.core.service.DuplicateScanDetectionService;
 import com.wmsdipl.core.service.PutawayService;
+import com.wmsdipl.core.service.ReceiptWorkflowBlockerService;
 import com.wmsdipl.core.service.TaskLifecycleService;
 import com.wmsdipl.core.service.StockMovementService;
 import org.springframework.stereotype.Service;
@@ -56,6 +57,7 @@ public class PlacementWorkflowService {
     private final PutawayService putawayService;
     private final StockMovementService stockMovementService;
     private final DuplicateScanDetectionService duplicateScanDetectionService;
+    private final ReceiptWorkflowBlockerService receiptWorkflowBlockerService;
 
     public PlacementWorkflowService(
             TaskRepository taskRepository,
@@ -66,7 +68,8 @@ public class PlacementWorkflowService {
             ReceiptRepository receiptRepository,
             PutawayService putawayService,
             StockMovementService stockMovementService,
-            DuplicateScanDetectionService duplicateScanDetectionService
+            DuplicateScanDetectionService duplicateScanDetectionService,
+            ReceiptWorkflowBlockerService receiptWorkflowBlockerService
     ) {
         this.taskRepository = taskRepository;
         this.palletRepository = palletRepository;
@@ -77,6 +80,7 @@ public class PlacementWorkflowService {
         this.putawayService = putawayService;
         this.stockMovementService = stockMovementService;
         this.duplicateScanDetectionService = duplicateScanDetectionService;
+        this.receiptWorkflowBlockerService = receiptWorkflowBlockerService;
     }
 
     /**
@@ -161,16 +165,7 @@ public class PlacementWorkflowService {
         pallet.setStatus(PalletStatus.PLACED);
         Pallet savedPallet = palletRepository.save(pallet);
 
-        // === 5. RECORD MOVEMENT ===
-        stockMovementService.recordPlacement(
-            savedPallet,
-            sourceLocation,
-            targetLocation,
-            task.getAssignee() != null ? task.getAssignee() : "system",
-            taskId
-        );
-
-        // === 6. CREATE SCAN RECORD ===
+        // === 5. CREATE SCAN RECORD ===
         Scan scan = new Scan();
         scan.setTask(task);
         scan.setRequestId(requestId);
@@ -181,6 +176,16 @@ public class PlacementWorkflowService {
         scan.setDeviceId(request.deviceId());
         scan.setDiscrepancy(false);
         Scan savedScan = scanRepository.save(scan);
+
+        // === 6. RECORD MOVEMENT ===
+        stockMovementService.recordPlacement(
+            savedPallet,
+            sourceLocation,
+            targetLocation,
+            task.getAssignee() != null ? task.getAssignee() : "system",
+            taskId,
+            savedScan.getId()
+        );
 
         // === 7. UPDATE TASK QUANTITY (FOR TRACKING) ===
         BigDecimal currentDone = task.getQtyDone() != null ? task.getQtyDone() : BigDecimal.ZERO;
@@ -272,6 +277,8 @@ public class PlacementWorkflowService {
             throw new ResponseStatusException(BAD_REQUEST,
                 "Only ACCEPTED receipts or cross-dock READY_FOR_PLACEMENT receipts can start placement");
         }
+
+        receiptWorkflowBlockerService.assertNoSkuStatusBlockers(receipt, "startPlacement");
 
         // Generate placement tasks using PutawayService
         List<Task> createdTasks = putawayService.generatePlacementTasks(receiptId);

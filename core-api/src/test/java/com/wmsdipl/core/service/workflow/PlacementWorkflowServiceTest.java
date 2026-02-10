@@ -5,6 +5,7 @@ import com.wmsdipl.core.domain.*;
 import com.wmsdipl.core.repository.*;
 import com.wmsdipl.core.service.DuplicateScanDetectionService;
 import com.wmsdipl.core.service.PutawayService;
+import com.wmsdipl.core.service.ReceiptWorkflowBlockerService;
 import com.wmsdipl.core.service.TaskLifecycleService;
 import com.wmsdipl.core.service.StockMovementService;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +25,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -55,6 +57,9 @@ class PlacementWorkflowServiceTest {
 
     @Mock
     private DuplicateScanDetectionService duplicateScanDetectionService;
+
+    @Mock
+    private ReceiptWorkflowBlockerService receiptWorkflowBlockerService;
 
     @InjectMocks
     private PlacementWorkflowService placementWorkflowService;
@@ -192,7 +197,7 @@ class PlacementWorkflowServiceTest {
         when(locationRepository.findById(1L)).thenReturn(Optional.of(sourceLocation));
         when(locationRepository.findById(2L)).thenReturn(Optional.of(targetLocation));
         when(palletRepository.save(any(Pallet.class))).thenReturn(testPallet);
-        when(stockMovementService.recordPlacement(any(), any(), any(), any(), anyLong()))
+        when(stockMovementService.recordPlacement(any(), any(), any(), any(), anyLong(), nullable(Long.class)))
                 .thenReturn(new PalletMovement());
         when(scanRepository.save(any(Scan.class))).thenReturn(testScan);
         when(taskRepository.save(any(Task.class))).thenReturn(testTask);

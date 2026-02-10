@@ -137,7 +137,7 @@ public class TaskAutoAssignService {
 
         List<String> operators = userRepository.findAll().stream()
             .filter(user -> Boolean.TRUE.equals(user.getActive()))
-            .filter(user -> user.getRole() == UserRole.OPERATOR || user.getRole() == UserRole.PC_OPERATOR)
+            .filter(user -> user.getRole() == UserRole.OPERATOR)
             .map(User::getUsername)
             .filter(Objects::nonNull)
             .filter(username -> !username.isBlank())

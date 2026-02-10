@@ -12,6 +12,8 @@ import java.util.Optional;
 
 public interface PalletMovementRepository extends JpaRepository<PalletMovement, Long> {
     List<PalletMovement> findByPallet(Pallet pallet);
+    Optional<PalletMovement> findByScanId(Long scanId);
+    long deleteByScanId(Long scanId);
     
     @Query("SELECT pm FROM PalletMovement pm " +
            "LEFT JOIN FETCH pm.pallet " +

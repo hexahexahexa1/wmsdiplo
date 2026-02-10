@@ -38,6 +38,9 @@ public class Discrepancy {
     @Column(name = "task_id")
     private Long taskId;
 
+    @Column(name = "scan_id")
+    private Long scanId;
+
     @Column(name = "pallet_id")
     private Long palletId;
 
@@ -46,6 +49,15 @@ public class Discrepancy {
 
     @Column(columnDefinition = "TEXT")
     private String description;
+
+    @Column(name = "system_comment_key", length = 128)
+    private String systemCommentKey;
+
+    @Column(name = "system_comment_params", columnDefinition = "TEXT")
+    private String systemCommentParams;
+
+    @Column(name = "draft_sku_id")
+    private Long draftSkuId;
 
     @Column(name = "qty_expected", precision = 10, scale = 2)
     private BigDecimal qtyExpected;

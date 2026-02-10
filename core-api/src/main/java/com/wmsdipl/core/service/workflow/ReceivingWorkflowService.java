@@ -13,6 +13,7 @@ import com.wmsdipl.core.domain.ReceiptLine;
 import com.wmsdipl.core.domain.ReceiptStatus;
 import com.wmsdipl.core.domain.Scan;
 import com.wmsdipl.core.domain.Sku;
+import com.wmsdipl.core.domain.SkuStatus;
 import com.wmsdipl.core.domain.Task;
 import com.wmsdipl.core.domain.TaskStatus;
 import com.wmsdipl.core.domain.TaskType;
@@ -25,6 +26,9 @@ import com.wmsdipl.core.repository.SkuRepository;
 import com.wmsdipl.core.repository.TaskRepository;
 import com.wmsdipl.core.service.DuplicateScanDetectionService;
 import com.wmsdipl.core.service.ReceiptService;
+import com.wmsdipl.core.service.ReceiptWorkflowBlockedException;
+import com.wmsdipl.core.service.ReceiptWorkflowBlockerService;
+import com.wmsdipl.core.service.SkuService;
 import com.wmsdipl.core.service.TaskLifecycleService;
 import com.wmsdipl.core.service.StockMovementService;
 import org.springframework.stereotype.Service;
@@ -56,9 +60,11 @@ public class ReceivingWorkflowService {
     private final PalletRepository palletRepository;
     private final LocationRepository locationRepository;
     private final SkuRepository skuRepository;
+    private final SkuService skuService;
     private final StockMovementService stockMovementService;
     private final DuplicateScanDetectionService duplicateScanDetectionService;
     private final ReceiptService receiptService;
+    private final ReceiptWorkflowBlockerService receiptWorkflowBlockerService;
 
     public ReceivingWorkflowService(
             ReceiptRepository receiptRepository,
@@ -69,9 +75,11 @@ public class ReceivingWorkflowService {
             PalletRepository palletRepository,
             LocationRepository locationRepository,
             SkuRepository skuRepository,
+            SkuService skuService,
             StockMovementService stockMovementService,
             DuplicateScanDetectionService duplicateScanDetectionService,
-            ReceiptService receiptService
+            ReceiptService receiptService,
+            ReceiptWorkflowBlockerService receiptWorkflowBlockerService
     ) {
         this.receiptRepository = receiptRepository;
         this.taskRepository = taskRepository;
@@ -81,9 +89,11 @@ public class ReceivingWorkflowService {
         this.palletRepository = palletRepository;
         this.locationRepository = locationRepository;
         this.skuRepository = skuRepository;
+        this.skuService = skuService;
         this.stockMovementService = stockMovementService;
         this.duplicateScanDetectionService = duplicateScanDetectionService;
         this.receiptService = receiptService;
+        this.receiptWorkflowBlockerService = receiptWorkflowBlockerService;
     }
 
     /**
@@ -114,9 +124,16 @@ public class ReceivingWorkflowService {
         }
         receiptService.ensureReceiptLinesReadyForWorkflow(receipt);
         
-        // Create tasks for each line (with multi-pallet auto-split if needed)
+        List<ReceiptLine> activeLines = receipt.getLines().stream()
+            .filter(line -> !Boolean.TRUE.equals(line.getExcludedFromWorkflow()))
+            .toList();
+        if (activeLines.isEmpty()) {
+            throw new ResponseStatusException(BAD_REQUEST, "Receipt has no active lines for receiving");
+        }
+
+        // Create tasks for each active line (with multi-pallet auto-split if needed)
         int[] count = {0};
-        receipt.getLines().forEach(line -> {
+        activeLines.forEach(line -> {
             count[0] += createTasksForLine(receipt, line);
         });
         
@@ -233,14 +250,24 @@ public class ReceivingWorkflowService {
         }
         
         // === 5. VALIDATE BARCODE MATCHES EXPECTED SKU.CODE ===
+        Sku expectedSku = null;
         boolean barcodeMatches = true;
+        Long draftSkuId = null;
         if (request.barcode() != null && !request.barcode().isBlank()) {
-            Sku expectedSku = skuRepository.findById(expectedSkuId)
-                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, 
+            expectedSku = skuRepository.findById(expectedSkuId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND,
                     "Expected SKU not found: " + expectedSkuId));
-            
             if (!request.barcode().equals(expectedSku.getCode())) {
                 barcodeMatches = false;
+                Sku scannedSku = skuRepository.findByCode(request.barcode())
+                    .orElseGet(() -> skuService.findOrCreateDraftForBarcodeMismatch(
+                        request.barcode(),
+                        request.barcode(),
+                        line.getUom()
+                    ));
+                if (scannedSku.getStatus() == SkuStatus.DRAFT || scannedSku.getStatus() == SkuStatus.REJECTED) {
+                    draftSkuId = scannedSku.getId();
+                }
             }
         }
         
@@ -286,16 +313,6 @@ public class ReceivingWorkflowService {
         pallet.setUom(resolveBaseUom(line));
         Pallet savedPallet = palletRepository.save(pallet);
         
-        // === 7.1. RECORD STOCK MOVEMENT (only for first scan on this pallet) ===
-        if (isNewPallet && transitLocation != null) {
-            stockMovementService.recordReceive(
-                savedPallet, 
-                transitLocation, 
-                task.getAssignee() != null ? task.getAssignee() : "system", 
-                task.getId()
-            );
-        }
-        
         // === 8. UPDATE TASK QUANTITY ===
         Receipt receipt = task.getReceipt();
         BigDecimal currentDone = zeroIfNull(task.getQtyDone());
@@ -310,17 +327,25 @@ public class ReceivingWorkflowService {
         // === 9. DETECT DISCREPANCIES ===
         boolean hasDiscrepancy = false;
         DiscrepancyType discrepancyType = null;
+        String expectedValue = null;
+        String actualValue = null;
         
         // BARCODE_MISMATCH
         if (!barcodeMatches) {
             hasDiscrepancy = true;
             discrepancyType = DiscrepancyType.BARCODE_MISMATCH;
+            expectedValue = expectedSku != null ? expectedSku.getCode() : String.valueOf(expectedSkuId);
+            actualValue = request.barcode();
         }
         
         // OVER_QTY
         if (expectedQty != null && newTotal.compareTo(expectedQty) > 0) {
             hasDiscrepancy = true;
-            discrepancyType = discrepancyType != null ? discrepancyType : DiscrepancyType.OVER_QTY;
+            if (discrepancyType == null) {
+                discrepancyType = DiscrepancyType.OVER_QTY;
+                expectedValue = safeToString(expectedQty);
+                actualValue = safeToString(newTotal);
+            }
         }
         
         // UNDER_QTY (detected only when task is being completed with less than expected)
@@ -331,26 +356,42 @@ public class ReceivingWorkflowService {
         if (line.getSsccExpected() != null && request.sscc() != null
             && !line.getSsccExpected().equals(request.sscc())) {
             hasDiscrepancy = true;
-            discrepancyType = discrepancyType != null ? discrepancyType : DiscrepancyType.SSCC_MISMATCH;
+            if (discrepancyType == null) {
+                discrepancyType = DiscrepancyType.SSCC_MISMATCH;
+                expectedValue = line.getSsccExpected();
+                actualValue = request.sscc();
+            }
         }
         
         // NEW: DAMAGE - Damaged goods detected
         if (Boolean.TRUE.equals(request.damageFlag())) {
             hasDiscrepancy = true;
-            discrepancyType = discrepancyType != null ? discrepancyType : DiscrepancyType.DAMAGE;
+            if (discrepancyType == null) {
+                discrepancyType = DiscrepancyType.DAMAGE;
+                expectedValue = "NO_DAMAGE";
+                actualValue = request.damageType() != null ? request.damageType().name() : "DAMAGED";
+            }
         }
         
         // NEW: EXPIRED_PRODUCT - Expiry date is in the past
         if (request.expiryDate() != null && request.expiryDate().isBefore(java.time.LocalDate.now())) {
             hasDiscrepancy = true;
-            discrepancyType = discrepancyType != null ? discrepancyType : DiscrepancyType.EXPIRED_PRODUCT;
+            if (discrepancyType == null) {
+                discrepancyType = DiscrepancyType.EXPIRED_PRODUCT;
+                expectedValue = line.getExpiryDateExpected() != null ? line.getExpiryDateExpected().toString() : "VALID_PRODUCT";
+                actualValue = request.expiryDate().toString();
+            }
         }
         
         // NEW: LOT_MISMATCH - Lot number doesn't match expected
         if (line.getLotNumberExpected() != null && request.lotNumber() != null
             && !line.getLotNumberExpected().equals(request.lotNumber())) {
             hasDiscrepancy = true;
-            discrepancyType = discrepancyType != null ? discrepancyType : DiscrepancyType.LOT_MISMATCH;
+            if (discrepancyType == null) {
+                discrepancyType = DiscrepancyType.LOT_MISMATCH;
+                expectedValue = line.getLotNumberExpected();
+                actualValue = request.lotNumber();
+            }
         }
 
         // === 10. CREATE AND SAVE SCAN ===
@@ -389,10 +430,28 @@ public class ReceivingWorkflowService {
         taskLifecycleService.autoStartIfNeeded(task);
         taskRepository.save(task);
 
-        // === 12. CREATE DISCREPANCY RECORD ===
+        // === 12. RECORD STOCK MOVEMENT (only for first scan on this pallet) ===
+        if (isNewPallet && transitLocation != null) {
+            stockMovementService.recordReceive(
+                savedPallet,
+                transitLocation,
+                task.getAssignee() != null ? task.getAssignee() : "system",
+                task.getId(),
+                savedScan.getId()
+            );
+        }
+
+        // === 13. CREATE DISCREPANCY RECORD ===
         if (hasDiscrepancy) {
+            BigDecimal discrepancyExpectedQty = expectedQty;
+            BigDecimal discrepancyActualQty = newTotal;
+            if (discrepancyType != DiscrepancyType.OVER_QTY) {
+                discrepancyExpectedQty = qtyBase;
+                discrepancyActualQty = qtyBase;
+            }
             createDiscrepancyRecord(receipt, line, task.getId(), discrepancyType,
-                expectedQty, newTotal, request.comment());
+                discrepancyExpectedQty, discrepancyActualQty, request.comment(), draftSkuId, expectedValue, actualValue,
+                savedScan.getId());
         }
 
         return savedScan;
@@ -422,6 +481,8 @@ public class ReceivingWorkflowService {
         if (!allCompleted) {
             throw new ResponseStatusException(BAD_REQUEST, "All receiving tasks must be completed first");
         }
+
+        receiptWorkflowBlockerService.assertNoSkuStatusBlockers(receipt, "completeReceiving");
         
         // Operator confirmed all discrepancies during task completion
         // Proceed to next status based on cross-dock flag
@@ -452,7 +513,7 @@ public class ReceivingWorkflowService {
      * 
      * Called by TaskService when a receiving task is completed.
      */
-    @Transactional
+    @Transactional(noRollbackFor = ReceiptWorkflowBlockedException.class)
     public void checkAndCompleteReceipt(Long receiptId) {
         Receipt receipt = receiptRepository.findById(receiptId).orElse(null);
         if (receipt == null || receipt.getStatus() != ReceiptStatus.IN_PROGRESS) {
@@ -607,15 +668,59 @@ public class ReceivingWorkflowService {
     }
 
     private void createDiscrepancyRecord(Receipt receipt, ReceiptLine line, Long taskId, DiscrepancyType type,
-                                        BigDecimal expectedQty, BigDecimal actualQty, String comment) {
+                                        BigDecimal expectedQty, BigDecimal actualQty, String comment,
+                                        Long draftSkuId, String expectedValue, String actualValue, Long scanId) {
         Discrepancy d = new Discrepancy();
         d.setReceipt(receipt);
         d.setLine(line);
         d.setTaskId(taskId);
+        d.setScanId(scanId);
         d.setType(type.name());
         d.setQtyExpected(expectedQty);
         d.setQtyActual(actualQty);
-        d.setDescription(comment);
+        d.setDescription(normalizeComment(comment));
+        d.setSystemCommentKey(resolveSystemCommentKey(type));
+        d.setSystemCommentParams(joinParams(expectedValue, actualValue));
+        d.setDraftSkuId(draftSkuId);
         discrepancyRepository.save(d);
+    }
+
+    private String resolveSystemCommentKey(DiscrepancyType type) {
+        if (type == null) {
+            return null;
+        }
+        return switch (type) {
+            case BARCODE_MISMATCH -> "discrepancy.journal.comment.system.barcode_mismatch";
+            case OVER_QTY -> "discrepancy.journal.comment.system.over_qty";
+            case UNDER_QTY -> "discrepancy.journal.comment.system.under_qty";
+            case SSCC_MISMATCH -> "discrepancy.journal.comment.system.sscc_mismatch";
+            case DAMAGE -> "discrepancy.journal.comment.system.damage";
+            case EXPIRED_PRODUCT -> "discrepancy.journal.comment.system.expired_product";
+            case LOT_MISMATCH -> "discrepancy.journal.comment.system.lot_mismatch";
+        };
+    }
+
+    private String normalizeComment(String comment) {
+        if (comment == null) {
+            return null;
+        }
+        String trimmed = comment.trim();
+        return trimmed.isBlank() ? null : trimmed;
+    }
+
+    private String safeToString(BigDecimal value) {
+        if (value == null) {
+            return "";
+        }
+        return value.stripTrailingZeros().toPlainString();
+    }
+
+    private String joinParams(String... values) {
+        if (values == null || values.length == 0) {
+            return null;
+        }
+        return java.util.Arrays.stream(values)
+            .map(v -> v == null ? "" : v)
+            .collect(java.util.stream.Collectors.joining("|"));
     }
 }

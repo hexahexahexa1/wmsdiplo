@@ -105,10 +105,36 @@ class TaskAutoAssignServiceTest {
         verify(taskLifecycleService, never()).assign(anyLong(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
     }
 
+    @Test
+    void shouldIgnorePcOperator_WhenSelectingAutoAssignCandidates() {
+        Task task = new Task();
+        task.setId(30L);
+        task.setStatus(TaskStatus.NEW);
+
+        User operator = user("operator1");
+        User pcOperator = user("pcoperator1", UserRole.PC_OPERATOR);
+
+        when(taskRepository.findAllById(List.of(30L))).thenReturn(List.of(task));
+        when(userRepository.findAll()).thenReturn(List.of(pcOperator, operator));
+        when(taskRepository.findByAssigneeAndStatus("operator1", TaskStatus.ASSIGNED)).thenReturn(List.of());
+        when(taskRepository.findByAssigneeAndStatus("operator1", TaskStatus.IN_PROGRESS)).thenReturn(List.of());
+
+        AutoAssignResultDto result = taskAutoAssignService.dryRun(new AutoAssignRequest(List.of(30L), false));
+
+        assertEquals(1, result.assignedCount());
+        assertEquals("operator1", result.items().get(0).suggestedAssignee());
+        verify(taskRepository, never()).findByAssigneeAndStatus("pcoperator1", TaskStatus.ASSIGNED);
+        verify(taskRepository, never()).findByAssigneeAndStatus("pcoperator1", TaskStatus.IN_PROGRESS);
+    }
+
     private User user(String username) {
+        return user(username, UserRole.OPERATOR);
+    }
+
+    private User user(String username, UserRole role) {
         User user = new User();
         user.setUsername(username);
-        user.setRole(UserRole.OPERATOR);
+        user.setRole(role);
         user.setActive(true);
         return user;
     }

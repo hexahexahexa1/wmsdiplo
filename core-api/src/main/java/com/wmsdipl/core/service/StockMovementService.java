@@ -39,6 +39,15 @@ public class StockMovementService {
             Location toLocation,
             String movedBy,
             Long taskId) {
+        return recordReceive(pallet, toLocation, movedBy, taskId, null);
+    }
+
+    public PalletMovement recordReceive(
+            Pallet pallet,
+            Location toLocation,
+            String movedBy,
+            Long taskId,
+            Long scanId) {
         
         PalletMovement movement = new PalletMovement();
         movement.setPallet(pallet);
@@ -48,6 +57,7 @@ public class StockMovementService {
         movement.setQuantity(pallet.getQuantity());
         movement.setMovedBy(movedBy);
         movement.setTaskId(taskId);
+        movement.setScanId(scanId);
         movement.setMovedAt(LocalDateTime.now());
         
         return palletMovementRepository.save(movement);
@@ -69,6 +79,16 @@ public class StockMovementService {
             Location toLocation,
             String movedBy,
             Long taskId) {
+        return recordPlacement(pallet, fromLocation, toLocation, movedBy, taskId, null);
+    }
+
+    public PalletMovement recordPlacement(
+            Pallet pallet,
+            Location fromLocation,
+            Location toLocation,
+            String movedBy,
+            Long taskId,
+            Long scanId) {
         
         PalletMovement movement = new PalletMovement();
         movement.setPallet(pallet);
@@ -78,6 +98,7 @@ public class StockMovementService {
         movement.setQuantity(pallet.getQuantity());
         movement.setMovedBy(movedBy);
         movement.setTaskId(taskId);
+        movement.setScanId(scanId);
         movement.setMovedAt(LocalDateTime.now());
         
         return palletMovementRepository.save(movement);
@@ -99,6 +120,16 @@ public class StockMovementService {
             Location toLocation,
             String movedBy,
             Long taskId) {
+        return recordMove(pallet, fromLocation, toLocation, movedBy, taskId, null);
+    }
+
+    public PalletMovement recordMove(
+            Pallet pallet,
+            Location fromLocation,
+            Location toLocation,
+            String movedBy,
+            Long taskId,
+            Long scanId) {
         
         PalletMovement movement = new PalletMovement();
         movement.setPallet(pallet);
@@ -108,6 +139,7 @@ public class StockMovementService {
         movement.setQuantity(pallet.getQuantity());
         movement.setMovedBy(movedBy);
         movement.setTaskId(taskId);
+        movement.setScanId(scanId);
         movement.setMovedAt(LocalDateTime.now());
         
         return palletMovementRepository.save(movement);
@@ -129,6 +161,16 @@ public class StockMovementService {
             BigDecimal quantity,
             String movedBy,
             Long taskId) {
+        return recordPick(pallet, fromLocation, quantity, movedBy, taskId, null);
+    }
+
+    public PalletMovement recordPick(
+            Pallet pallet,
+            Location fromLocation,
+            BigDecimal quantity,
+            String movedBy,
+            Long taskId,
+            Long scanId) {
         
         PalletMovement movement = new PalletMovement();
         movement.setPallet(pallet);
@@ -138,6 +180,7 @@ public class StockMovementService {
         movement.setQuantity(quantity != null ? quantity : pallet.getQuantity());
         movement.setMovedBy(movedBy);
         movement.setTaskId(taskId);
+        movement.setScanId(scanId);
         movement.setMovedAt(LocalDateTime.now());
         
         return palletMovementRepository.save(movement);

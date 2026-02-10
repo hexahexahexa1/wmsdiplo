@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wmsdipl.contracts.dto.RecordScanRequest;
 import com.wmsdipl.contracts.dto.ScanDto;
 import com.wmsdipl.contracts.dto.TaskDto;
+import com.wmsdipl.contracts.dto.UndoLastScanResultDto;
 import com.wmsdipl.core.domain.*;
 import com.wmsdipl.core.mapper.ScanMapper;
 import com.wmsdipl.core.mapper.TaskMapper;
@@ -105,7 +106,7 @@ class TaskControllerTest {
         Task task = createMockTask(1L, TaskType.RECEIVING);
         TaskDto dto = createMockTaskDto(1L);
 
-        when(taskService.findFiltered(isNull(), isNull(), isNull(), isNull(), any()))
+        when(taskService.findFiltered(isNull(), isNull(), isNull(), isNull(), isNull(), any()))
             .thenReturn(new PageImpl<>(List.of(task), PageRequest.of(0, 10), 1));
         when(taskMapper.toDtoList(List.of(task))).thenReturn(List.of(dto));
 
@@ -113,9 +114,25 @@ class TaskControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.content[0].id").value(1));
 
-        verify(taskService).findFiltered(isNull(), isNull(), isNull(), isNull(), any());
+        verify(taskService).findFiltered(isNull(), isNull(), isNull(), isNull(), isNull(), any());
         verify(taskMapper).toDtoList(List.of(task));
         verify(taskMapper, never()).toDto(any(Task.class));
+    }
+
+    @Test
+    void shouldFilterTasksByTaskId_WhenTaskIdProvided() throws Exception {
+        Task task = createMockTask(99L, TaskType.RECEIVING);
+        TaskDto dto = createMockTaskDto(99L);
+
+        when(taskService.findFiltered(isNull(), isNull(), isNull(), isNull(), eq(99L), any()))
+            .thenReturn(new PageImpl<>(List.of(task), PageRequest.of(0, 10), 1));
+        when(taskMapper.toDtoList(List.of(task))).thenReturn(List.of(dto));
+
+        mockMvc.perform(get("/api/tasks").param("page", "0").param("size", "10").param("taskId", "99"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.content[0].id").value(99));
+
+        verify(taskService).findFiltered(isNull(), isNull(), isNull(), isNull(), eq(99L), any());
     }
 
     @Test
@@ -159,6 +176,25 @@ class TaskControllerTest {
                 .andExpect(jsonPath("$.id").value(1));
 
         verify(taskService).assign(1L, "operator1", "supervisor1");
+    }
+
+    @Test
+    @WithMockUser(username = "operator1", roles = {"OPERATOR"})
+    void shouldRejectAssignToAnotherUser_WhenOperatorAssignsTask() throws Exception {
+        String requestBody = """
+                {
+                    "assignee": "operator2",
+                    "assignedBy": "operator1"
+                }
+                """;
+
+        mockMvc.perform(post("/api/tasks/1/assign")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isForbidden());
+
+        verify(taskService, never()).get(anyLong());
+        verify(taskService, never()).assign(anyLong(), anyString(), anyString());
     }
 
     @Test
@@ -252,6 +288,30 @@ class TaskControllerTest {
                 .andExpect(jsonPath("$.id").value(1));
 
         verify(taskService).release(1L);
+    }
+
+    @Test
+    void shouldUndoLastScan_WhenValidId() throws Exception {
+        UndoLastScanResultDto result = new UndoLastScanResultDto(
+            1L,
+            10L,
+            "RECEIVING",
+            BigDecimal.TEN,
+            BigDecimal.ONE,
+            "PALLET-001",
+            true,
+            1
+        );
+
+        when(taskService.undoLastScan(1L)).thenReturn(result);
+
+        mockMvc.perform(post("/api/tasks/1/undo-last-scan"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.taskId").value(1))
+            .andExpect(jsonPath("$.scanId").value(10))
+            .andExpect(jsonPath("$.movementRolledBack").value(true));
+
+        verify(taskService).undoLastScan(1L);
     }
 
     @Test

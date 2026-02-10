@@ -10,6 +10,7 @@ import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.service.CsvExportService;
 import com.wmsdipl.core.service.ReceiptAcceptBlockedException;
+import com.wmsdipl.core.service.ReceiptWorkflowBlockedException;
 import com.wmsdipl.core.service.ReceiptService;
 import com.wmsdipl.core.service.workflow.PlacementWorkflowService;
 import com.wmsdipl.core.service.workflow.ReceivingWorkflowService;
@@ -107,7 +108,9 @@ class ReceiptControllerTest {
                 BigDecimal.TEN,  // unitsPerPalletSnapshot
                 null,            // ssccExpected
                 null,            // lotNumberExpected
-                null             // expiryDateExpected
+                null,            // expiryDateExpected
+                false,           // excludedFromWorkflow
+                null             // exclusionReason
         );
         when(receiptService.listLines(1L)).thenReturn(List.of(line));
 
@@ -191,6 +194,8 @@ class ReceiptControllerTest {
             new BigDecimal("10.000"),
             "SSCC-01",
             null,
+            null,
+            false,
             null
         );
         when(receiptService.addDraftLine(eq(1L), any())).thenReturn(line);
@@ -264,6 +269,33 @@ class ReceiptControllerTest {
     }
 
     @Test
+    void shouldReturnStructuredConflict_WhenCompleteReceivingBlockedBySkuStatus() throws Exception {
+        doThrow(new ReceiptWorkflowBlockedException(
+            1L,
+            "completeReceiving",
+            List.of(new ReceiptWorkflowBlockedException.Blocker(
+                "LINE_SKU_NOT_ACTIVE",
+                "LINE",
+                10L,
+                1,
+                null,
+                100L,
+                "SKU-100",
+                "DRAFT",
+                "Blocked by draft SKU"
+            ))
+        )).when(receivingWorkflowService).completeReceiving(1L);
+
+        mockMvc.perform(post("/api/receipts/1/complete-receiving"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("RECEIPT_WORKFLOW_BLOCKED"))
+            .andExpect(jsonPath("$.receiptId").value(1))
+            .andExpect(jsonPath("$.operation").value("completeReceiving"))
+            .andExpect(jsonPath("$.blockers[0].code").value("LINE_SKU_NOT_ACTIVE"))
+            .andExpect(jsonPath("$.blockers[0].skuStatus").value("DRAFT"));
+    }
+
+    @Test
     void shouldAcceptReceipt_WhenValidId() throws Exception {
         // Given
         doNothing().when(receiptService).accept(1L);
@@ -289,6 +321,33 @@ class ReceiptControllerTest {
             .andExpect(jsonPath("$.blockers[0].taskId").value(10))
             .andExpect(jsonPath("$.blockers[0].taskType").value("RECEIVING"))
             .andExpect(jsonPath("$.blockers[0].status").value("IN_PROGRESS"));
+    }
+
+    @Test
+    void shouldReturnStructuredConflict_WhenAcceptBlockedBySkuStatus() throws Exception {
+        doThrow(new ReceiptWorkflowBlockedException(
+            1L,
+            "accept",
+            List.of(new ReceiptWorkflowBlockedException.Blocker(
+                "DISCREPANCY_SKU_PENDING_RESOLUTION",
+                "DISCREPANCY",
+                20L,
+                2,
+                30L,
+                200L,
+                "SKU-200",
+                "REJECTED",
+                "Remap or approve required"
+            ))
+        )).when(receiptService).accept(1L);
+
+        mockMvc.perform(post("/api/receipts/1/accept"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("RECEIPT_WORKFLOW_BLOCKED"))
+            .andExpect(jsonPath("$.receiptId").value(1))
+            .andExpect(jsonPath("$.operation").value("accept"))
+            .andExpect(jsonPath("$.blockers[0].code").value("DISCREPANCY_SKU_PENDING_RESOLUTION"))
+            .andExpect(jsonPath("$.blockers[0].skuStatus").value("REJECTED"));
     }
 
 
@@ -320,6 +379,31 @@ class ReceiptControllerTest {
     }
 
     @Test
+    void shouldReturnStructuredConflict_WhenStartPlacementBlockedBySkuStatus() throws Exception {
+        doThrow(new ReceiptWorkflowBlockedException(
+            1L,
+            "startPlacement",
+            List.of(new ReceiptWorkflowBlockedException.Blocker(
+                "LINE_SKU_NOT_ACTIVE",
+                "LINE",
+                11L,
+                3,
+                null,
+                300L,
+                "SKU-300",
+                "DRAFT",
+                "Blocked by draft SKU"
+            ))
+        )).when(placementWorkflowService).startPlacement(1L);
+
+        mockMvc.perform(post("/api/receipts/1/start-placement"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("RECEIPT_WORKFLOW_BLOCKED"))
+            .andExpect(jsonPath("$.operation").value("startPlacement"))
+            .andExpect(jsonPath("$.blockers[0].skuCode").value("SKU-300"));
+    }
+
+    @Test
     void shouldCompletePlacement_WhenValidId() throws Exception {
         // Given
         doNothing().when(placementWorkflowService).completePlacement(1L);
@@ -340,6 +424,31 @@ class ReceiptControllerTest {
             .andExpect(jsonPath("$.count").value(2));
 
         verify(shippingWorkflowService).startShipping(1L);
+    }
+
+    @Test
+    void shouldReturnStructuredConflict_WhenStartShippingBlockedBySkuStatus() throws Exception {
+        doThrow(new ReceiptWorkflowBlockedException(
+            1L,
+            "startShipping",
+            List.of(new ReceiptWorkflowBlockedException.Blocker(
+                "LINE_SKU_NOT_ACTIVE",
+                "LINE",
+                12L,
+                4,
+                null,
+                400L,
+                "SKU-400",
+                "REJECTED",
+                "Blocked by rejected SKU"
+            ))
+        )).when(shippingWorkflowService).startShipping(1L);
+
+        mockMvc.perform(post("/api/receipts/1/start-shipping"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("RECEIPT_WORKFLOW_BLOCKED"))
+            .andExpect(jsonPath("$.operation").value("startShipping"))
+            .andExpect(jsonPath("$.blockers[0].skuStatus").value("REJECTED"));
     }
 
     @Test

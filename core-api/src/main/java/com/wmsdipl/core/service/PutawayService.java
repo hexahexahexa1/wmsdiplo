@@ -135,6 +135,9 @@ public class PutawayService {
         allPallets.addAll(receivedPallets);
         allPallets.addAll(damagedPallets);
         allPallets.addAll(quarantinePallets);
+
+        // Keep pallet SKU aligned with remapped receipt line SKU before task generation.
+        synchronizePalletSkuWithReceiptLine(allPallets);
         
         List<Task> tasks = new ArrayList<>();
 
@@ -163,6 +166,22 @@ public class PutawayService {
         }
 
         return tasks;
+    }
+
+    private void synchronizePalletSkuWithReceiptLine(List<Pallet> pallets) {
+        if (pallets == null || pallets.isEmpty()) {
+            return;
+        }
+        for (Pallet pallet : pallets) {
+            if (pallet == null || pallet.getReceiptLine() == null || pallet.getReceiptLine().getSkuId() == null) {
+                continue;
+            }
+            Long lineSkuId = pallet.getReceiptLine().getSkuId();
+            if (!lineSkuId.equals(pallet.getSkuId())) {
+                pallet.setSkuId(lineSkuId);
+                palletRepository.save(pallet);
+            }
+        }
     }
 
     /**

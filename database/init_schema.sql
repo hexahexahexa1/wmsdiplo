@@ -261,9 +261,13 @@ CREATE TABLE discrepancies (
     receipt_id BIGINT NOT NULL REFERENCES receipts(id),
     line_id BIGINT REFERENCES receipt_lines(id),
     task_id BIGINT REFERENCES tasks(id),
+    scan_id BIGINT REFERENCES scans(id) ON DELETE SET NULL,
     pallet_id BIGINT REFERENCES pallets(id),
     type VARCHAR(50) NOT NULL,
     description TEXT,
+    system_comment_key VARCHAR(128),
+    system_comment_params TEXT,
+    draft_sku_id BIGINT,
     qty_expected NUMERIC(10,2),
     qty_actual NUMERIC(10,2),
     resolved BOOLEAN DEFAULT false,
@@ -368,6 +372,7 @@ CREATE TABLE pallet_movements (
     to_location_id BIGINT REFERENCES locations(id),
     quantity NUMERIC(10,2),
     task_id BIGINT,
+    scan_id BIGINT REFERENCES scans(id) ON DELETE SET NULL,
     moved_by VARCHAR(128),
     moved_at TIMESTAMP
 );
@@ -431,10 +436,12 @@ CREATE INDEX idx_scans_task ON scans(task_id);
 CREATE INDEX idx_scans_pallet ON scans(pallet_code);
 CREATE UNIQUE INDEX uq_scans_task_request_id ON scans(task_id, request_id) WHERE request_id IS NOT NULL;
 CREATE INDEX idx_discrepancies_receipt ON discrepancies(receipt_id);
+CREATE INDEX idx_discrepancies_scan_id ON discrepancies(scan_id);
 CREATE INDEX idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
 CREATE INDEX idx_status_history_entity ON status_history(entity_type, entity_id);
 CREATE INDEX idx_movements_pallet ON pallet_movements(pallet_id);
 CREATE INDEX idx_movements_task ON pallet_movements(task_id);
+CREATE INDEX idx_pallet_movements_scan_id ON pallet_movements(scan_id);
 CREATE INDEX idx_import_config_key ON import_config(config_key);
 CREATE INDEX idx_receipts_status ON receipts(status);
 CREATE INDEX idx_receipts_doc_date ON receipts(doc_date);

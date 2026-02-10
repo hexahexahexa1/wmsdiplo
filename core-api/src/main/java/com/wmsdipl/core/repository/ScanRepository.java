@@ -20,6 +20,8 @@ public interface ScanRepository extends JpaRepository<Scan, Long> {
      */
     List<Scan> findByTaskOrderByScannedAtDesc(Task task);
 
+    java.util.Optional<Scan> findFirstByTaskOrderByScannedAtDescIdDesc(Task task);
+
     void deleteByTask(Task task);
 
     Optional<Scan> findByTaskIdAndRequestId(Long taskId, String requestId);
@@ -27,4 +29,9 @@ public interface ScanRepository extends JpaRepository<Scan, Long> {
     Optional<Scan> findFirstByTaskIdAndPalletCodeOrderByScannedAtDesc(Long taskId, String palletCode);
 
     boolean existsByTaskIdAndScannedAtAfter(Long taskId, LocalDateTime scannedAt);
+
+    boolean existsByTask_Line_IdIn(java.util.Collection<Long> lineIds);
+
+    boolean existsByBarcodeIgnoreCase(String barcode);
+    boolean existsByTask_Receipt_IdAndBarcodeIgnoreCase(Long receiptId, String barcode);
 }

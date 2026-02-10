@@ -20,5 +20,9 @@ public record SkuDto(
     
     @NotBlank(message = "Unit of measure is required")
     @Size(max = 32, message = "UOM must not exceed 32 characters")
-    String uom
+    String uom,
+
+    @NotBlank(message = "SKU status is required")
+    @Size(max = 16, message = "Status must not exceed 16 characters")
+    String status
 ) {}

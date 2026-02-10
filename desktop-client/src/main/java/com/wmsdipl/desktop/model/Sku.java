@@ -8,5 +8,6 @@ public record Sku(
     Long id,
     String code,
     String name,
-    String uom
+    String uom,
+    String status
 ) {}

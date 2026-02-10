@@ -17,6 +17,7 @@ import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.TaskRepository;
 import com.wmsdipl.core.service.DuplicateScanDetectionService;
+import com.wmsdipl.core.service.ReceiptWorkflowBlockerService;
 import com.wmsdipl.core.service.StockMovementService;
 import com.wmsdipl.core.service.TaskLifecycleService;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -66,6 +68,9 @@ class ShippingWorkflowServiceTest {
 
     @Mock
     private DuplicateScanDetectionService duplicateScanDetectionService;
+
+    @Mock
+    private ReceiptWorkflowBlockerService receiptWorkflowBlockerService;
 
     @InjectMocks
     private ShippingWorkflowService shippingWorkflowService;
@@ -157,7 +162,7 @@ class ShippingWorkflowServiceTest {
         when(duplicateScanDetectionService.checkScan("PLT-100"))
             .thenReturn(DuplicateScanDetectionService.ScanResult.valid("PLT-100"));
         when(palletRepository.findByCode("PLT-100")).thenReturn(Optional.of(pallet));
-        when(stockMovementService.recordPick(any(Pallet.class), any(Location.class), eq(BigDecimal.valueOf(4)), eq("operator1"), eq(5L)))
+        when(stockMovementService.recordPick(any(Pallet.class), any(Location.class), eq(BigDecimal.valueOf(4)), eq("operator1"), eq(5L), nullable(Long.class)))
             .thenReturn(new PalletMovement());
         when(palletRepository.save(any(Pallet.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(scanRepository.save(any(Scan.class))).thenAnswer(invocation -> invocation.getArgument(0));

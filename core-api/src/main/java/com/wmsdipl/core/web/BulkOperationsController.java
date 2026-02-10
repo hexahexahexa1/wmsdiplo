@@ -72,10 +72,14 @@ public class BulkOperationsController {
      *   "count": 50
      * }
      * 
-     * Creates pallets: PLT-00100, PLT-00101, ..., PLT-00149
+     * Creates pallets: PLT-00100, PLT-00101, ..., PLT-00149.
+     * New pallets are created as EMPTY with quantity=0 and no location binding.
      */
     @PostMapping("/pallets")
-    @Operation(summary = "Bulk create pallets", description = "Create multiple pallets with auto-generated codes")
+    @Operation(
+        summary = "Bulk create pallets",
+        description = "Create multiple pallets with auto-generated codes. New pallets are EMPTY (quantity=0, location=null)."
+    )
     public ResponseEntity<PalletCreationResult> bulkCreatePallets(@Valid @RequestBody BulkCreatePalletsRequest request) {
         PalletCreationResult result = bulkOperationsService.bulkCreatePallets(request);
         return ResponseEntity.ok(result);

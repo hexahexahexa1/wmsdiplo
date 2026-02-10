@@ -16,6 +16,7 @@ import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.TaskRepository;
 import com.wmsdipl.core.service.DuplicateScanDetectionService;
+import com.wmsdipl.core.service.ReceiptWorkflowBlockerService;
 import com.wmsdipl.core.service.StockMovementService;
 import com.wmsdipl.core.service.TaskLifecycleService;
 import org.springframework.stereotype.Service;
@@ -41,6 +42,7 @@ public class ShippingWorkflowService {
     private final ScanRepository scanRepository;
     private final StockMovementService stockMovementService;
     private final DuplicateScanDetectionService duplicateScanDetectionService;
+    private final ReceiptWorkflowBlockerService receiptWorkflowBlockerService;
 
     public ShippingWorkflowService(
             ReceiptRepository receiptRepository,
@@ -49,7 +51,8 @@ public class ShippingWorkflowService {
             PalletRepository palletRepository,
             ScanRepository scanRepository,
             StockMovementService stockMovementService,
-            DuplicateScanDetectionService duplicateScanDetectionService
+            DuplicateScanDetectionService duplicateScanDetectionService,
+            ReceiptWorkflowBlockerService receiptWorkflowBlockerService
     ) {
         this.receiptRepository = receiptRepository;
         this.taskRepository = taskRepository;
@@ -58,6 +61,7 @@ public class ShippingWorkflowService {
         this.scanRepository = scanRepository;
         this.stockMovementService = stockMovementService;
         this.duplicateScanDetectionService = duplicateScanDetectionService;
+        this.receiptWorkflowBlockerService = receiptWorkflowBlockerService;
     }
 
     @Transactional
@@ -71,6 +75,8 @@ public class ShippingWorkflowService {
             throw new ResponseStatusException(BAD_REQUEST,
                 "Only cross-dock receipts in READY_FOR_SHIPMENT can start shipping");
         }
+
+        receiptWorkflowBlockerService.assertNoSkuStatusBlockers(receipt, "startShipping");
 
         List<Pallet> pallets = palletRepository.findByReceipt(receipt);
         if (pallets.isEmpty()) {
@@ -208,13 +214,25 @@ public class ShippingWorkflowService {
                 "Shipped quantity exceeds pallet quantity. Available: " + currentQty + ", scanned: " + qtyDecimal);
         }
 
+        Scan scan = new Scan();
+        scan.setTask(task);
+        scan.setRequestId(requestId);
+        scan.setPalletCode(request.palletCode());
+        scan.setSscc(request.sscc());
+        scan.setBarcode(request.barcode());
+        scan.setQty(qtyDecimal);
+        scan.setDeviceId(request.deviceId());
+        scan.setDiscrepancy(false);
+        Scan savedScan = scanRepository.save(scan);
+
         Location fromLocation = pallet.getLocation();
         stockMovementService.recordPick(
             pallet,
             fromLocation,
             qtyDecimal,
             task.getAssignee() != null ? task.getAssignee() : "system",
-            taskId
+            taskId,
+            savedScan.getId()
         );
 
         BigDecimal remainingQty = currentQty.subtract(qtyDecimal);
@@ -226,17 +244,6 @@ public class ShippingWorkflowService {
             pallet.setStatus(PalletStatus.PICKING);
         }
         palletRepository.save(pallet);
-
-        Scan scan = new Scan();
-        scan.setTask(task);
-        scan.setRequestId(requestId);
-        scan.setPalletCode(request.palletCode());
-        scan.setSscc(request.sscc());
-        scan.setBarcode(request.barcode());
-        scan.setQty(qtyDecimal);
-        scan.setDeviceId(request.deviceId());
-        scan.setDiscrepancy(false);
-        Scan savedScan = scanRepository.save(scan);
 
         BigDecimal currentDone = task.getQtyDone() != null ? task.getQtyDone() : BigDecimal.ZERO;
         task.setQtyDone(currentDone.add(qtyDecimal));

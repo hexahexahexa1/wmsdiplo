@@ -39,6 +39,7 @@ import javafx.scene.control.ListView;
 import javafx.scene.control.PasswordField;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.Separator;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TableColumn;
@@ -48,6 +49,7 @@ import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextFormatter;
 import javafx.scene.control.TextInputDialog;
+import javafx.scene.control.Tooltip;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
@@ -62,6 +64,7 @@ import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.animation.FadeTransition;
 import javafx.animation.KeyFrame;
+import javafx.animation.PauseTransition;
 import javafx.animation.Timeline;
 import javafx.animation.TranslateTransition;
 import javafx.scene.chart.PieChart;
@@ -111,6 +114,7 @@ public class DesktopClientApplication extends Application {
     private LocalDateTime lastSyncAt;
     private boolean syncOnline = true;
     private Timeline topStatusTimeline;
+    private Timeline syncHealthTimeline;
     private final DateTimeFormatter dateFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private final DateTimeFormatter timeFmt = DateTimeFormatter.ofPattern("HH:mm:ss");
     private final DateTimeFormatter dateTimeFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -225,6 +229,15 @@ public class DesktopClientApplication extends Application {
         topStatusTimeline = new Timeline(new KeyFrame(Duration.seconds(1), e -> refreshTopIndicators()));
         topStatusTimeline.setCycleCount(Timeline.INDEFINITE);
         topStatusTimeline.play();
+
+        if (syncHealthTimeline != null) {
+            syncHealthTimeline.stop();
+        }
+        syncHealthTimeline = new Timeline(new KeyFrame(Duration.seconds(15), e -> runSyncHeartbeat()));
+        syncHealthTimeline.setCycleCount(Timeline.INDEFINITE);
+        syncHealthTimeline.play();
+        runSyncHeartbeat();
+
         refreshTopIndicators();
     }
 
@@ -261,6 +274,56 @@ public class DesktopClientApplication extends Application {
     private void markSyncFailure() {
         syncOnline = false;
         refreshTopIndicators();
+    }
+
+    private void runSyncHeartbeat() {
+        CompletableFuture.runAsync(() -> {
+            try {
+                apiClient.pingSync();
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        }).whenComplete((unused, error) -> Platform.runLater(() -> {
+            if (error != null) {
+                updateSyncFromAsyncError(error);
+                return;
+            }
+            markSyncSuccess();
+        }));
+    }
+
+    private void updateSyncFromAsyncError(Throwable error) {
+        if (isConnectivityError(error)) {
+            markSyncFailure();
+        }
+    }
+
+    private boolean isConnectivityError(Throwable throwable) {
+        Throwable root = throwable;
+        while (root != null && root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+
+        if (root instanceof java.net.ConnectException
+            || root instanceof java.net.UnknownHostException
+            || root instanceof java.net.SocketTimeoutException
+            || root instanceof java.net.http.HttpTimeoutException
+            || root instanceof java.net.SocketException) {
+            return true;
+        }
+
+        String message = root != null ? root.getMessage() : null;
+        if (message == null) {
+            return false;
+        }
+        String normalized = message.toLowerCase(java.util.Locale.ROOT);
+        return normalized.contains("connection refused")
+            || normalized.contains("connect timed out")
+            || normalized.contains("connection reset")
+            || normalized.contains("no route to host")
+            || normalized.contains("status=503")
+            || normalized.contains("status=502")
+            || normalized.contains("status=504");
     }
 
     private VBox buildNav() {
@@ -632,12 +695,10 @@ public class DesktopClientApplication extends Application {
             }
         }).whenComplete((draft, error) -> Platform.runLater(() -> {
             if (error != null) {
-                markSyncFailure();
                 Throwable cause = error.getCause() != null ? error.getCause() : error;
                 showError(I18n.format("common.error", cause.getMessage()));
                 return;
             }
-            markSyncSuccess();
             showNotification(I18n.format("receipts.copy.status.success", sourceReceipt.docNo(), draft.docNo()));
             loadReceipts(receiptTable, "");
             showDraftLinesEditorDialog(draft, receiptTable);
@@ -1055,13 +1116,11 @@ public class DesktopClientApplication extends Application {
                 }
             }).whenComplete((created, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    markSyncFailure();
                     statusLabel.setText(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
                     statusLabel.setStyle("-fx-text-fill: #F44336; -fx-font-size: 12px;");
                     createBtn.setDisable(false);
                     return;
                 }
-                markSyncSuccess();
                 dialog.close();
                 showDraftLinesEditorDialog(created, receiptTable);
             }));
@@ -1466,12 +1525,10 @@ public class DesktopClientApplication extends Application {
             })
             .whenComplete((receipts, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    markSyncFailure();
                     table.setPlaceholder(new Label(I18n.format("common.error", error.getMessage())));
                     table.setItems(FXCollections.observableArrayList());
                     return;
                 }
-                markSyncSuccess();
                 List<Receipt> filtered = receipts;
                 if (filter != null && !filter.isBlank()) {
                     String lower = filter.toLowerCase();
@@ -2051,6 +2108,8 @@ public class DesktopClientApplication extends Application {
         header.getStyleClass().add("section-header");
         TextField receiptFilter = new TextField();
         receiptFilter.setPromptText(I18n.get("tasks.filter.receipt"));
+        TextField taskIdFilter = new TextField();
+        taskIdFilter.setPromptText(I18n.get("tasks.filter.task_id"));
         Button refresh = new Button(I18n.get("btn.refresh"));
         refresh.getStyleClass().add("refresh-btn");
         
@@ -2115,10 +2174,15 @@ public class DesktopClientApplication extends Application {
         
         table.getColumns().addAll(taskIdCol, taskDocCol, taskTypeCol, taskStatusCol, taskAssigneeCol, taskPalletCol, taskSourceCol, taskTargetCol);
 
-        refresh.setOnAction(e -> loadTasks(table, receiptFilter.getText()));
-        loadTasks(table, null);
+        refresh.setOnAction(e -> loadTasks(table, receiptFilter.getText(), taskIdFilter.getText()));
+        receiptFilter.setOnAction(e -> refresh.fire());
+        taskIdFilter.setOnAction(e -> refresh.fire());
+        PauseTransition tasksFilterDebounce = new PauseTransition(Duration.millis(250));
+        tasksFilterDebounce.setOnFinished(event -> loadTasks(table, receiptFilter.getText(), taskIdFilter.getText()));
+        taskIdFilter.textProperty().addListener((obs, oldValue, newValue) -> tasksFilterDebounce.playFromStart());
+        loadTasks(table, null, null);
 
-        HBox controls = new HBox(10, receiptFilter, refresh);
+        HBox controls = new HBox(10, receiptFilter, taskIdFilter, refresh);
         if (canBulk) {
             controls.getChildren().addAll(bulkOpsBtn, autoAssignBtn, discrepancyJournalBtn);
         }
@@ -2214,7 +2278,7 @@ public class DesktopClientApplication extends Application {
                     result.assignedCount(),
                     result.skippedCount()
                 ));
-                loadTasks(taskTable, null);
+                loadTasks(taskTable, null, null);
             }));
         });
 
@@ -2239,6 +2303,8 @@ public class DesktopClientApplication extends Application {
         Stage dialog = new Stage();
         dialog.initModality(Modality.APPLICATION_MODAL);
         dialog.setTitle(I18n.get("discrepancy.journal.title"));
+        String role = apiClient.getCurrentUser() != null ? apiClient.getCurrentUser().role() : "";
+        boolean canRemapDraftSku = "ADMIN".equalsIgnoreCase(role) || "SUPERVISOR".equalsIgnoreCase(role);
 
         TextField docNoField = new TextField();
         docNoField.setPromptText(I18n.get("discrepancy.journal.filter.doc"));
@@ -2282,10 +2348,11 @@ public class DesktopClientApplication extends Application {
             column(I18n.get("discrepancy.journal.col.id"), Discrepancy::id),
             column(I18n.get("discrepancy.journal.col.doc"), d -> d.receiptDocNo() != null ? d.receiptDocNo() : ""),
             column(I18n.get("discrepancy.journal.col.type"), d -> d.type() != null ? d.type() : ""),
+            column(I18n.get("discrepancy.journal.col.draft_sku"), d -> d.draftSkuId() != null ? d.draftSkuId() : ""),
             column(I18n.get("discrepancy.journal.col.operator"), d -> d.operator() != null ? d.operator() : ""),
             column(I18n.get("discrepancy.journal.col.qty_expected"), d -> d.qtyExpected() != null ? d.qtyExpected().stripTrailingZeros().toPlainString() : ""),
             column(I18n.get("discrepancy.journal.col.qty_actual"), d -> d.qtyActual() != null ? d.qtyActual().stripTrailingZeros().toPlainString() : ""),
-            column(I18n.get("discrepancy.journal.col.comment"), d -> localizeSystemDiscrepancyComment(d.comment())),
+            column(I18n.get("discrepancy.journal.col.comment"), this::localizeSystemDiscrepancyComment),
             column(I18n.get("discrepancy.journal.col.resolved"), d -> Boolean.TRUE.equals(d.resolved()) ? I18n.get("common.yes") : I18n.get("common.no")),
             column(I18n.get("discrepancy.journal.col.created_at"), d -> d.createdAt() != null ? d.createdAt().format(dateTimeFmt) : "")
         );
@@ -2295,12 +2362,41 @@ public class DesktopClientApplication extends Application {
         Button editCommentBtn = new Button(I18n.get("discrepancy.journal.btn.edit_comment"));
         editCommentBtn.getStyleClass().add("refresh-btn");
         editCommentBtn.setDisable(true);
+        Button remapSkuBtn = new Button(I18n.get("discrepancy.journal.btn.remap_sku"));
+        remapSkuBtn.getStyleClass().add("refresh-btn");
+        remapSkuBtn.setDisable(true);
+        remapSkuBtn.setTooltip(new Tooltip(I18n.get("discrepancy.journal.remap.tooltip")));
         Button closeBtn = new Button(I18n.get("common.close"));
         closeBtn.getStyleClass().add("refresh-btn");
         closeBtn.setOnAction(e -> dialog.close());
+        Label remapHintLabel = new Label();
+        remapHintLabel.getStyleClass().add("form-hint");
 
-        table.getSelectionModel().selectedItemProperty().addListener((obs, oldV, selected) ->
-            editCommentBtn.setDisable(selected == null));
+        Runnable updateRemapState = () -> {
+            Discrepancy selected = table.getSelectionModel().getSelectedItem();
+            if (!canRemapDraftSku) {
+                remapSkuBtn.setDisable(true);
+                remapHintLabel.setText(I18n.get("discrepancy.journal.remap.hint.role"));
+                return;
+            }
+            if (selected == null) {
+                remapSkuBtn.setDisable(true);
+                remapHintLabel.setText(I18n.get("discrepancy.journal.remap.hint.select"));
+                return;
+            }
+            if (selected.draftSkuId() == null) {
+                remapSkuBtn.setDisable(true);
+                remapHintLabel.setText(I18n.get("discrepancy.journal.remap.hint.no_draft"));
+                return;
+            }
+            remapSkuBtn.setDisable(false);
+            remapHintLabel.setText(I18n.get("discrepancy.journal.remap.hint.ready"));
+        };
+
+        table.getSelectionModel().selectedItemProperty().addListener((obs, oldV, selected) -> {
+            editCommentBtn.setDisable(selected == null);
+            updateRemapState.run();
+        });
 
         Runnable loadJournal = () -> {
             Long skuId = null;
@@ -2340,10 +2436,12 @@ public class DesktopClientApplication extends Application {
                 if (error != null) {
                     statusLabel.setText(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
                     table.setItems(FXCollections.observableArrayList());
+                    updateRemapState.run();
                     return;
                 }
                 table.setItems(FXCollections.observableArrayList(items));
                 statusLabel.setText(I18n.format("discrepancy.journal.status.loaded", items.size()));
+                updateRemapState.run();
             }));
         };
 
@@ -2377,20 +2475,29 @@ public class DesktopClientApplication extends Application {
                 String currentUser = apiClient.getCurrentUsername();
                 String author = (currentUser == null || currentUser.isBlank()) ? "system" : currentUser;
                 if (updated != null && updated.id() != null) {
-                    var items = table.getItems();
-                    int index = items.indexOf(selected);
-                    if (index >= 0) {
-                        items.set(index, updated);
-                        table.getSelectionModel().select(index);
-                    }
+                    replaceDiscrepancyInTable(table, updated);
                 }
                 statusLabel.setText(I18n.format("discrepancy.journal.status.saved_by", author));
             }));
         });
+        remapSkuBtn.setOnAction(e -> {
+            Discrepancy selected = table.getSelectionModel().getSelectedItem();
+            if (selected == null || selected.draftSkuId() == null) {
+                return;
+            }
+            showRemapSkuDialog(
+                selected,
+                updated -> {
+                    replaceDiscrepancyInTable(table, updated);
+                    statusLabel.setText(I18n.format("discrepancy.journal.status.remapped", updated.id()));
+                },
+                errorMessage -> statusLabel.setText(I18n.format("common.error", errorMessage))
+            );
+        });
 
         HBox filterRow = new HBox(10, docNoField, operatorField, skuField, typeCombo, resolvedCombo, fromDate, toDate, refreshBtn);
-        HBox actionRow = new HBox(10, editCommentBtn, closeBtn);
-        VBox root = new VBox(12, filterRow, statusLabel, table, actionRow);
+        HBox actionRow = new HBox(10, editCommentBtn, remapSkuBtn, closeBtn);
+        VBox root = new VBox(12, filterRow, statusLabel, table, actionRow, remapHintLabel);
         root.setPadding(new Insets(16));
         root.getStyleClass().add("dialog-surface");
 
@@ -2399,7 +2506,135 @@ public class DesktopClientApplication extends Application {
         dialog.setScene(scene);
         dialog.show();
 
+        updateRemapState.run();
         loadJournal.run();
+    }
+
+    private void showRemapSkuDialog(
+        Discrepancy discrepancy,
+        Consumer<Discrepancy> onRemapped,
+        Consumer<String> onError
+    ) {
+        Stage dialog = new Stage();
+        dialog.initModality(Modality.APPLICATION_MODAL);
+        dialog.initOwner(shell.getScene().getWindow());
+        dialog.setTitle(I18n.get("discrepancy.journal.remap.title"));
+
+        Label header = new Label(I18n.format("discrepancy.journal.remap.header", discrepancy.id()));
+        header.getStyleClass().add("section-header");
+
+        Label targetSkuLabel = new Label(I18n.get("discrepancy.journal.remap.target_label"));
+        targetSkuLabel.getStyleClass().add("form-label");
+        ComboBox<Sku> targetSkuCombo = new ComboBox<>();
+        targetSkuCombo.setPrefWidth(460);
+        targetSkuCombo.setPromptText(I18n.get("discrepancy.journal.remap.target_prompt"));
+        targetSkuCombo.setCellFactory(v -> new ListCell<>() {
+            @Override
+            protected void updateItem(Sku item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.code() + " - " + item.name() + " (#" + item.id() + ")");
+            }
+        });
+        targetSkuCombo.setButtonCell(new ListCell<>() {
+            @Override
+            protected void updateItem(Sku item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item.code() + " - " + item.name());
+            }
+        });
+
+        Label statusLabel = new Label(I18n.get("discrepancy.journal.remap.status.loading"));
+        statusLabel.getStyleClass().add("form-hint");
+
+        Button remapBtn = new Button(I18n.get("btn.save"));
+        remapBtn.getStyleClass().add("refresh-btn");
+        remapBtn.setDisable(true);
+
+        Button cancelBtn = new Button(I18n.get("common.cancel"));
+        cancelBtn.getStyleClass().add("refresh-btn");
+        cancelBtn.setOnAction(e -> dialog.close());
+
+        targetSkuCombo.valueProperty().addListener((obs, oldV, selected) ->
+            remapBtn.setDisable(selected == null));
+
+        remapBtn.setOnAction(e -> {
+            Sku targetSku = targetSkuCombo.getValue();
+            if (targetSku == null) {
+                statusLabel.setText(I18n.get("discrepancy.journal.remap.error.target_required"));
+                return;
+            }
+            remapBtn.setDisable(true);
+            cancelBtn.setDisable(true);
+            statusLabel.setText(I18n.get("discrepancy.journal.remap.status.remapping"));
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.remapDiscrepancySku(discrepancy.id(), targetSku.id());
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((updated, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    String message = error.getCause() != null ? error.getCause().getMessage() : error.getMessage();
+                    statusLabel.setText(I18n.format("common.error", message));
+                    onError.accept(message);
+                    cancelBtn.setDisable(false);
+                    remapBtn.setDisable(targetSkuCombo.getValue() == null);
+                    return;
+                }
+                onRemapped.accept(updated);
+                dialog.close();
+            }));
+        });
+
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                return apiClient.listSkus("ACTIVE");
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        }).whenComplete((activeSkus, error) -> Platform.runLater(() -> {
+            if (error != null) {
+                String message = error.getCause() != null ? error.getCause().getMessage() : error.getMessage();
+                statusLabel.setText(I18n.format("common.error", message));
+                onError.accept(message);
+                return;
+            }
+            List<Sku> sorted = activeSkus.stream()
+                .sorted(Comparator.comparing(sku -> Objects.toString(sku.code(), "")))
+                .toList();
+            targetSkuCombo.setItems(FXCollections.observableArrayList(sorted));
+            if (sorted.isEmpty()) {
+                statusLabel.setText(I18n.get("discrepancy.journal.remap.status.no_active_skus"));
+                remapBtn.setDisable(true);
+                return;
+            }
+            statusLabel.setText("");
+        }));
+
+        HBox actions = new HBox(10, remapBtn, cancelBtn);
+        VBox root = new VBox(12, header, targetSkuLabel, targetSkuCombo, statusLabel, actions);
+        root.setPadding(new Insets(16));
+        root.getStyleClass().add("dialog-surface");
+
+        Scene scene = new Scene(root, 540, 230);
+        applyStyles(scene);
+        dialog.setScene(scene);
+        dialog.showAndWait();
+    }
+
+    private void replaceDiscrepancyInTable(TableView<Discrepancy> table, Discrepancy updated) {
+        if (table == null || updated == null || updated.id() == null) {
+            return;
+        }
+        var items = table.getItems();
+        for (int i = 0; i < items.size(); i++) {
+            Discrepancy current = items.get(i);
+            if (Objects.equals(current.id(), updated.id())) {
+                items.set(i, updated);
+                table.getSelectionModel().select(i);
+                return;
+            }
+        }
     }
 
     private String translateAutoAssignDecision(String decision) {
@@ -2410,25 +2645,55 @@ public class DesktopClientApplication extends Application {
         return value.startsWith("!") ? decision : value;
     }
 
-    private String localizeSystemDiscrepancyComment(String comment) {
-        if (comment == null || comment.isBlank()) {
+    private boolean isTerminalFinishedStatus(String status) {
+        if (status == null) {
+            return false;
+        }
+        return "COMPLETED".equalsIgnoreCase(status) || "CANCELLED".equalsIgnoreCase(status);
+    }
+
+    private String localizeSystemDiscrepancyComment(Discrepancy discrepancy) {
+        if (discrepancy == null) {
             return "";
         }
 
-        Matcher shortageMatcher = SHORTAGE_COMMENT_PATTERN.matcher(comment.trim());
-        if (shortageMatcher.matches()) {
-            return I18n.format(
-                "discrepancy.journal.comment.shortage_confirmed",
-                shortageMatcher.group(1).trim(),
-                shortageMatcher.group(2).trim()
-            );
+        String comment = discrepancy.comment();
+        if (comment != null && !comment.isBlank()) {
+            Matcher shortageMatcher = SHORTAGE_COMMENT_PATTERN.matcher(comment.trim());
+            if (shortageMatcher.matches()) {
+                return I18n.format(
+                    "discrepancy.journal.comment.shortage_confirmed",
+                    shortageMatcher.group(1).trim(),
+                    shortageMatcher.group(2).trim()
+                );
+            }
+
+            if ("Shortage confirmed by operator during task completion.".equals(comment.trim())) {
+                return I18n.get("discrepancy.journal.comment.shortage_confirmed_short");
+            }
+
+            return comment;
         }
 
-        if ("Shortage confirmed by operator during task completion.".equals(comment.trim())) {
-            return I18n.get("discrepancy.journal.comment.shortage_confirmed_short");
+        String systemCommentKey = discrepancy.systemCommentKey();
+        if (systemCommentKey != null && !systemCommentKey.isBlank()) {
+            String[] params = parseSystemCommentParams(discrepancy.systemCommentParams());
+            String localized = params.length == 0
+                ? I18n.get(systemCommentKey)
+                : I18n.format(systemCommentKey, (Object[]) params);
+            if (!localized.startsWith("!")) {
+                return localized;
+            }
         }
 
-        return comment;
+        return "";
+    }
+
+    private String[] parseSystemCommentParams(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return new String[0];
+        }
+        return raw.split("\\|", -1);
     }
 
     private void showUsersPane() {
@@ -2699,19 +2964,36 @@ public class DesktopClientApplication extends Application {
         }));
     }
 
-    private void loadTasks(TableView<com.wmsdipl.desktop.model.Task> table, String receiptFilter) {
+    private void loadTasks(TableView<com.wmsdipl.desktop.model.Task> table, String receiptFilter, String taskIdFilter) {
         Long receiptId = null;
         if (receiptFilter != null && !receiptFilter.isBlank()) {
             try {
                 receiptId = Long.parseLong(receiptFilter.trim());
+                if (receiptId <= 0) {
+                    throw new NumberFormatException("receiptId must be > 0");
+                }
             } catch (NumberFormatException ex) {
                 table.setPlaceholder(new Label(I18n.get("placeholder.invalid_receipt")));
                 table.setItems(FXCollections.observableArrayList());
                 return;
             }
         }
+        Long taskId = null;
+        if (taskIdFilter != null && !taskIdFilter.isBlank()) {
+            try {
+                taskId = Long.parseLong(taskIdFilter.trim());
+                if (taskId <= 0) {
+                    throw new NumberFormatException("taskId must be > 0");
+                }
+            } catch (NumberFormatException ex) {
+                table.setPlaceholder(new Label(I18n.get("placeholder.invalid_task_id")));
+                table.setItems(FXCollections.observableArrayList());
+                return;
+            }
+        }
         final Long rid = receiptId;
-        loadList(table, () -> apiClient.listTasks(rid));
+        final Long tid = taskId;
+        loadList(table, () -> apiClient.listTasksFiltered(null, null, null, rid, tid, 0, 200, "priority,desc"));
     }
 
     private void showTerminalPane() {
@@ -2824,15 +3106,61 @@ public class DesktopClientApplication extends Application {
         refreshBtn.getStyleClass().add("refresh-btn");
         refreshBtn.setPrefHeight(48);
 
+        TextField taskIdFilterField = new TextField();
+        taskIdFilterField.setPromptText(I18n.get("terminal.filter.task_id"));
+        taskIdFilterField.setPrefWidth(180);
+        taskIdFilterField.setPrefHeight(40);
+
+        CheckBox onlyUnfinishedCheck = new CheckBox(I18n.get("terminal.filter.only_unfinished"));
+        onlyUnfinishedCheck.setSelected(true);
+        onlyUnfinishedCheck.getStyleClass().add("form-label");
+
+        java.util.function.Supplier<Long> parseTaskIdFilter = () -> {
+            String rawValue = taskIdFilterField.getText();
+            if (rawValue == null || rawValue.isBlank()) {
+                return null;
+            }
+            try {
+                long parsed = Long.parseLong(rawValue.trim());
+                if (parsed <= 0) {
+                    throw new NumberFormatException("taskId must be > 0");
+                }
+                return parsed;
+            } catch (NumberFormatException ex) {
+                throw new IllegalArgumentException(I18n.get("placeholder.invalid_task_id"));
+            }
+        };
+
+        Function<List<com.wmsdipl.desktop.model.Task>, List<com.wmsdipl.desktop.model.Task>> applyTerminalStatusFilter = tasks -> {
+            if (tasks == null) {
+                return List.of();
+            }
+            if (!onlyUnfinishedCheck.isSelected()) {
+                return tasks;
+            }
+            return tasks.stream()
+                .filter(task -> !isTerminalFinishedStatus(task.status()))
+                .toList();
+        };
+
         // Load my tasks
         Runnable loadMyTasks = () -> {
             String currentUser = apiClient.getCurrentUsername();
             if (currentUser != null) {
+                final Long taskIdFilter;
+                try {
+                    taskIdFilter = parseTaskIdFilter.get();
+                } catch (IllegalArgumentException ex) {
+                    taskTable.setPlaceholder(new Label(ex.getMessage()));
+                    taskTable.setItems(FXCollections.observableArrayList());
+                    return;
+                }
                 CompletableFuture.supplyAsync(() -> {
                 try {
-                    return apiClient.listTasksFiltered(currentUser, null, null, null, 0, 200, "priority,desc").stream()
+                    List<com.wmsdipl.desktop.model.Task> tasks = apiClient.listTasksFiltered(currentUser, null, null, null, taskIdFilter, 0, 200, "priority,desc").stream()
                         .filter(t -> "RECEIVING".equals(t.taskType()) || "PLACEMENT".equals(t.taskType()) || "SHIPPING".equals(t.taskType()))
                         .collect(Collectors.toList());
+                    return applyTerminalStatusFilter.apply(tasks);
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
@@ -2851,27 +3179,36 @@ public class DesktopClientApplication extends Application {
         final TableView<com.wmsdipl.desktop.model.Task> finalAllTasksTable = allTasksTable;
         Runnable loadAllTasks = () -> {
             if (finalAllTasksTable == null) return;
+            final Long taskIdFilter;
+            try {
+                taskIdFilter = parseTaskIdFilter.get();
+            } catch (IllegalArgumentException ex) {
+                finalAllTasksTable.setPlaceholder(new Label(ex.getMessage()));
+                finalAllTasksTable.setItems(FXCollections.observableArrayList());
+                return;
+            }
             CompletableFuture.supplyAsync(() -> {
                 try {
                     String currentUser = apiClient.getCurrentUsername();
                     String currentRole = apiClient.getCurrentUser().role();
                     List<com.wmsdipl.desktop.model.Task> tasks;
                     if ("ADMIN".equalsIgnoreCase(currentRole) || "SUPERVISOR".equalsIgnoreCase(currentRole)) {
-                        tasks = apiClient.listTasksFiltered(null, null, null, null, 0, 200, "priority,desc");
+                        tasks = apiClient.listTasksFiltered(null, null, null, null, taskIdFilter, 0, 200, "priority,desc");
                     } else {
                         List<com.wmsdipl.desktop.model.Task> newTasks =
-                            apiClient.listTasksFiltered(null, "NEW", null, null, 0, 200, "priority,desc");
+                            apiClient.listTasksFiltered(null, "NEW", null, null, taskIdFilter, 0, 200, "priority,desc");
                         List<com.wmsdipl.desktop.model.Task> myTasks =
-                            apiClient.listTasksFiltered(currentUser, null, null, null, 0, 200, "priority,desc");
+                            apiClient.listTasksFiltered(currentUser, null, null, null, taskIdFilter, 0, 200, "priority,desc");
                         tasks = java.util.stream.Stream.concat(newTasks.stream(), myTasks.stream())
                             .collect(Collectors.toMap(com.wmsdipl.desktop.model.Task::id, t -> t, (a, b) -> a))
                             .values()
                             .stream()
                             .toList();
                     }
-                    return tasks.stream()
+                    List<com.wmsdipl.desktop.model.Task> filteredByType = tasks.stream()
                         .filter(t -> "RECEIVING".equals(t.taskType()) || "PLACEMENT".equals(t.taskType()) || "SHIPPING".equals(t.taskType()))
                         .toList();
+                    return applyTerminalStatusFilter.apply(filteredByType);
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
@@ -2903,7 +3240,29 @@ public class DesktopClientApplication extends Application {
             }
         });
 
-        VBox layout = new VBox(12, header, refreshBtn, filterTabs);
+        onlyUnfinishedCheck.selectedProperty().addListener((obs, oldVal, newVal) -> {
+            if (filterTabs.getSelectionModel().getSelectedItem() == myTasksTab) {
+                loadMyTasks.run();
+            } else if (filterTabs.getSelectionModel().getSelectedItem() == finalAllTasksTab) {
+                loadAllTasks.run();
+            }
+        });
+
+        taskIdFilterField.setOnAction(e -> refreshBtn.fire());
+        PauseTransition terminalTaskIdDebounce = new PauseTransition(Duration.millis(250));
+        terminalTaskIdDebounce.setOnFinished(event -> {
+            if (filterTabs.getSelectionModel().getSelectedItem() == myTasksTab) {
+                loadMyTasks.run();
+            } else if (filterTabs.getSelectionModel().getSelectedItem() == finalAllTasksTab) {
+                loadAllTasks.run();
+            }
+        });
+        taskIdFilterField.textProperty().addListener((obs, oldValue, newValue) -> terminalTaskIdDebounce.playFromStart());
+
+        HBox controls = new HBox(10, taskIdFilterField, refreshBtn, onlyUnfinishedCheck);
+        controls.setAlignment(Pos.CENTER_LEFT);
+
+        VBox layout = new VBox(12, header, controls, filterTabs);
         layout.setPadding(new Insets(24));
         layout.getStyleClass().add("page-root");
         VBox.setVgrow(filterTabs, Priority.ALWAYS);
@@ -2923,18 +3282,20 @@ public class DesktopClientApplication extends Application {
         enableAutoColumnSizing(skuTable);
         skuTable.setPlaceholder(new Label(I18n.get("common.no_data")));
         skuTable.setPrefHeight(400);
+        Runnable reloadSkus = () -> loadList(skuTable, () -> apiClient.listSkus());
         skuTable.getColumns().addAll(
             column(I18n.get("skus.table.id"), Sku::id),
             column(I18n.get("skus.table.code"), Sku::code),
             column(I18n.get("skus.table.name"), Sku::name),
-            column(I18n.get("skus.table.uom"), Sku::uom)
+            column(I18n.get("skus.table.uom"), Sku::uom),
+            column(I18n.get("skus.table.status"), s -> translateStatus(s.status()))
         );
         
         Button refreshSku = new Button(I18n.get("btn.refresh"));
         refreshSku.getStyleClass().add("refresh-btn");
         refreshSku.setPrefHeight(48);
         refreshSku.setPrefWidth(150);
-        refreshSku.setOnAction(e -> loadList(skuTable, () -> apiClient.listSkus()));
+        refreshSku.setOnAction(e -> reloadSkus.run());
         
         Button createSku = new Button(I18n.get("skus.btn.create"));
         createSku.getStyleClass().add("refresh-btn");
@@ -2953,28 +3314,51 @@ public class DesktopClientApplication extends Application {
         unitsSku.setPrefHeight(48);
         unitsSku.setPrefWidth(220);
         unitsSku.setDisable(true);
+
+        Button approveDraftSku = new Button(I18n.get("skus.btn.approve_draft"));
+        approveDraftSku.getStyleClass().add("refresh-btn");
+        approveDraftSku.setPrefHeight(48);
+        approveDraftSku.setPrefWidth(190);
+        approveDraftSku.setDisable(true);
+
+        Button rejectDraftSku = new Button(I18n.get("skus.btn.reject_draft"));
+        rejectDraftSku.getStyleClass().add("refresh-btn");
+        rejectDraftSku.setPrefHeight(48);
+        rejectDraftSku.setPrefWidth(190);
+        rejectDraftSku.setDisable(true);
         
         skuTable.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
             deleteSku.setDisable(newV == null);
             unitsSku.setDisable(newV == null);
+            boolean draftSelected = newV != null && "DRAFT".equalsIgnoreCase(newV.status());
+            approveDraftSku.setDisable(!draftSelected);
+            rejectDraftSku.setDisable(!draftSelected);
         });
         
         deleteSku.setOnAction(e -> {
             Sku selected = skuTable.getSelectionModel().getSelectedItem();
-            if (selected != null) {
-                CompletableFuture.runAsync(() -> {
-                    try {
-                        apiClient.deleteSku(selected.id());
-                    } catch (Exception ex) {
-                        throw new RuntimeException(ex);
-                    }
-                }).whenComplete((v, error) -> Platform.runLater(() -> {
-                    if (error != null) {
-                        showError(I18n.format("common.error", error.getMessage()));
-                    }
-                    loadList(skuTable, () -> apiClient.listSkus());
-                }));
+            if (selected == null) {
+                return;
             }
+            if (!showConfirm(
+                I18n.get("common.confirm_title"),
+                I18n.format("skus.delete.confirm", selected.code()))
+            ) {
+                return;
+            }
+            CompletableFuture.runAsync(() -> {
+                try {
+                    apiClient.deleteSku(selected.id());
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((v, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    String message = error.getCause() != null ? error.getCause().getMessage() : error.getMessage();
+                    showError(I18n.format("common.error", message));
+                }
+                reloadSkus.run();
+            }));
         });
 
         unitsSku.setOnAction(e -> {
@@ -2983,8 +3367,50 @@ public class DesktopClientApplication extends Application {
                 showSkuUnitConfigsDialog(selected);
             }
         });
+
+        approveDraftSku.setOnAction(e -> {
+            Sku selected = skuTable.getSelectionModel().getSelectedItem();
+            if (selected == null || !"DRAFT".equalsIgnoreCase(selected.status())) {
+                return;
+            }
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.approveDraftSku(selected.id());
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((updated, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    showError(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                } else if (updated != null) {
+                    showInfo(I18n.format("skus.status.approved", updated.code()));
+                }
+                reloadSkus.run();
+            }));
+        });
+
+        rejectDraftSku.setOnAction(e -> {
+            Sku selected = skuTable.getSelectionModel().getSelectedItem();
+            if (selected == null || !"DRAFT".equalsIgnoreCase(selected.status())) {
+                return;
+            }
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.rejectDraftSku(selected.id());
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((updated, error) -> Platform.runLater(() -> {
+                if (error != null) {
+                    showError(I18n.format("common.error", error.getCause() != null ? error.getCause().getMessage() : error.getMessage()));
+                } else if (updated != null) {
+                    showInfo(I18n.format("skus.status.rejected", updated.code()));
+                }
+                reloadSkus.run();
+            }));
+        });
         
-        HBox buttons = new HBox(10, refreshSku, createSku, unitsSku, deleteSku);
+        HBox buttons = new HBox(10, refreshSku, createSku, unitsSku, approveDraftSku, rejectDraftSku, deleteSku);
         buttons.setPadding(new Insets(10, 0, 10, 0));
         
         VBox layout = new VBox(15, header, buttons, skuTable);
@@ -2993,7 +3419,7 @@ public class DesktopClientApplication extends Application {
         layout.setFillWidth(true);
         
         setContent(layout);
-        loadList(skuTable, () -> apiClient.listSkus());
+        reloadSkus.run();
     }
 
     private void showSkuUnitConfigsDialog(Sku sku) {
@@ -3483,12 +3909,10 @@ public class DesktopClientApplication extends Application {
             })
             .whenComplete((list, error) -> Platform.runLater(() -> {
                 if (error != null) {
-                    markSyncFailure();
                     table.setPlaceholder(new Label(I18n.format("common.error", error.getMessage())));
                     table.setItems(FXCollections.observableArrayList());
                     return;
                 }
-                markSyncSuccess();
                 table.setItems(FXCollections.observableArrayList(list));
             }));
     }
@@ -3502,10 +3926,7 @@ public class DesktopClientApplication extends Application {
             }
         }).whenComplete((v, error) -> Platform.runLater(() -> {
             if (error != null) {
-                markSyncFailure();
                 showError(I18n.format("common.error", error.getMessage()));
-            } else {
-                markSyncSuccess();
             }
             loadReceipts(table, "");
         }));
@@ -3704,8 +4125,6 @@ public class DesktopClientApplication extends Application {
 
         // Tab 2: Fact (scan form)
         Tab factTab = new Tab(I18n.get("task_exec.tab.fact"));
-        VBox factContent = buildFactTab(currentTask[0], dialog);
-        factTab.setContent(factContent);
 
         tabs.getTabs().addAll(docTab, factTab);
         tabs.getSelectionModel().select(factTab); // Start on Fact tab
@@ -3746,7 +4165,7 @@ public class DesktopClientApplication extends Application {
             if (isOperator) {
                 assignBtn.setDisable(!"NEW".equals(status));
             } else {
-                assignBtn.setDisable(!"NEW".equals(status) && !"ASSIGNED".equals(status) && !"IN_PROGRESS".equals(status));
+                assignBtn.setDisable(!"NEW".equals(status) && !"ASSIGNED".equals(status));
             }
 
             startBtn.setDisable(!"ASSIGNED".equals(status) || !currentUser.equals(assignee));
@@ -3754,16 +4173,28 @@ public class DesktopClientApplication extends Application {
             releaseBtn.setDisable(!("ASSIGNED".equals(status) || "IN_PROGRESS".equals(status)) || !currentUser.equals(assignee));
         };
         updateButtons.run();
+
+        @SuppressWarnings("unchecked")
+        final java.util.function.Consumer<com.wmsdipl.desktop.model.Task>[] refreshTaskState =
+            new java.util.function.Consumer[1];
+        refreshTaskState[0] = updatedTask -> {
+            currentTask[0] = updatedTask;
+            updateButtons.run();
+            updateTitle.run();
+            refreshTaskDocumentTab(docTab, currentTask[0]);
+            factTab.setContent(buildFactTab(currentTask[0], dialog, refreshTaskState[0]));
+        };
+        factTab.setContent(buildFactTab(currentTask[0], dialog, refreshTaskState[0]));
         
         // Assign action
         assignBtn.setOnAction(e -> {
             String userRole = apiClient.getCurrentUser().role();
             if ("OPERATOR".equalsIgnoreCase(userRole)) {
                 if ("NEW".equals(currentTask[0].status())) {
-                    assignToSelf(currentTask, assignBtn, actionStatus, updateButtons, updateTitle, docTab, factTab, dialog);
+                    assignToSelf(currentTask, assignBtn, actionStatus, refreshTaskState[0], dialog);
                 }
             } else {
-                showAssignDialog(currentTask, assignBtn, actionStatus, updateButtons, updateTitle, docTab, factTab, dialog);
+                showAssignDialog(currentTask, assignBtn, actionStatus, refreshTaskState[0], dialog);
             }
         });
         
@@ -3783,13 +4214,9 @@ public class DesktopClientApplication extends Application {
                     actionStatus.setStyle("-fx-text-fill: #F44336; -fx-font-size: 14px;");
                     startBtn.setDisable(false);
                 } else {
-                    currentTask[0] = updatedTask;
                     actionStatus.setText(I18n.get("task_exec.status.started"));
                     actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
-                    updateButtons.run();
-                    updateTitle.run();
-                    refreshTaskDocumentTab(docTab, currentTask[0]);
-                    factTab.setContent(buildFactTab(currentTask[0], dialog));
+                    refreshTaskState[0].accept(updatedTask);
                 }
             }));
         });
@@ -3874,14 +4301,9 @@ public class DesktopClientApplication extends Application {
                             actionStatus.setStyle("-fx-text-fill: #F44336; -fx-font-size: 14px;");
                             completeBtn.setDisable(false);
                         } else {
-                            currentTask[0] = updatedTask;
                             actionStatus.setText(I18n.get("task_exec.status.completed"));
                             actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
-                            updateButtons.run();
-                            updateTitle.run();
-                            refreshTaskDocumentTab(docTab, currentTask[0]);
-                            // Rebuild Fact tab to refresh scan table with updated discrepancy flags
-                            factTab.setContent(buildFactTab(currentTask[0], dialog));
+                            refreshTaskState[0].accept(updatedTask);
                         }
                     }));
                 }));
@@ -3904,12 +4326,9 @@ public class DesktopClientApplication extends Application {
                     actionStatus.setStyle("-fx-text-fill: #F44336; -fx-font-size: 14px;");
                     releaseBtn.setDisable(false);
                 } else {
-                    currentTask[0] = updatedTask;
                     actionStatus.setText(I18n.get("task_exec.status.released"));
                     actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
-                    updateButtons.run();
-                    updateTitle.run();
-                    refreshTaskDocumentTab(docTab, currentTask[0]);
+                    refreshTaskState[0].accept(updatedTask);
                 }
             }));
         });
@@ -4029,7 +4448,11 @@ public class DesktopClientApplication extends Application {
         return I18n.get("common.no_data");
     }
 
-    private VBox buildFactTab(com.wmsdipl.desktop.model.Task task, Stage dialog) {
+    private VBox buildFactTab(
+        com.wmsdipl.desktop.model.Task task,
+        Stage dialog,
+        java.util.function.Consumer<com.wmsdipl.desktop.model.Task> onTaskUpdated
+    ) {
         VBox content = new VBox(16);
         content.setPadding(new Insets(0, 16, 16, 16));
         content.getStyleClass().add("dialog-surface");
@@ -4154,13 +4577,21 @@ public class DesktopClientApplication extends Application {
         submitBtn.setPrefHeight(48);
         submitBtn.setPrefWidth(200);
 
+        Button undoBtn = new Button(I18n.get("fact_tab.undo"));
+        undoBtn.getStyleClass().add("refresh-btn");
+        undoBtn.setPrefHeight(48);
+        undoBtn.setPrefWidth(200);
+
         // Disable all fields if task is not STARTED
         boolean isStarted = "IN_PROGRESS".equals(task.status());
+        String currentUser = apiClient.getCurrentUsername();
+        boolean isAssignee = currentUser != null && currentUser.equals(task.assignee());
         palletField.setDisable(!isStarted);
         barcodeField.setDisable(!isStarted);
         qtyField.setDisable(!isStarted);
         commentField.setDisable(!isStarted);
         submitBtn.setDisable(!isStarted);
+        undoBtn.setDisable(!(isStarted && isAssignee));
         damageCheckBox.setDisable(!isStarted);
         lotNumberField.setDisable(!isStarted);
         expiryDatePicker.setDisable(!isStarted);
@@ -4286,6 +4717,62 @@ public class DesktopClientApplication extends Application {
             }));
         });
 
+        undoBtn.setOnAction(e -> {
+            statusLabel.setText(I18n.get("fact_tab.undo.loading"));
+            undoBtn.setDisable(true);
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return apiClient.getTaskScans(task.id());
+                } catch (Exception ex) {
+                    throw new RuntimeException(ex);
+                }
+            }).whenComplete((scans, loadError) -> Platform.runLater(() -> {
+                if (loadError != null) {
+                    showError(statusLabel, I18n.format("common.error", loadError.getMessage()), palletField);
+                    undoBtn.setDisable(!(isStarted && isAssignee));
+                    return;
+                }
+                if (scans == null || scans.isEmpty()) {
+                    showError(statusLabel, I18n.get("fact_tab.undo.no_scans"), palletField);
+                    undoBtn.setDisable(!(isStarted && isAssignee));
+                    return;
+                }
+
+                Scan lastScan = scans.get(0);
+                boolean confirmed = showConfirm(
+                    I18n.get("fact_tab.undo.confirm_title"),
+                    I18n.format(
+                        "fact_tab.undo.confirm_message",
+                        summarizeLastScan(lastScan)
+                    )
+                );
+                if (!confirmed) {
+                    statusLabel.setText(I18n.get("task_exec.status.cancelled"));
+                    statusLabel.setStyle("-fx-text-fill: #FFC107; -fx-font-size: 14px;");
+                    undoBtn.setDisable(!(isStarted && isAssignee));
+                    return;
+                }
+
+                statusLabel.setText(I18n.get("fact_tab.undo.processing"));
+                CompletableFuture.supplyAsync(() -> {
+                    try {
+                        apiClient.undoLastScan(task.id());
+                        return apiClient.getTask(task.id());
+                    } catch (Exception ex) {
+                        throw new RuntimeException(ex);
+                    }
+                }).whenComplete((updatedTask, undoError) -> Platform.runLater(() -> {
+                    if (undoError != null) {
+                        showError(statusLabel, I18n.format("common.error", undoError.getMessage()), palletField);
+                        undoBtn.setDisable(!(isStarted && isAssignee));
+                        return;
+                    }
+                    showSuccess(statusLabel, I18n.get("fact_tab.undo.success"), palletField);
+                    onTaskUpdated.accept(updatedTask);
+                }));
+            }));
+        });
+
         // Load initial scans
         loadTaskScans(task, scanTable);
 
@@ -4299,6 +4786,7 @@ public class DesktopClientApplication extends Application {
                 locationLabel, locationField,
                 commentLabel, commentField,
                 submitBtn,
+                undoBtn,
                 statusLabel
             );
         } else if (isShippingTask) {
@@ -4308,6 +4796,7 @@ public class DesktopClientApplication extends Application {
                 qtyLabel, qtyField,
                 commentLabel, commentField,
                 submitBtn,
+                undoBtn,
                 statusLabel
             );
         } else {
@@ -4319,6 +4808,7 @@ public class DesktopClientApplication extends Application {
                 lotHeaderLabel, lotNumberField, expiryDatePicker,
                 commentLabel, commentField,
                 submitBtn,
+                undoBtn,
                 statusLabel
             );
         }
@@ -4361,6 +4851,17 @@ public class DesktopClientApplication extends Application {
                 table.setItems(FXCollections.observableArrayList(scans));
             }
         }));
+    }
+
+    private String summarizeLastScan(Scan scan) {
+        if (scan == null) {
+            return I18n.get("common.no_data");
+        }
+        String pallet = scan.palletCode() != null ? scan.palletCode() : "-";
+        String barcode = scan.barcode() != null ? scan.barcode() : "-";
+        String qty = scan.qty() != null ? scan.qty().toString() : "0";
+        String time = scan.scannedAt() != null ? scan.scannedAt().toString() : "-";
+        return I18n.format("fact_tab.undo.scan_summary", pallet, barcode, qty, time);
     }
 
     private void showSuccess(Label label, String message, TextField field) {
@@ -5143,6 +5644,11 @@ public class DesktopClientApplication extends Application {
         VBox analyticsBox = new VBox(16);
         analyticsBox.setPadding(new Insets(16));
         analyticsBox.getStyleClass().add("analytics-box");
+        ScrollPane analyticsScroll = new ScrollPane(analyticsBox);
+        analyticsScroll.setFitToWidth(true);
+        analyticsScroll.setFitToHeight(false);
+        analyticsScroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+        analyticsScroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.ALWAYS);
 
         Runnable loadAnalytics = () -> {
             LocalDate fromDate = fromDatePicker.getValue();
@@ -5236,16 +5742,15 @@ public class DesktopClientApplication extends Application {
                 );
                 keyMetricsRow.setAlignment(Pos.CENTER_LEFT);
 
-                HBox chartsRow = new HBox(
-                    16,
-                    createAnalyticsChartBox(I18n.get("analytics.lbl.receipts_by_status"), receiptsByStatus),
-                    createAnalyticsChartBox(I18n.get("analytics.lbl.discrepancies"), discrepanciesByType),
-                    createAnalyticsChartBox(I18n.get("analytics.lbl.pallets_by_status"), palletsByStatus)
-                );
-                chartsRow.setAlignment(Pos.TOP_LEFT);
-                chartsRow.setFillHeight(true);
+                VBox receiptsChartBox = createAnalyticsChartBox(I18n.get("analytics.lbl.receipts_by_status"), receiptsByStatus);
+                VBox discrepanciesChartBox = createAnalyticsChartBox(I18n.get("analytics.lbl.discrepancies"), discrepanciesByType);
+                VBox palletsChartBox = createAnalyticsChartBox(I18n.get("analytics.lbl.pallets_by_status"), palletsByStatus);
+                FlowPane chartsPane = new FlowPane(16, 16);
+                chartsPane.setAlignment(Pos.TOP_LEFT);
+                chartsPane.setPrefWrapLength(1180);
+                chartsPane.getChildren().addAll(receiptsChartBox, discrepanciesChartBox, palletsChartBox);
 
-                analyticsBox.getChildren().addAll(periodLabel, keyMetricsRow, chartsRow);
+                analyticsBox.getChildren().addAll(periodLabel, keyMetricsRow, chartsPane);
             }));
         };
 
@@ -5286,10 +5791,10 @@ public class DesktopClientApplication extends Application {
         });
         loadAnalytics.run(); // Initial load
 
-        VBox layout = new VBox(16, header, controls, analyticsBox);
+        VBox layout = new VBox(16, header, controls, analyticsScroll);
         layout.setPadding(new Insets(24));
         layout.getStyleClass().add("page-root");
-        VBox.setVgrow(analyticsBox, Priority.ALWAYS);
+        VBox.setVgrow(analyticsScroll, Priority.ALWAYS);
 
         setContent(layout);
     }
@@ -5329,14 +5834,19 @@ public class DesktopClientApplication extends Application {
             VBox box = new VBox(8, titleLabel, emptyLabel);
             box.getStyleClass().add("chart-card");
             box.setPadding(new Insets(12));
-            box.setPrefWidth(320);
+            box.setMinWidth(360);
+            box.setPrefWidth(380);
+            box.setMinHeight(220);
             return box;
         }
 
         PieChart chart = new PieChart();
         chart.setLabelsVisible(true);
         chart.setLegendVisible(false);
-        chart.setPrefSize(300, 250);
+        chart.setLabelLineLength(24);
+        chart.setMinSize(320, 240);
+        chart.setPrefSize(360, 280);
+        chart.setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
         values.forEach((key, count) -> chart.getData().add(new PieChart.Data(key + " (" + count + ")", count)));
 
         VBox details = new VBox(4);
@@ -5349,7 +5859,11 @@ public class DesktopClientApplication extends Application {
         VBox box = new VBox(8, titleLabel, chart, details);
         box.getStyleClass().add("chart-card");
         box.setPadding(new Insets(12));
-        box.setPrefWidth(320);
+        box.setMinWidth(360);
+        box.setPrefWidth(380);
+        box.setMinHeight(420);
+        box.setPrefHeight(440);
+        box.setMaxWidth(Double.MAX_VALUE);
         return box;
     }
 
@@ -5417,8 +5931,13 @@ public class DesktopClientApplication extends Application {
         return comboBox;
     }
 
-    private void showAssignDialog(com.wmsdipl.desktop.model.Task[] currentTaskWrapper, Button assignBtn, Label actionStatus, 
-                                  Runnable updateButtons, Runnable updateTitle, Tab docTab, Tab factTab, Stage parentDialog) {
+    private void showAssignDialog(
+        com.wmsdipl.desktop.model.Task[] currentTaskWrapper,
+        Button assignBtn,
+        Label actionStatus,
+        java.util.function.Consumer<com.wmsdipl.desktop.model.Task> onTaskUpdated,
+        Stage parentDialog
+    ) {
         Stage dialog = new Stage();
         dialog.setTitle(I18n.get("assign.title"));
         dialog.initModality(Modality.APPLICATION_MODAL);
@@ -5462,10 +5981,7 @@ public class DesktopClientApplication extends Application {
                     currentTaskWrapper[0] = updatedTask;
                     actionStatus.setText(I18n.format("assign.status.success", updatedTask.assignee()));
                     actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
-                    updateButtons.run();
-                    updateTitle.run();
-                    refreshTaskDocumentTab(docTab, updatedTask);
-                    factTab.setContent(buildFactTab(updatedTask, parentDialog));
+                    onTaskUpdated.accept(updatedTask);
                 }
             }));
         });
@@ -5477,8 +5993,13 @@ public class DesktopClientApplication extends Application {
         dialog.show();
     }
 
-    private void assignToSelf(com.wmsdipl.desktop.model.Task[] currentTaskWrapper, Button assignBtn, Label actionStatus,
-                              Runnable updateButtons, Runnable updateTitle, Tab docTab, Tab factTab, Stage dialog) {
+    private void assignToSelf(
+        com.wmsdipl.desktop.model.Task[] currentTaskWrapper,
+        Button assignBtn,
+        Label actionStatus,
+        java.util.function.Consumer<com.wmsdipl.desktop.model.Task> onTaskUpdated,
+        Stage dialog
+    ) {
         assignBtn.setDisable(true);
         actionStatus.setText(I18n.get("assign.status.assigning"));
         CompletableFuture.supplyAsync(() -> {
@@ -5496,10 +6017,7 @@ public class DesktopClientApplication extends Application {
                 currentTaskWrapper[0] = updatedTask;
                 actionStatus.setText(I18n.get("assign.status.success_self"));
                 actionStatus.setStyle("-fx-text-fill: #4CAF50; -fx-font-size: 14px;");
-                updateButtons.run();
-                updateTitle.run();
-                refreshTaskDocumentTab(docTab, updatedTask);
-                factTab.setContent(buildFactTab(updatedTask, dialog));
+                onTaskUpdated.accept(updatedTask);
             }
         }));
     }
@@ -5560,9 +6078,14 @@ public class DesktopClientApplication extends Application {
                 } else {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> map = (Map<String, Object>) result;
-                    showInfo(I18n.format("bulk.assign.success", map.get("successCount")));
+                    int successCount = extractCollectionSize(map, "successes");
+                    int failureCount = extractCollectionSize(map, "failures");
+                    String failureDetails = formatBulkFailures(map.get("failures"));
+                    showInfo(I18n.format("bulk.assign.success", successCount)
+                        + (failureCount > 0 ? " | failed: " + failureCount : "")
+                        + (failureDetails.isBlank() ? "" : "\n" + failureDetails));
                     dialog.close();
-                    loadTasks(taskTable, null);
+                    loadTasks(taskTable, null, null);
                 }
             }));
         });
@@ -5606,9 +6129,14 @@ public class DesktopClientApplication extends Application {
                 } else {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> map = (Map<String, Object>) result;
-                    showInfo(I18n.format("bulk.priority.success", map.get("successCount")));
+                    int successCount = extractCollectionSize(map, "successes");
+                    int failureCount = extractCollectionSize(map, "failures");
+                    String failureDetails = formatBulkFailures(map.get("failures"));
+                    showInfo(I18n.format("bulk.priority.success", successCount)
+                        + (failureCount > 0 ? " | failed: " + failureCount : "")
+                        + (failureDetails.isBlank() ? "" : "\n" + failureDetails));
                     dialog.close();
-                    loadTasks(taskTable, null);
+                    loadTasks(taskTable, null, null);
                 }
             }));
         });
@@ -5646,9 +6174,14 @@ public class DesktopClientApplication extends Application {
                 } else {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> map = (Map<String, Object>) result;
-                    showInfo(I18n.format("bulk.cancel.success", map.get("successCount")));
+                    int successCount = extractCollectionSize(map, "successes");
+                    int failureCount = extractCollectionSize(map, "failures");
+                    String failureDetails = formatBulkFailures(map.get("failures"));
+                    showInfo(I18n.format("bulk.cancel.success", successCount)
+                        + (failureCount > 0 ? " | failed: " + failureCount : "")
+                        + (failureDetails.isBlank() ? "" : "\n" + failureDetails));
                     dialog.close();
-                    loadTasks(taskTable, null);
+                    loadTasks(taskTable, null, null);
                 }
             }));
         });
@@ -5761,11 +6294,6 @@ public class DesktopClientApplication extends Application {
         Label header = new Label(I18n.get("pallet.bulk.header"));
         header.getStyleClass().add("sub-header");
 
-        Label prefixLabel = new Label(I18n.get("pallet.bulk.prefix_label"));
-        prefixLabel.getStyleClass().add("form-label");
-        TextField prefixField = new TextField("PLT");
-        prefixField.setPrefHeight(40);
-
         Label startLabel = new Label(I18n.get("pallet.bulk.start_label"));
         startLabel.getStyleClass().add("form-label");
         TextField startField = new TextField("100");
@@ -5776,17 +6304,52 @@ public class DesktopClientApplication extends Application {
         TextField countField = new TextField("50");
         countField.setPrefHeight(40);
 
+        Label rangePreviewLabel = new Label("");
+        rangePreviewLabel.getStyleClass().add("form-hint");
+
+        Runnable updateRangePreview = () -> {
+            try {
+                int start = Integer.parseInt(startField.getText().trim());
+                int count = Integer.parseInt(countField.getText().trim());
+                if (start < 1 || count < 1) {
+                    rangePreviewLabel.setText("");
+                    return;
+                }
+                String from = formatBulkPalletCode(start);
+                String to = formatBulkPalletCode(start + count - 1);
+                rangePreviewLabel.setText(I18n.format("pallet.bulk.range_preview", from, to));
+            } catch (Exception ex) {
+                rangePreviewLabel.setText("");
+            }
+        };
+        startField.textProperty().addListener((obs, oldValue, newValue) -> updateRangePreview.run());
+        countField.textProperty().addListener((obs, oldValue, newValue) -> updateRangePreview.run());
+
         Button createBtn = new Button(I18n.get("pallet.bulk.create_button"));
         createBtn.getStyleClass().add("btn-success");
         createBtn.setPrefHeight(40);
         createBtn.setOnAction(e -> {
-            String prefix = prefixField.getText().trim();
-            Integer start = Integer.parseInt(startField.getText().trim());
-            Integer count = Integer.parseInt(countField.getText().trim());
+            int start;
+            int count;
+            try {
+                start = Integer.parseInt(startField.getText().trim());
+                count = Integer.parseInt(countField.getText().trim());
+            } catch (NumberFormatException ex) {
+                showError(I18n.get("pallet.bulk.error.numeric"));
+                return;
+            }
+            if (start < 1) {
+                showError(I18n.get("pallet.bulk.error.start_min"));
+                return;
+            }
+            if (count < 1) {
+                showError(I18n.get("pallet.bulk.error.count_min"));
+                return;
+            }
             
             CompletableFuture.supplyAsync(() -> {
                 try {
-                    return apiClient.bulkCreatePallets(prefix, start, count);
+                    return apiClient.bulkCreatePallets(start, count);
                 } catch (Exception ex) {
                     throw new RuntimeException(ex);
                 }
@@ -5796,17 +6359,49 @@ public class DesktopClientApplication extends Application {
                 } else {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> map = (Map<String, Object>) result;
-                    showInfo(I18n.format("pallet.bulk.success", map.get("createdCount")));
+                    int createdCount = extractCollectionSize(map, "created");
+                    int failureCount = extractCollectionSize(map, "failures");
+                    String failureDetails = formatBulkFailures(map.get("failures"));
+                    showInfo(I18n.format("pallet.bulk.success", createdCount)
+                        + (failureCount > 0 ? " | failed: " + failureCount : "")
+                        + (failureDetails.isBlank() ? "" : "\n" + failureDetails));
                     dialog.close();
                 }
             }));
         });
 
-        content.getChildren().addAll(header, prefixLabel, prefixField, startLabel, startField, countLabel, countField, createBtn);
-        Scene scene = new Scene(content, 400, 450);
+        content.getChildren().addAll(header, startLabel, startField, countLabel, countField, rangePreviewLabel, createBtn);
+        Scene scene = new Scene(content, 400, 380);
         applyStyles(scene);
         dialog.setScene(scene);
+        updateRangePreview.run();
         dialog.showAndWait();
+    }
+
+    private String formatBulkPalletCode(int sequence) {
+        return String.format("PLT-%05d", sequence);
+    }
+
+    private int extractCollectionSize(Map<String, Object> payload, String key) {
+        if (payload == null || key == null) {
+            return 0;
+        }
+        Object value = payload.get(key);
+        if (value instanceof List<?> list) {
+            return list.size();
+        }
+        return 0;
+    }
+
+    private String formatBulkFailures(Object value) {
+        if (!(value instanceof List<?> failures) || failures.isEmpty()) {
+            return "";
+        }
+        return failures.stream()
+            .filter(Map.class::isInstance)
+            .map(Map.class::cast)
+            .map(entry -> "id=" + entry.getOrDefault("id", "?") + ": " + entry.getOrDefault("error", "unknown error"))
+            .collect(Collectors.joining("\n"));
     }
 
     private Alert createAlert(AlertType type) {

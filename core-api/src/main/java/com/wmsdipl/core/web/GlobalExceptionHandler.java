@@ -1,6 +1,7 @@
 package com.wmsdipl.core.web;
 
 import com.wmsdipl.core.service.ReceiptAcceptBlockedException;
+import com.wmsdipl.core.service.ReceiptWorkflowBlockedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -37,6 +38,20 @@ public class GlobalExceptionHandler {
         response.put("error", HttpStatus.CONFLICT.getReasonPhrase());
         response.put("message", ex.getMessage());
         response.put("receiptId", ex.getReceiptId());
+        response.put("blockers", ex.getBlockers());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    @ExceptionHandler(ReceiptWorkflowBlockedException.class)
+    public ResponseEntity<Map<String, Object>> handleReceiptWorkflowBlocked(ReceiptWorkflowBlockedException ex) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("timestamp", LocalDateTime.now().toString());
+        response.put("status", HttpStatus.CONFLICT.value());
+        response.put("code", "RECEIPT_WORKFLOW_BLOCKED");
+        response.put("error", HttpStatus.CONFLICT.getReasonPhrase());
+        response.put("message", ex.getMessage());
+        response.put("receiptId", ex.getReceiptId());
+        response.put("operation", ex.getOperation());
         response.put("blockers", ex.getBlockers());
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }

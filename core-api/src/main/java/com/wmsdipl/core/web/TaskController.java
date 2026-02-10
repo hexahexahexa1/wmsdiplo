@@ -3,6 +3,7 @@ package com.wmsdipl.core.web;
 import com.wmsdipl.contracts.dto.RecordScanRequest;
 import com.wmsdipl.contracts.dto.ScanDto;
 import com.wmsdipl.contracts.dto.TaskDto;
+import com.wmsdipl.contracts.dto.UndoLastScanResultDto;
 import com.wmsdipl.core.domain.Scan;
 import com.wmsdipl.core.domain.Task;
 import com.wmsdipl.core.domain.TaskStatus;
@@ -77,9 +78,10 @@ public class TaskController {
             @RequestParam(required = false) TaskStatus status,
             @RequestParam(required = false) TaskType taskType,
             @RequestParam(required = false) Long receiptId,
+            @RequestParam(required = false) Long taskId,
             @PageableDefault(size = 50, sort = "priority") Pageable pageable
     ) {
-        Page<Task> taskPage = taskService.findFiltered(assignee, status, taskType, receiptId, pageable);
+        Page<Task> taskPage = taskService.findFiltered(assignee, status, taskType, receiptId, taskId, pageable);
         List<TaskDto> content = taskMapper.toDtoList(taskPage.getContent());
         return new PageImpl<>(content, taskPage.getPageable(), taskPage.getTotalElements());
     }
@@ -170,6 +172,15 @@ public class TaskController {
     @ApiResponse(responseCode = "404", description = "Task not found")
     public TaskDto release(@PathVariable Long id) {
         return taskMapper.toDto(taskService.release(id));
+    }
+
+    @PostMapping("/{id}/undo-last-scan")
+    @Operation(
+        summary = "Undo last scan",
+        description = "Rolls back the latest scan and all linked stock effects for a task."
+    )
+    public UndoLastScanResultDto undoLastScan(@PathVariable Long id) {
+        return taskService.undoLastScan(id);
     }
 
     @GetMapping("/{id}/scans")

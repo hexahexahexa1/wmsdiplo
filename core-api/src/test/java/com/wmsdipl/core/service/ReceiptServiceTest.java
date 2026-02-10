@@ -12,10 +12,13 @@ import com.wmsdipl.core.domain.Receipt;
 import com.wmsdipl.core.domain.ReceiptLine;
 import com.wmsdipl.core.domain.ReceiptStatus;
 import com.wmsdipl.core.domain.Pallet;
+import com.wmsdipl.core.domain.Sku;
+import com.wmsdipl.core.domain.SkuStatus;
 import com.wmsdipl.core.domain.SkuUnitConfig;
 import com.wmsdipl.core.mapper.ReceiptMapper;
 import com.wmsdipl.core.repository.ReceiptRepository;
 import com.wmsdipl.core.repository.PalletRepository;
+import com.wmsdipl.core.repository.SkuRepository;
 import com.wmsdipl.core.repository.TaskRepository;
 import com.wmsdipl.core.repository.DiscrepancyRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,10 +58,16 @@ class ReceiptServiceTest {
     private PalletRepository palletRepository;
 
     @Mock
+    private SkuRepository skuRepository;
+
+    @Mock
     private TaskRepository taskRepository;
 
     @Mock
     private DiscrepancyRepository discrepancyRepository;
+
+    @Mock
+    private ReceiptWorkflowBlockerService receiptWorkflowBlockerService;
 
     @InjectMocks
     private ReceiptService receiptService;
@@ -106,6 +115,14 @@ class ReceiptServiceTest {
             null,   // outboundRef
             List.of(line)
         );
+
+        Sku activeSku = new Sku();
+        activeSku.setId(100L);
+        activeSku.setCode("SKU001");
+        activeSku.setName("Test SKU");
+        activeSku.setUom("PCS");
+        activeSku.setStatus(SkuStatus.ACTIVE);
+        lenient().when(skuRepository.findById(anyLong())).thenReturn(Optional.of(activeSku));
 
     }
 
@@ -170,6 +187,8 @@ class ReceiptServiceTest {
             new BigDecimal("10"),
             "SSCC001",
             null,
+            null,
+            false,
             null
         );
 
@@ -274,6 +293,8 @@ class ReceiptServiceTest {
             new BigDecimal("12.000"),
             "SSCC-001",
             null,
+            null,
+            false,
             null
         );
 
@@ -391,7 +412,7 @@ class ReceiptServiceTest {
         mockSku.setCode("SKU001");
 
         when(receiptRepository.findByMessageId("MSG001")).thenReturn(Optional.empty());
-        when(skuService.findOrCreate("SKU001", "Product Name", "PCS")).thenReturn(mockSku);
+        when(skuService.findOrCreateActive("SKU001", "Product Name", "PCS")).thenReturn(mockSku);
         when(receiptRepository.save(any(Receipt.class))).thenReturn(testReceipt);
         when(receiptMapper.toDto(any(Receipt.class))).thenReturn(testReceiptDto);
 

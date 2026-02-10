@@ -170,8 +170,12 @@ public class TaskLifecycleService {
                 discrepancy.setResolved(true);
                 discrepancy.setResolvedBy(resolveCurrentUsername(task));
                 discrepancy.setResolvedAt(LocalDateTime.now());
-                discrepancy.setDescription("Shortage confirmed by operator during task completion. " +
-                    "Expected: " + qtyAssigned + ", Received: " + qtyDone);
+                discrepancy.setDescription(null);
+                discrepancy.setSystemCommentKey("discrepancy.journal.comment.system.under_qty_confirmed");
+                discrepancy.setSystemCommentParams(joinParams(
+                    formatDecimal(qtyAssigned),
+                    formatDecimal(qtyDone)
+                ));
 
                 discrepancyRepository.save(discrepancy);
 
@@ -234,5 +238,21 @@ public class TaskLifecycleService {
             return task.getAssignee();
         }
         return "system";
+    }
+
+    private String joinParams(String... values) {
+        if (values == null || values.length == 0) {
+            return null;
+        }
+        return java.util.Arrays.stream(values)
+            .map(v -> v == null ? "" : v)
+            .collect(java.util.stream.Collectors.joining("|"));
+    }
+
+    private String formatDecimal(BigDecimal value) {
+        if (value == null) {
+            return "";
+        }
+        return value.stripTrailingZeros().toPlainString();
     }
 }

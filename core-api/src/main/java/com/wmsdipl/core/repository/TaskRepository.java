@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 
 public interface TaskRepository extends JpaRepository<Task, Long>, JpaSpecificationExecutor<Task> {
@@ -36,4 +37,8 @@ public interface TaskRepository extends JpaRepository<Task, Long>, JpaSpecificat
     List<Task> findByTaskTypeAndClosedAtBetween(TaskType taskType, LocalDateTime from, LocalDateTime to);
 
     long countByTargetLocationIdAndStatusIn(Long targetLocationId, java.util.Collection<TaskStatus> statuses);
+
+    boolean existsByLine_IdIn(Collection<Long> lineIds);
+    boolean existsByReceiptIdAndLine_SkuId(Long receiptId, Long skuId);
+    boolean existsByLine_SkuIdAndStatusIn(Long skuId, Collection<TaskStatus> statuses);
 }

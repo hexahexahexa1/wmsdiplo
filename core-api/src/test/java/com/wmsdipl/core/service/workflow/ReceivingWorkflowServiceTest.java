@@ -6,6 +6,8 @@ import com.wmsdipl.core.domain.*;
 import com.wmsdipl.core.repository.*;
 import com.wmsdipl.core.service.DuplicateScanDetectionService;
 import com.wmsdipl.core.service.ReceiptService;
+import com.wmsdipl.core.service.ReceiptWorkflowBlockerService;
+import com.wmsdipl.core.service.SkuService;
 import com.wmsdipl.core.service.StockMovementService;
 import com.wmsdipl.core.service.TaskLifecycleService;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,11 +51,15 @@ class ReceivingWorkflowServiceTest {
     @Mock
     private SkuRepository skuRepository;
     @Mock
+    private SkuService skuService;
+    @Mock
     private StockMovementService stockMovementService;
     @Mock
     private DuplicateScanDetectionService duplicateScanDetectionService;
     @Mock
     private ReceiptService receiptService;
+    @Mock
+    private ReceiptWorkflowBlockerService receiptWorkflowBlockerService;
 
     @InjectMocks
     private ReceivingWorkflowService receivingWorkflowService;
@@ -196,6 +202,80 @@ class ReceivingWorkflowServiceTest {
 
         assertThrows(org.springframework.web.server.ResponseStatusException.class,
             () -> receivingWorkflowService.recordScan(1L, request));
+    }
+
+    @Test
+    void shouldLinkRejectedScannedSkuAsDraftSkuId_WhenBarcodeMismatch() {
+        testReceipt.setStatus(ReceiptStatus.IN_PROGRESS);
+
+        ReceiptLine line = new ReceiptLine();
+        line.setSkuId(1L);
+        line.setQtyExpected(BigDecimal.TEN);
+        line.setUom("PCS");
+
+        Task task = new Task();
+        task.setTaskType(TaskType.RECEIVING);
+        task.setStatus(TaskStatus.IN_PROGRESS);
+        task.setReceipt(testReceipt);
+        task.setLine(line);
+        task.setQtyAssigned(BigDecimal.TEN);
+        task.setQtyDone(BigDecimal.ZERO);
+        task.setAssignee("operator");
+
+        Pallet pallet = new Pallet();
+        pallet.setCode("PLT-REJ-001");
+        pallet.setQuantity(BigDecimal.ZERO);
+
+        Location receivingLocation = new Location();
+        receivingLocation.setLocationType(LocationType.RECEIVING);
+        receivingLocation.setStatus(LocationStatus.AVAILABLE);
+
+        Sku expectedSku = new Sku();
+        expectedSku.setId(1L);
+        expectedSku.setCode("SKU-EXP-001");
+        expectedSku.setStatus(SkuStatus.ACTIVE);
+
+        Sku rejectedScannedSku = new Sku();
+        rejectedScannedSku.setId(77L);
+        rejectedScannedSku.setCode("SKU-REJ-001");
+        rejectedScannedSku.setStatus(SkuStatus.REJECTED);
+
+        when(taskLifecycleService.getTask(1L)).thenReturn(task);
+        when(duplicateScanDetectionService.checkScan("PLT-REJ-001"))
+            .thenReturn(DuplicateScanDetectionService.ScanResult.valid("PLT-REJ-001"));
+        when(palletRepository.findByCode("PLT-REJ-001")).thenReturn(Optional.of(pallet));
+        when(locationRepository.findFirstByLocationTypeAndStatusAndActiveTrueOrderByIdAsc(
+            LocationType.RECEIVING, LocationStatus.AVAILABLE
+        )).thenReturn(Optional.of(receivingLocation));
+        when(skuRepository.findById(1L)).thenReturn(Optional.of(expectedSku));
+        when(skuRepository.findByCode("SKU-REJ-001")).thenReturn(Optional.of(rejectedScannedSku));
+        when(palletRepository.save(any(Pallet.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(scanRepository.save(any(Scan.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(taskRepository.save(any(Task.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        RecordScanRequest request = new RecordScanRequest(
+            null,
+            "PLT-REJ-001",
+            1,
+            null,
+            "SKU-REJ-001",
+            null,
+            null,
+            null,
+            false,
+            null,
+            null,
+            null,
+            null
+        );
+
+        receivingWorkflowService.recordScan(1L, request);
+
+        ArgumentCaptor<Discrepancy> discrepancyCaptor = ArgumentCaptor.forClass(Discrepancy.class);
+        verify(discrepancyRepository).save(discrepancyCaptor.capture());
+        Discrepancy discrepancy = discrepancyCaptor.getValue();
+        assertEquals("BARCODE_MISMATCH", discrepancy.getType());
+        assertEquals(77L, discrepancy.getDraftSkuId());
     }
 
     @Test

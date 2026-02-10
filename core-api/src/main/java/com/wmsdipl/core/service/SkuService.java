@@ -4,14 +4,24 @@ import com.wmsdipl.contracts.dto.CreateSkuRequest;
 import com.wmsdipl.contracts.dto.SkuDto;
 import com.wmsdipl.contracts.dto.SkuUnitConfigDto;
 import com.wmsdipl.contracts.dto.UpsertSkuUnitConfigsRequest;
+import com.wmsdipl.core.domain.Discrepancy;
+import com.wmsdipl.core.domain.ReceiptLine;
 import com.wmsdipl.core.domain.ReceiptStatus;
 import com.wmsdipl.core.domain.Sku;
+import com.wmsdipl.core.domain.SkuStatus;
+import com.wmsdipl.core.domain.TaskStatus;
 import com.wmsdipl.core.domain.SkuUnitConfig;
 import com.wmsdipl.core.mapper.SkuMapper;
+import com.wmsdipl.core.repository.PalletRepository;
+import com.wmsdipl.core.repository.DiscrepancyRepository;
 import com.wmsdipl.core.repository.ReceiptLineRepository;
+import com.wmsdipl.core.repository.ScanRepository;
 import com.wmsdipl.core.repository.SkuRepository;
 import com.wmsdipl.core.repository.SkuUnitConfigRepository;
+import com.wmsdipl.core.repository.TaskRepository;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -19,6 +29,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.EnumSet;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -41,7 +52,12 @@ public class SkuService {
     private final SkuRepository skuRepository;
     private final SkuUnitConfigRepository skuUnitConfigRepository;
     private final ReceiptLineRepository receiptLineRepository;
+    private final TaskRepository taskRepository;
+    private final PalletRepository palletRepository;
+    private final ScanRepository scanRepository;
+    private final DiscrepancyRepository discrepancyRepository;
     private final SkuMapper skuMapper;
+    private final AuditLogService auditLogService;
 
     private static final Set<ReceiptStatus> OPEN_RECEIPT_STATUSES = EnumSet.of(
         ReceiptStatus.DRAFT,
@@ -54,21 +70,44 @@ public class SkuService {
         ReceiptStatus.SHIPPING_IN_PROGRESS
     );
 
+    private static final Set<TaskStatus> ACTIVE_TASK_STATUSES = EnumSet.of(
+        TaskStatus.NEW,
+        TaskStatus.ASSIGNED,
+        TaskStatus.IN_PROGRESS
+    );
+
     public SkuService(
         SkuRepository skuRepository,
         SkuUnitConfigRepository skuUnitConfigRepository,
         ReceiptLineRepository receiptLineRepository,
-        SkuMapper skuMapper
+        TaskRepository taskRepository,
+        PalletRepository palletRepository,
+        ScanRepository scanRepository,
+        DiscrepancyRepository discrepancyRepository,
+        SkuMapper skuMapper,
+        AuditLogService auditLogService
     ) {
         this.skuRepository = skuRepository;
         this.skuUnitConfigRepository = skuUnitConfigRepository;
         this.receiptLineRepository = receiptLineRepository;
+        this.taskRepository = taskRepository;
+        this.palletRepository = palletRepository;
+        this.scanRepository = scanRepository;
+        this.discrepancyRepository = discrepancyRepository;
         this.skuMapper = skuMapper;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional(readOnly = true)
     public List<SkuDto> findAll() {
         return skuRepository.findAll().stream()
+            .map(skuMapper::toDto)
+            .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<SkuDto> findAllByStatus(SkuStatus status) {
+        return skuRepository.findByStatus(status).stream()
             .map(skuMapper::toDto)
             .collect(Collectors.toList());
     }
@@ -94,6 +133,7 @@ public class SkuService {
         }
 
         Sku sku = skuMapper.toEntity(request);
+        sku.setStatus(SkuStatus.ACTIVE);
         try {
             Sku saved = skuRepository.save(sku);
             ensureDefaultBaseUnitConfig(saved, saved.getPalletCapacity());
@@ -123,22 +163,34 @@ public class SkuService {
 
     @Transactional
     public void delete(Long id) {
-        if (!skuRepository.existsById(id)) {
-            throw new ResponseStatusException(NOT_FOUND, "SKU not found: " + id);
+        Sku sku = skuRepository.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "SKU not found: " + id));
+
+        List<String> blockers = collectDeleteBlockers(id);
+        if (!blockers.isEmpty()) {
+            throw new ResponseStatusException(
+                CONFLICT,
+                "SKU '" + sku.getCode() + "' cannot be deleted: " + String.join("; ", blockers)
+            );
         }
+
         skuUnitConfigRepository.deleteAll(skuUnitConfigRepository.findBySkuIdOrderByIsBaseDescUnitCodeAsc(id));
         skuRepository.deleteById(id);
     }
 
     /**
-     * Finds or creates a SKU by code.
-     * Used during import to auto-create missing SKUs.
+     * Finds or creates an ACTIVE SKU by code.
+     * Used during import to auto-create missing expected SKUs.
      */
     @Transactional
-    public Sku findOrCreate(String code, String name, String uom) {
+    public Sku findOrCreateActive(String code, String name, String uom) {
         Optional<Sku> existing = skuRepository.findByCode(code);
         if (existing.isPresent()) {
             Sku existingSku = existing.get();
+            if (existingSku.getStatus() != SkuStatus.ACTIVE) {
+                existingSku.setStatus(SkuStatus.ACTIVE);
+                skuRepository.save(existingSku);
+            }
             ensureDefaultBaseUnitConfig(existingSku, existingSku.getPalletCapacity());
             return existingSku;
         }
@@ -146,11 +198,79 @@ public class SkuService {
         Sku newSku = new Sku();
         newSku.setCode(code);
         newSku.setName(name != null && !name.isBlank() ? name : code);
-        newSku.setUom(uom != null && !uom.isBlank() ? uom : "ШТ");
+        newSku.setUom(uom != null && !uom.isBlank() ? uom : "PCS");
+        newSku.setStatus(SkuStatus.ACTIVE);
 
         Sku saved = skuRepository.save(newSku);
         ensureDefaultBaseUnitConfig(saved, saved.getPalletCapacity());
         return saved;
+    }
+
+    @Transactional
+    public Sku findOrCreateDraftForBarcodeMismatch(String code, String name, String uom) {
+        Optional<Sku> existing = skuRepository.findByCode(code);
+        if (existing.isPresent()) {
+            Sku existingSku = existing.get();
+            ensureDefaultBaseUnitConfig(existingSku, existingSku.getPalletCapacity());
+            return existingSku;
+        }
+
+        Sku draft = new Sku();
+        draft.setCode(code);
+        draft.setName(name != null && !name.isBlank() ? name : code);
+        draft.setUom(uom != null && !uom.isBlank() ? uom : "PCS");
+        draft.setStatus(SkuStatus.DRAFT);
+        Sku saved = skuRepository.save(draft);
+        ensureDefaultBaseUnitConfig(saved, saved.getPalletCapacity());
+        return saved;
+    }
+
+    @Transactional
+    public SkuDto approveDraft(Long id) {
+        Sku sku = skuRepository.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "SKU not found: " + id));
+        if (sku.getStatus() != SkuStatus.DRAFT) {
+            throw new ResponseStatusException(BAD_REQUEST, "Only DRAFT SKU can be approved");
+        }
+        String oldStatus = sku.getStatus().name();
+        sku.setStatus(SkuStatus.ACTIVE);
+        Sku saved = skuRepository.save(sku);
+        auditLogService.logStatusChange("SKU", saved.getId(), resolveCurrentUsername(), oldStatus, saved.getStatus().name());
+        return skuMapper.toDto(saved);
+    }
+
+    @Transactional
+    public SkuDto rejectDraft(Long id) {
+        Sku sku = skuRepository.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "SKU not found: " + id));
+        if (sku.getStatus() != SkuStatus.DRAFT) {
+            throw new ResponseStatusException(BAD_REQUEST, "Only DRAFT SKU can be rejected");
+        }
+
+        List<Long> relatedReceiptIds = collectRelatedReceiptIds(id);
+        List<Long> blockedReceiptIds = relatedReceiptIds.stream()
+            .filter(receiptId -> hasOperationalFactsForSkuInReceipt(receiptId, sku))
+            .toList();
+        if (!blockedReceiptIds.isEmpty()) {
+            throw new ResponseStatusException(CONFLICT,
+                "Cannot reject DRAFT SKU with operational facts in receipt(s): " + blockedReceiptIds
+                    + ". Use remap instead.");
+        }
+
+        String oldStatus = sku.getStatus().name();
+        sku.setStatus(SkuStatus.REJECTED);
+        Sku saved = skuRepository.save(sku);
+        auditLogService.logStatusChange("SKU", saved.getId(), resolveCurrentUsername(), oldStatus, saved.getStatus().name());
+
+        List<ReceiptLine> lines = collectRejectCandidateLines(id);
+        for (ReceiptLine line : lines) {
+            line.setExcludedFromWorkflow(true);
+            line.setExclusionReason("REJECTED_LINE");
+        }
+        if (!lines.isEmpty()) {
+            receiptLineRepository.saveAll(lines);
+        }
+        return skuMapper.toDto(saved);
     }
 
     @Transactional(readOnly = true)
@@ -243,7 +363,7 @@ public class SkuService {
             .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, noRollbackFor = ResponseStatusException.class)
     public SkuUnitConfig getActiveUnitConfigOrThrow(Long skuId, String unitCode) {
         String normalizedCode = normalizeUnitCode(unitCode);
         SkuUnitConfig config = skuUnitConfigRepository.findBySkuIdAndUnitCodeIgnoreCase(skuId, normalizedCode)
@@ -368,5 +488,93 @@ public class SkuService {
             throw new ResponseStatusException(BAD_REQUEST, "unitCode is required");
         }
         return unitCode.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private List<Long> collectRelatedReceiptIds(Long skuId) {
+        Set<Long> receiptIds = new HashSet<>();
+        receiptLineRepository.findBySkuId(skuId).stream()
+            .map(ReceiptLine::getReceipt)
+            .filter(java.util.Objects::nonNull)
+            .map(com.wmsdipl.core.domain.Receipt::getId)
+            .filter(java.util.Objects::nonNull)
+            .forEach(receiptIds::add);
+
+        discrepancyRepository.findByDraftSkuId(skuId).stream()
+            .map(Discrepancy::getReceipt)
+            .filter(java.util.Objects::nonNull)
+            .map(com.wmsdipl.core.domain.Receipt::getId)
+            .filter(java.util.Objects::nonNull)
+            .forEach(receiptIds::add);
+
+        return receiptIds.stream().sorted().toList();
+    }
+
+    private List<ReceiptLine> collectRejectCandidateLines(Long skuId) {
+        Map<Long, ReceiptLine> result = new HashMap<>();
+        receiptLineRepository.findBySkuId(skuId).forEach(line -> {
+            if (line != null && line.getId() != null) {
+                result.put(line.getId(), line);
+            }
+        });
+
+        discrepancyRepository.findByDraftSkuId(skuId).stream()
+            .map(Discrepancy::getLine)
+            .filter(java.util.Objects::nonNull)
+            .forEach(line -> {
+                if (line.getId() != null) {
+                    result.putIfAbsent(line.getId(), line);
+                }
+            });
+
+        return result.values().stream().toList();
+    }
+
+    private boolean hasOperationalFactsForSkuInReceipt(Long receiptId, Sku sku) {
+        if (receiptId == null || sku == null || sku.getId() == null) {
+            return false;
+        }
+        if (taskRepository.existsByReceiptIdAndLine_SkuId(receiptId, sku.getId())) {
+            return true;
+        }
+        if (palletRepository.existsByReceipt_IdAndSkuId(receiptId, sku.getId())) {
+            return true;
+        }
+        return scanRepository.existsByTask_Receipt_IdAndBarcodeIgnoreCase(receiptId, sku.getCode());
+    }
+
+    private List<String> collectDeleteBlockers(Long skuId) {
+        List<String> blockers = new ArrayList<>();
+
+        if (palletRepository.existsBySkuIdAndQuantityGreaterThan(skuId, BigDecimal.ZERO)) {
+            blockers.add("current stock quantity is greater than zero");
+        }
+        if (receiptLineRepository.existsActiveBySkuIdAndReceiptStatusIn(skuId, OPEN_RECEIPT_STATUSES)) {
+            blockers.add("SKU is used in open receipt lines");
+        }
+        if (taskRepository.existsByLine_SkuIdAndStatusIn(skuId, ACTIVE_TASK_STATUSES)) {
+            blockers.add("SKU has open tasks");
+        }
+        boolean hasLineDiscrepancies = discrepancyRepository.existsByLine_SkuIdAndResolvedFalseAndReceipt_StatusIn(
+            skuId,
+            OPEN_RECEIPT_STATUSES
+        );
+        boolean hasDraftDiscrepancies = discrepancyRepository.existsByDraftSkuIdAndResolvedFalseAndReceipt_StatusIn(
+            skuId,
+            OPEN_RECEIPT_STATUSES
+        );
+        if (hasLineDiscrepancies || hasDraftDiscrepancies) {
+            blockers.add("SKU has unresolved discrepancies in open receipts");
+        }
+
+        return blockers;
+    }
+
+    private String resolveCurrentUsername() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getName() == null || authentication.getName().isBlank()
+            || "anonymousUser".equalsIgnoreCase(authentication.getName())) {
+            return "system";
+        }
+        return authentication.getName();
     }
 }

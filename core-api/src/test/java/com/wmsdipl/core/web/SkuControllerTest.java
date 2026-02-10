@@ -41,7 +41,7 @@ class SkuControllerTest {
     @Test
     void shouldListAllSkus_WhenCalled() throws Exception {
         // Given
-        SkuDto sku = new SkuDto(1L, "SKU001", "Product A", "ШТ");
+        SkuDto sku = new SkuDto(1L, "SKU001", "Product A", "РЁРў", "ACTIVE");
         when(skuService.findAll()).thenReturn(List.of(sku));
 
         // When & Then
@@ -50,7 +50,7 @@ class SkuControllerTest {
                 .andExpect(jsonPath("$[0].id").value(1))
                 .andExpect(jsonPath("$[0].code").value("SKU001"))
                 .andExpect(jsonPath("$[0].name").value("Product A"))
-                .andExpect(jsonPath("$[0].uom").value("ШТ"));
+                .andExpect(jsonPath("$[0].uom").value("РЁРў"));
 
         verify(skuService).findAll();
     }
@@ -58,7 +58,7 @@ class SkuControllerTest {
     @Test
     void shouldGetSkuById_WhenValidId() throws Exception {
         // Given
-        SkuDto sku = new SkuDto(1L, "SKU001", "Product A", "ШТ");
+        SkuDto sku = new SkuDto(1L, "SKU001", "Product A", "РЁРў", "ACTIVE");
         when(skuService.findById(1L)).thenReturn(sku);
 
         // When & Then
@@ -74,7 +74,7 @@ class SkuControllerTest {
     @Test
     void shouldGetSkuByCode_WhenCodeExists() throws Exception {
         // Given
-        SkuDto sku = new SkuDto(1L, "SKU001", "Product A", "ШТ");
+        SkuDto sku = new SkuDto(1L, "SKU001", "Product A", "РЁРў", "ACTIVE");
         when(skuService.findByCode("SKU001")).thenReturn(Optional.of(sku));
 
         // When & Then
@@ -101,14 +101,14 @@ class SkuControllerTest {
     @Test
     void shouldCreateSku_WhenValidRequest() throws Exception {
         // Given
-        SkuDto created = new SkuDto(1L, "SKU001", "Product A", "ШТ");
+        SkuDto created = new SkuDto(1L, "SKU001", "Product A", "РЁРў", "ACTIVE");
         when(skuService.create(any(CreateSkuRequest.class))).thenReturn(created);
 
         String requestBody = """
                 {
                     "code": "SKU001",
                     "name": "Product A",
-                    "uom": "ШТ"
+                    "uom": "РЁРў"
                 }
                 """;
 
@@ -128,14 +128,14 @@ class SkuControllerTest {
     @Test
     void shouldUpdateSku_WhenValidRequest() throws Exception {
         // Given
-        SkuDto updated = new SkuDto(1L, "SKU001", "Updated Product", "ШТ");
+        SkuDto updated = new SkuDto(1L, "SKU001", "Updated Product", "РЁРў", "ACTIVE");
         when(skuService.update(eq(1L), any(CreateSkuRequest.class))).thenReturn(updated);
 
         String requestBody = """
                 {
                     "code": "SKU001",
                     "name": "Updated Product",
-                    "uom": "ШТ"
+                    "uom": "РЁРў"
                 }
                 """;
 
@@ -169,7 +169,7 @@ class SkuControllerTest {
                 {
                     "code": "",
                     "name": "Product A",
-                    "uom": "ШТ"
+                    "uom": "РЁРў"
                 }
                 """;
 
@@ -189,7 +189,7 @@ class SkuControllerTest {
                 {
                     "code": "SKU001",
                     "name": "",
-                    "uom": "ШТ"
+                    "uom": "РЁРў"
                 }
                 """;
 
@@ -214,4 +214,31 @@ class SkuControllerTest {
 
         verify(skuService).findAll();
     }
+
+    @Test
+    void shouldApproveDraftSku_WhenValidId() throws Exception {
+        SkuDto approved = new SkuDto(7L, "NEW-SKU", "New SKU", "PCS", "ACTIVE");
+        when(skuService.approveDraft(7L)).thenReturn(approved);
+
+        mockMvc.perform(post("/api/skus/7/approve-draft"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(7))
+            .andExpect(jsonPath("$.status").value("ACTIVE"));
+
+        verify(skuService).approveDraft(7L);
+    }
+
+    @Test
+    void shouldRejectDraftSku_WhenValidId() throws Exception {
+        SkuDto rejected = new SkuDto(8L, "BAD-SKU", "Bad SKU", "PCS", "REJECTED");
+        when(skuService.rejectDraft(8L)).thenReturn(rejected);
+
+        mockMvc.perform(post("/api/skus/8/reject-draft"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").value(8))
+            .andExpect(jsonPath("$.status").value("REJECTED"));
+
+        verify(skuService).rejectDraft(8L);
+    }
 }
+

@@ -19,7 +19,8 @@ public class SkuMapper {
             sku.getId(),
             sku.getCode(),
             sku.getName(),
-            sku.getUom()
+            sku.getUom(),
+            sku.getStatus() != null ? sku.getStatus().name() : null
         );
     }
 

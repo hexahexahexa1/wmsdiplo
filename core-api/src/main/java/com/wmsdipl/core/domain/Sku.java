@@ -1,7 +1,6 @@
 package com.wmsdipl.core.domain;
 
 import jakarta.persistence.*;
-import java.time.Instant;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -27,6 +26,10 @@ public class Sku {
 
     @Column(name = "pallet_capacity", precision = 10, scale = 2)
     private java.math.BigDecimal palletCapacity;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", length = 16)
+    private SkuStatus status = SkuStatus.ACTIVE;
 
     public Sku() {}
 

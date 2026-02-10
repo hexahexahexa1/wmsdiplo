@@ -2,9 +2,11 @@ package com.wmsdipl.core.web;
 
 import com.wmsdipl.contracts.dto.DiscrepancyRetentionConfigDto;
 import com.wmsdipl.contracts.dto.DiscrepancyDto;
+import com.wmsdipl.contracts.dto.RemapDiscrepancySkuRequest;
 import com.wmsdipl.contracts.dto.UpdateDiscrepancyRetentionRequest;
 import com.wmsdipl.core.domain.Discrepancy;
 import com.wmsdipl.core.mapper.DiscrepancyMapper;
+import com.wmsdipl.core.service.DiscrepancySkuResolutionService;
 import com.wmsdipl.core.service.DiscrepancyJournalConfigService;
 import com.wmsdipl.core.service.TaskService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -30,15 +32,18 @@ public class DiscrepancyController {
     private final TaskService taskService;
     private final DiscrepancyMapper discrepancyMapper;
     private final DiscrepancyJournalConfigService discrepancyJournalConfigService;
+    private final DiscrepancySkuResolutionService discrepancySkuResolutionService;
 
     public DiscrepancyController(
         TaskService taskService,
         DiscrepancyMapper discrepancyMapper,
-        DiscrepancyJournalConfigService discrepancyJournalConfigService
+        DiscrepancyJournalConfigService discrepancyJournalConfigService,
+        DiscrepancySkuResolutionService discrepancySkuResolutionService
     ) {
         this.taskService = taskService;
         this.discrepancyMapper = discrepancyMapper;
         this.discrepancyJournalConfigService = discrepancyJournalConfigService;
+        this.discrepancySkuResolutionService = discrepancySkuResolutionService;
     }
 
     @GetMapping
@@ -81,6 +86,12 @@ public class DiscrepancyController {
     @Operation(summary = "Update discrepancy comment", description = "Updates comment in discrepancy journal entry")
     public DiscrepancyDto updateComment(@PathVariable Long id, @RequestBody UpdateCommentRequest req) {
         return discrepancyMapper.toDto(taskService.updateDiscrepancyComment(id, req.comment));
+    }
+
+    @PostMapping("/{id}/remap-sku")
+    @Operation(summary = "Remap discrepancy SKU", description = "Remaps discrepancy-related DRAFT/REJECTED SKU to existing ACTIVE SKU")
+    public DiscrepancyDto remapSku(@PathVariable Long id, @RequestBody RemapDiscrepancySkuRequest request) {
+        return discrepancyMapper.toDto(discrepancySkuResolutionService.remapDiscrepancySku(id, request.targetSkuId()));
     }
 
     @GetMapping("/retention")

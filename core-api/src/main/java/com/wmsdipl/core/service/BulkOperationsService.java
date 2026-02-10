@@ -68,7 +68,30 @@ public class BulkOperationsService {
 
         for (Long taskId : request.taskIds()) {
             try {
-                taskLifecycleService.assign(taskId, request.assignee(), assignedBy);
+                Task task = taskRepository.findById(taskId)
+                    .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+
+                if (task.getStatus() == TaskStatus.IN_PROGRESS) {
+                    throw new IllegalStateException("Task in IN_PROGRESS status cannot be reassigned");
+                }
+                if (task.getStatus() == TaskStatus.COMPLETED) {
+                    throw new IllegalStateException("Completed task cannot be reassigned");
+                }
+                if (task.getStatus() == TaskStatus.CANCELLED) {
+                    throw new IllegalStateException("Cancelled task cannot be assigned");
+                }
+                if (task.getStatus() != TaskStatus.NEW && task.getStatus() != TaskStatus.ASSIGNED) {
+                    throw new IllegalStateException(
+                        "Task can only be assigned from NEW or ASSIGNED status. Current status: " + task.getStatus()
+                    );
+                }
+
+                task.setAssignee(request.assignee());
+                task.setAssignedBy(assignedBy);
+                if (task.getStatus() == TaskStatus.NEW) {
+                    task.setStatus(TaskStatus.ASSIGNED);
+                }
+                taskRepository.save(task);
                 successes.add(taskId);
             } catch (Exception e) {
                 failures.add(new BulkOperationFailure(
@@ -128,7 +151,7 @@ public class BulkOperationsService {
 
     /**
      * Creates multiple pallets with auto-generated codes (PLT-XXX series).
-     * Pallets are created in RECEIVING status and assigned to RECEIVING location.
+     * Pallets are created in EMPTY status without receipt binding.
      * Uses startNumber from request for sequential numbering.
      * Best-effort: continues on errors, returns success/failure counts.
      * 
@@ -137,13 +160,6 @@ public class BulkOperationsService {
      */
     @Transactional
     public PalletCreationResult bulkCreatePallets(BulkCreatePalletsRequest request) {
-        // Find RECEIVING location for initial placement
-        Location receivingLocation = locationRepository
-            .findFirstByLocationTypeAndStatusAndActiveTrueOrderByIdAsc(
-                LocationType.RECEIVING, LocationStatus.AVAILABLE
-            )
-            .orElse(null);
-
         List<String> createdPalletCodes = new ArrayList<>();
         List<BulkOperationFailure> failures = new ArrayList<>();
 
@@ -155,9 +171,15 @@ public class BulkOperationsService {
 
                 Pallet pallet = new Pallet();
                 pallet.setCode(palletCode);
-                pallet.setStatus(PalletStatus.RECEIVING);  // Use RECEIVING instead of DRAFT
+                pallet.setStatus(PalletStatus.EMPTY);
                 pallet.setQuantity(BigDecimal.ZERO);
-                pallet.setLocation(receivingLocation);
+                pallet.setLocation(null);
+                pallet.setReceipt(null);
+                pallet.setReceiptLine(null);
+                pallet.setSkuId(null);
+                pallet.setUom(null);
+                pallet.setLotNumber(null);
+                pallet.setExpiryDate(null);
 
                 palletRepository.save(pallet);
                 createdPalletCodes.add(palletCode);

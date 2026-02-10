@@ -21,6 +21,7 @@ import com.wmsdipl.desktop.model.StockMovement;
 import com.wmsdipl.desktop.model.ShippingWave;
 import com.wmsdipl.desktop.model.ShippingWaveActionResult;
 import com.wmsdipl.desktop.model.Task;
+import com.wmsdipl.desktop.model.UndoLastScanResult;
 import com.wmsdipl.desktop.model.User;
 import com.wmsdipl.desktop.model.Zone;
 
@@ -96,6 +97,29 @@ public class ApiClient {
         this.basicAuth = null;
         this.currentUsername = null;
         this.currentUser = null;
+    }
+
+    public void pingSync() throws IOException, InterruptedException {
+        String heartbeatPath = resolveHeartbeatPath();
+        HttpRequest request = withAuth(HttpRequest.newBuilder())
+            .uri(URI.create(baseUrl + heartbeatPath))
+            .GET()
+            .header("Accept", "application/json")
+            .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+            return;
+        }
+        throw new IOException(formatErrorMessage(response.statusCode(), heartbeatPath, response.body()));
+    }
+
+    private String resolveHeartbeatPath() {
+        String role = currentUser != null ? currentUser.role() : null;
+        if ("OPERATOR".equalsIgnoreCase(role)) {
+            return "/api/tasks?page=0&size=1";
+        }
+        return "/api/receipts?page=0&size=1";
     }
 
     private void setCredentials(String username, String password) {
@@ -334,6 +358,12 @@ public class ApiClient {
         return patchForObject("/api/discrepancies/" + discrepancyId + "/comment", payload, Discrepancy.class);
     }
 
+    public Discrepancy remapDiscrepancySku(Long discrepancyId, Long targetSkuId) throws IOException, InterruptedException {
+        var payload = mapper.createObjectNode();
+        payload.put("targetSkuId", targetSkuId);
+        return postForObject("/api/discrepancies/" + discrepancyId + "/remap-sku", payload, Discrepancy.class);
+    }
+
     public DiscrepancyRetentionConfig getDiscrepancyRetentionConfig() throws IOException, InterruptedException {
         HttpRequest request = withAuth(HttpRequest.newBuilder())
             .uri(URI.create(baseUrl + "/api/discrepancies/retention"))
@@ -420,6 +450,7 @@ public class ApiClient {
             String status,
             String taskType,
             Long receiptId,
+            Long taskId,
             int page,
             int size,
             String sort
@@ -436,6 +467,9 @@ public class ApiClient {
         }
         if (receiptId != null) {
             path.append("&receiptId=").append(receiptId);
+        }
+        if (taskId != null) {
+            path.append("&taskId=").append(taskId);
         }
         if (sort != null && !sort.isBlank()) {
             path.append("&sort=").append(encode(sort));
@@ -459,12 +493,31 @@ public class ApiClient {
         throw new IOException(formatErrorMessage(response.statusCode(), path.toString(), response.body()));
     }
 
+    public List<Task> listTasksFiltered(
+            String assignee,
+            String status,
+            String taskType,
+            Long receiptId,
+            int page,
+            int size,
+            String sort
+    ) throws IOException, InterruptedException {
+        return listTasksFiltered(assignee, status, taskType, receiptId, null, page, size, sort);
+    }
+
     public List<PutawayRule> listPutawayRules() throws IOException, InterruptedException {
         return getForList("/api/putaway-rules", new TypeReference<>() {});
     }
 
     public List<Sku> listSkus() throws IOException, InterruptedException {
-        return getForList("/api/skus", new TypeReference<>() {});
+        return listSkus(null);
+    }
+
+    public List<Sku> listSkus(String status) throws IOException, InterruptedException {
+        if (status == null || status.isBlank()) {
+            return getForList("/api/skus", new TypeReference<>() {});
+        }
+        return getForList("/api/skus?status=" + encode(status), new TypeReference<>() {});
     }
 
     public Sku createSku(String code, String name, String uom) throws IOException, InterruptedException {
@@ -473,6 +526,14 @@ public class ApiClient {
         payload.put("name", name);
         payload.put("uom", uom);
         return postForObject("/api/skus", payload, Sku.class);
+    }
+
+    public Sku approveDraftSku(Long id) throws IOException, InterruptedException {
+        return postForObject("/api/skus/" + id + "/approve-draft", null, Sku.class);
+    }
+
+    public Sku rejectDraftSku(Long id) throws IOException, InterruptedException {
+        return postForObject("/api/skus/" + id + "/reject-draft", null, Sku.class);
     }
 
     public void deleteSku(Long id) throws IOException, InterruptedException {
@@ -541,6 +602,10 @@ public class ApiClient {
 
     public Task releaseTask(Long taskId) throws IOException, InterruptedException {
         return postForObject("/api/tasks/" + taskId + "/release", null, Task.class);
+    }
+
+    public UndoLastScanResult undoLastScan(Long taskId) throws IOException, InterruptedException {
+        return postForObject("/api/tasks/" + taskId + "/undo-last-scan", null, UndoLastScanResult.class);
     }
 
     public Scan recordScan(Long taskId, String palletCode, String barcode, Integer qty, String comment, String locationCode,
@@ -1109,9 +1174,8 @@ public class ApiClient {
     /**
      * Bulk create pallets.
      */
-    public Map<String, Object> bulkCreatePallets(String prefix, Integer startNumber, Integer count) throws IOException, InterruptedException {
+    public Map<String, Object> bulkCreatePallets(Integer startNumber, Integer count) throws IOException, InterruptedException {
         var payload = mapper.createObjectNode();
-        payload.put("prefix", prefix);
         payload.put("startNumber", startNumber);
         payload.put("count", count);
         

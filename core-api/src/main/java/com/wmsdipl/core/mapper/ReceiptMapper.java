@@ -39,7 +39,9 @@ public class ReceiptMapper {
             line.getUnitsPerPalletSnapshot(),
             line.getSsccExpected(),
             line.getLotNumberExpected(),
-            line.getExpiryDateExpected()
+            line.getExpiryDateExpected(),
+            Boolean.TRUE.equals(line.getExcludedFromWorkflow()),
+            line.getExclusionReason()
         );
     }
 
@@ -53,6 +55,8 @@ public class ReceiptMapper {
         line.setSsccExpected(lineReq.ssccExpected());
         line.setLotNumberExpected(lineReq.lotNumberExpected());
         line.setExpiryDateExpected(lineReq.expiryDateExpected());
+        line.setExcludedFromWorkflow(false);
+        line.setExclusionReason(null);
         return line;
     }
 

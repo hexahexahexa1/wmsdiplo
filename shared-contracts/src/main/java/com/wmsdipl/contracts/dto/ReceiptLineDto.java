@@ -14,5 +14,7 @@ public record ReceiptLineDto(Long id,
                              BigDecimal unitsPerPalletSnapshot,
                              String ssccExpected,
                              String lotNumberExpected,
-                             LocalDate expiryDateExpected) {
+                             LocalDate expiryDateExpected,
+                             Boolean excludedFromWorkflow,
+                             String exclusionReason) {
 }

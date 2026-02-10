@@ -63,4 +63,10 @@ public class ReceiptLine {
 
     @Column(name = "expiry_date_expected")
     private java.time.LocalDate expiryDateExpected;
+
+    @Column(name = "excluded_from_workflow")
+    private Boolean excludedFromWorkflow = false;
+
+    @Column(name = "exclusion_reason", length = 255)
+    private String exclusionReason;
 }
